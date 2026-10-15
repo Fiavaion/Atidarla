@@ -834,6 +834,95 @@ fn parse_varying(rest: &str) -> Option<Vec<Varying>> {
     Some(out)
 }
 
+/// GLSL converts `return 0;` to `0.0` in a function returning `float`;
+/// naga does not. Rewrites integer-literal returns inside `float` functions.
+fn float_returns(src: &str) -> String {
+    let b = src.as_bytes();
+    let ident = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    let skip_ws = |mut i: usize| {
+        while i < b.len() && b[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        i
+    };
+    // Byte ranges of `float name(...) { ... }` bodies.
+    let mut bodies = Vec::new();
+    let mut i = 0;
+    while let Some(off) = src[i..].find("float") {
+        let start = i + off;
+        i = start + 5;
+        if (start > 0 && ident(b[start - 1])) || (i < b.len() && ident(b[i])) {
+            continue;
+        }
+        let mut j = skip_ws(i);
+        let name = j;
+        while j < b.len() && ident(b[j]) {
+            j += 1;
+        }
+        if j == name {
+            continue;
+        }
+        j = skip_ws(j);
+        if b.get(j) != Some(&b'(') {
+            continue;
+        }
+        let Some(close) = src[j..].find(')') else {
+            continue;
+        };
+        j = skip_ws(j + close + 1);
+        if b.get(j) != Some(&b'{') {
+            continue;
+        }
+        let mut depth = 0;
+        let mut k = j;
+        while k < b.len() {
+            match b[k] {
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            k += 1;
+        }
+        bodies.push((j, k));
+        i = k.min(b.len());
+    }
+    let mut out = String::with_capacity(src.len() + 16);
+    let mut last = 0;
+    for (from, to) in bodies {
+        let mut i = from;
+        while let Some(off) = src[i..to].find("return") {
+            let r = i + off;
+            i = r + 6;
+            if (r > 0 && ident(b[r - 1])) || (i < b.len() && ident(b[i])) {
+                continue;
+            }
+            let mut j = skip_ws(i);
+            if b.get(j) == Some(&b'-') {
+                j += 1;
+            }
+            let digits = j;
+            while j < to && b[j].is_ascii_digit() {
+                j += 1;
+            }
+            if j == digits || ident(b[j]) || b[j] == b'.' {
+                continue;
+            }
+            if b[skip_ws(j)] == b';' {
+                out.push_str(&src[last..j]);
+                out.push_str(".0");
+                last = j;
+            }
+        }
+    }
+    out.push_str(&src[last..]);
+    out
+}
+
 /// Locations used by one value of a GLSL type.
 fn locations(ty: &str) -> u32 {
     match ty {
@@ -866,12 +955,14 @@ fn generate(
         .collect();
     let (vs_body, vs_init) = match vs_src {
         Some(vs) => {
-            let (body, init) = hoist_initializers(&scrub(vs, &mut varyings, &known));
+            let (body, init) =
+                hoist_initializers(&float_returns(&scrub(vs, &mut varyings, &known)));
             (Some(body), init)
         }
         None => (None, String::new()),
     };
-    let (fs_body, fs_init) = hoist_initializers(&scrub(fs_body, &mut varyings, &known));
+    let (fs_body, fs_init) =
+        hoist_initializers(&float_returns(&scrub(fs_body, &mut varyings, &known)));
 
     // Uniform block: vec4s, then vec2s, then scalars (tight std140 packing).
     let mut members: Vec<(String, UniformType)> = BUILTINS
@@ -942,10 +1033,29 @@ fn generate(
         ));
     }
 
+    // WGSL cannot pass matrices between stages: a `matN` varying travels
+    // as N column vectors and is rebuilt in a global of the user's name.
+    let columns = |v: &Varying| match (v.ty.as_str(), v.len) {
+        ("mat2", None) => Some(2),
+        ("mat3", None) => Some(3),
+        ("mat4", None) => Some(4),
+        _ => None,
+    };
     let varying_decls = |dir: &str| -> String {
         let mut s = String::new();
         let mut loc = 1;
         for v in &varyings {
+            if let Some(n) = columns(v) {
+                for c in 0..n {
+                    s.push_str(&format!(
+                        "layout(location = {loc}) {dir} vec{n} atd_v_{}_{c};\n",
+                        v.name
+                    ));
+                    loc += 1;
+                }
+                s.push_str(&format!("{} {};\n", v.ty, v.name));
+                continue;
+            }
             let len = v.len.map(|n| format!("[{n}]")).unwrap_or_default();
             s.push_str(&format!(
                 "layout(location = {loc}) {dir} {} {}{len};\n",
@@ -955,6 +1065,25 @@ fn generate(
         }
         s
     };
+    let unpack_matrices: String = varyings
+        .iter()
+        .filter_map(|v| {
+            let n = columns(v)?;
+            let cols: Vec<String> = (0..n).map(|c| format!("atd_v_{}_{c}", v.name)).collect();
+            Some(format!("    {} = {}({});\n", v.name, v.ty, cols.join(", ")))
+        })
+        .collect();
+    let pack_matrices: String = varyings
+        .iter()
+        .filter_map(|v| {
+            let n = columns(v)?;
+            Some(
+                (0..n)
+                    .map(|c| format!("    atd_v_{0}_{c} = {0}[{c}];\n", v.name))
+                    .collect::<String>(),
+            )
+        })
+        .collect();
 
     // Fragment stage. Images have one mip level, so sampling at LOD 0 is
     // exact; it also avoids implicit-derivative samples inside loops, which
@@ -982,6 +1111,7 @@ fn generate(
         "    atd_fc = vec4(gl_FragCoord.x, RENDERSIZE.y - gl_FragCoord.y, gl_FragCoord.z, gl_FragCoord.w);\n",
     );
     fs.push_str(&set_bools);
+    fs.push_str(&unpack_matrices);
     fs.push_str("    atd_init();\n    isf_main();\n}\n");
 
     // Vertex stage: a quad over the target, or the user's vertex shader.
@@ -1017,7 +1147,9 @@ fn generate(
         "    atd_pos = ATD_QUAD[gl_VertexIndex];\n",
     ));
     vs.push_str(&set_bools);
-    vs.push_str("    atd_init();\n    isf_main();\n}\n");
+    vs.push_str("    atd_init();\n    isf_main();\n");
+    vs.push_str(&pack_matrices);
+    vs.push_str("}\n");
 
     Ok(Generated {
         vertex: vs,
@@ -1425,6 +1557,36 @@ mod tests {
         })
         .unwrap();
         assert_eq!(w, 320.0);
+    }
+
+    #[test]
+    fn integer_returns_in_float_functions_become_floats() {
+        let src = "float f(float x) {\n  if (x < 0.0) return 0;\n  return -1 ;\n}\nint g() { return 3; }\nfloat h() { return x2; }\n";
+        let out = float_returns(src);
+        assert!(out.contains("return 0.0;"), "{out}");
+        assert!(out.contains("return -1.0 ;"), "{out}");
+        assert!(
+            out.contains("int g() { return 3; }"),
+            "int functions untouched: {out}"
+        );
+        assert!(out.contains("return x2;"), "{out}");
+        let fs = r#"/*{"INPUTS": []}*/
+float pick(float x) { if (x > 0.5) return 1; return 0; }
+void main() { gl_FragColor = vec4(pick(isf_FragNormCoord.x)); }
+"#;
+        translate(fs, None).unwrap();
+    }
+
+    #[test]
+    fn matrix_varyings_travel_as_columns() {
+        let fs = r#"/*{"INPUTS": []}*/
+varying mat2 rot;
+void main() { gl_FragColor = vec4(rot * isf_FragNormCoord, 0.0, 1.0); }
+"#;
+        let vs = r#"varying mat2 rot;
+void main() { isf_vertShaderInit(); rot = mat2(0.0, 1.0, -1.0, 0.0); }
+"#;
+        translate(fs, Some(vs)).unwrap();
     }
 
     #[test]
