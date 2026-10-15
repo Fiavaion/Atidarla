@@ -133,6 +133,18 @@ fn every_sig_operator_cooks_without_allocating() {
             )
             .unwrap();
         }
+        if schema.type_id == "sig.dmx_out" {
+            // Loopback, so the test sends nowhere real.
+            net.apply(
+                &reg,
+                Edit::SetParam {
+                    node: id,
+                    param: "host".into(),
+                    value: Some(Param::constant(json!("127.0.0.1"))),
+                },
+            )
+            .unwrap();
+        }
         if schema.type_id.starts_with("sig.midi_") {
             net.apply(
                 &reg,

@@ -12,6 +12,7 @@
 //! projects follow once the project format (PRD A11) is ratified.
 
 mod audio;
+mod dmx;
 mod midi;
 mod ops;
 mod sig2;
@@ -19,13 +20,14 @@ mod sig2;
 use atd_core::registry::Registry;
 use atd_gpu::engine::OpLibrary;
 
+pub use dmx::DEFS4;
 pub use midi::DEFS3;
 pub use ops::DEFS;
 pub use sig2::DEFS2;
 
 /// Every SIG operator definition.
 pub fn defs() -> impl Iterator<Item = &'static Def> {
-    DEFS.iter().chain(DEFS2).chain(DEFS3)
+    DEFS.iter().chain(DEFS2).chain(DEFS3).chain(DEFS4)
 }
 
 /// A SIG operator definition: schema plus implementation factory.
@@ -60,7 +62,10 @@ mod tests {
     fn schemas_register_with_budgets_and_help() {
         let mut registry = Registry::default();
         register(&mut registry);
-        assert_eq!(registry.len(), DEFS.len() + DEFS2.len() + DEFS3.len());
+        assert_eq!(
+            registry.len(),
+            DEFS.len() + DEFS2.len() + DEFS3.len() + DEFS4.len()
+        );
         for op in registry.iter() {
             assert!(op.cook_budget_us > 0, "{} has a cook budget", op.type_id);
             assert!(!op.summary.is_empty());
