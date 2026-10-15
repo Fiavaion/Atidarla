@@ -51,7 +51,7 @@ struct Panels {
     patch: PatchEditor,
     /// Node shown in the viewer: the selection, or the last selected node.
     viewed: Option<NodeId>,
-    viewer_tex: Option<egui::TextureId>,
+    viewer: crate::viewer::TextureViewer,
     canvas_rect: egui::Rect,
     history: crate::channels::ChannelHistory,
 }
@@ -108,7 +108,7 @@ impl AtidarlaApp {
                 engine,
                 patch: PatchEditor::with_selection(viewed),
                 viewed,
-                viewer_tex: None,
+                viewer: Default::default(),
                 canvas_rect: egui::Rect::NOTHING,
                 history: Default::default(),
             },
@@ -309,24 +309,9 @@ impl AtidarlaApp {
         let (Some(rs), Some(tex)) = (frame.wgpu_render_state(), engine.result(viewed)) else {
             return;
         };
-        if cooked > 0 || p.viewer_tex.is_none() {
-            let view = tex.create_view(&Default::default());
+        if cooked > 0 || p.viewer.stale() {
             let mut renderer = rs.renderer.write();
-            match p.viewer_tex {
-                Some(id) => renderer.update_egui_texture_from_wgpu_texture(
-                    &rs.device,
-                    &view,
-                    wgpu::FilterMode::Linear,
-                    id,
-                ),
-                None => {
-                    p.viewer_tex = Some(renderer.register_native_texture(
-                        &rs.device,
-                        &view,
-                        wgpu::FilterMode::Linear,
-                    ))
-                }
-            }
+            p.viewer.present(&rs.device, &rs.queue, &mut renderer, tex);
         }
     }
 }
@@ -409,7 +394,8 @@ impl Panels {
             self.history.ui(ui, ch);
             return;
         }
-        let (Some(engine), Some(viewed), Some(tex)) = (&self.engine, self.viewed, self.viewer_tex)
+        let (Some(engine), Some(viewed), Some(tex)) =
+            (&self.engine, self.viewed, self.viewer.texture_id)
         else {
             placeholder(ui, "Select a node to view its output.");
             return;
@@ -426,6 +412,7 @@ impl Panels {
                 ui.colored_label(egui::Color32::from_rgb(230, 80, 80), e);
             }
         });
+        ui.horizontal(|ui| self.viewer.toolbar(ui));
         let avail = ui.available_size();
         let aspect = cfg.width as f32 / cfg.height as f32;
         let size = if avail.x / avail.y.max(1.0) > aspect {
@@ -434,7 +421,22 @@ impl Panels {
             egui::vec2(avail.x, avail.x / aspect)
         };
         ui.centered_and_justified(|ui| {
-            ui.add(egui::Image::new((tex, size)).fit_to_exact_size(size));
+            let r = ui.add(
+                egui::Image::new((tex, size))
+                    .fit_to_exact_size(size)
+                    .sense(egui::Sense::hover()),
+            );
+            if let Some(p) = r.hover_pos() {
+                let uv = (p - r.rect.min) / r.rect.size();
+                let (x, y) = (
+                    (uv.x * cfg.width as f32).floor() as i64,
+                    (uv.y * cfg.height as f32).floor() as i64,
+                );
+                r.on_hover_text_at_pointer(format!(
+                    "pixel {x}, {y}  ·  uv {:.3}, {:.3}",
+                    uv.x, uv.y
+                ));
+            }
         });
     }
 

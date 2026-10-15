@@ -3,9 +3,9 @@
 
 use std::collections::VecDeque;
 
-use atd_core::graph::NodeId;
+use atd_core::graph::{ChannelRef, NodeId};
 use atd_gpu::engine::Channels;
-use egui::{Color32, Pos2, Rect, Stroke, Ui, Vec2};
+use egui::{Color32, Id, Pos2, Rect, Stroke, Ui, Vec2};
 
 /// Frames of history kept per channel.
 const HISTORY: usize = 300;
@@ -55,7 +55,23 @@ impl ChannelHistory {
             .striped(true)
             .show(ui, |ui| {
                 for c in 0..ch.len() {
-                    ui.colored_label(COLOURS[c % COLOURS.len()], ch.name(c));
+                    // Drag a channel onto a parameter to bind it (FR-P2).
+                    let payload = self.node.map(|node| ChannelRef {
+                        node,
+                        channel: ch.name(c).to_owned(),
+                    });
+                    match payload {
+                        Some(payload) => {
+                            ui.dnd_drag_source(Id::unique(("atd-chan", c)), payload, |ui| {
+                                ui.colored_label(COLOURS[c % COLOURS.len()], ch.name(c));
+                            })
+                            .response
+                            .on_hover_text("Drag onto a parameter to bind it");
+                        }
+                        None => {
+                            ui.colored_label(COLOURS[c % COLOURS.len()], ch.name(c));
+                        }
+                    }
                     ui.monospace(format!("{:>10.4}", ch.last(c)));
                     ui.end_row();
                 }

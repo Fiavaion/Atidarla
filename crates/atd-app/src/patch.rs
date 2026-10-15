@@ -700,6 +700,17 @@ impl PatchEditor {
                         output: s.name.clone(),
                         start: c,
                     });
+                    // A SIG wire can also be dropped on a parameter to bind
+                    // it to the node's first channel (FR-P2).
+                    if s.wire == WireType::Sig {
+                        egui::DragAndDrop::set_payload(
+                            ui.ctx(),
+                            atd_core::graph::ChannelRef {
+                                node: node.id,
+                                channel: String::new(),
+                            },
+                        );
+                    }
                 }
                 painter.circle_filled(c, SOCKET_R * zoom.max(0.5), wire_colour(s.wire));
                 if sr.hovered() {

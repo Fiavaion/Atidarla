@@ -56,7 +56,29 @@ pub fn ui(ui: &mut Ui, engine: &mut Engine, node: NodeId) -> Option<String> {
                     .network()
                     .node(node)
                     .is_some_and(|n| n.params.contains_key(&p.name));
-                ui.label(&p.label).on_hover_text(&p.help);
+                let bindable = matches!(
+                    p.kind,
+                    ParamKind::Float { .. } | ParamKind::Int { .. } | ParamKind::Toggle
+                );
+                let label = ui.label(&p.label).on_hover_text(&p.help);
+                // Channel export by drag (FR-P2): drop a channel (from the
+                // channel viewer, or a wire dragged out of a SIG node) here.
+                let dropped = if bindable {
+                    if label.dnd_hover_payload::<ChannelRef>().is_some() {
+                        ui.painter().rect_stroke(
+                            label.rect.expand(2.0),
+                            3.0,
+                            egui::Stroke::new(1.5, ui.visuals().selection.stroke.color),
+                            egui::StrokeKind::Outside,
+                        );
+                    }
+                    label
+                        .dnd_release_payload::<ChannelRef>()
+                        .filter(|r| r.node != node)
+                        .map(|r| (*r).clone())
+                } else {
+                    None
+                };
                 let bind = engine
                     .network()
                     .node(node)
@@ -87,7 +109,7 @@ pub fn ui(ui: &mut Ui, engine: &mut Engine, node: NodeId) -> Option<String> {
                         new
                     }
                 };
-                let rebind = bind_widget(ui, engine, node, p, bind.as_ref());
+                let rebind = bind_widget(ui, engine, node, p, bind.as_ref()).or(dropped.map(Some));
                 let reset = ui
                     .add_enabled(overridden, egui::Button::new("reset").small())
                     .on_hover_text("Reset to default (and unbind)")

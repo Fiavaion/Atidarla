@@ -7,6 +7,7 @@ mod dock;
 mod params;
 mod patch;
 mod smoke;
+mod viewer;
 
 use std::process::ExitCode;
 
