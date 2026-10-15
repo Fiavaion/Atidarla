@@ -1,11 +1,13 @@
 //! Atidarla core: graph store, typed sockets, parameter system, pull cook
 //! scheduler, time model, undo/redo and the operator registry (PRD §5.2).
 //!
-//! **Status (M0):** the operator registry and the capability-flag mechanism
-//! (PRD A19) are implemented. The graph store, parameter system and cook
-//! scheduler land in M1.
+//! **Status:** the operator registry and capability flags (M0, PRD A19), and
+//! M1 pre-work: the graph store with invertible edits ([`graph`]).
 
 pub mod capability;
+pub mod cook;
+pub mod graph;
+pub mod history;
 pub mod platform;
 pub mod registry;
 

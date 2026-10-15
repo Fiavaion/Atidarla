@@ -25,11 +25,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: windows, os: windows-latest, optional: false, python: python }
-          - { name: macos-arm64, os: macos-latest, optional: false, python: python3 }
-          - { name: linux, os: ubuntu-latest, optional: true, python: python3 }
+          - { name: windows, os: windows-latest, optional: false, python: python, gpu: "1" }
+          - { name: macos-arm64, os: macos-latest, optional: false, python: python3, gpu: "1" }
+          - { name: linux, os: ubuntu-latest, optional: true, python: python3, gpu: "" }
     env:
       ATD_PYTHON: ${{ matrix.python }}
+      # GPU tests must run, not skip, where the runner has a GPU device
+      # (WARP on Windows, the paravirtual Metal device on macOS).
+      ATD_REQUIRE_GPU: ${{ matrix.gpu }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

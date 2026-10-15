@@ -79,6 +79,10 @@ pub struct SocketSchema {
     pub wire: WireType,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub optional: bool,
+    /// Feedback input: reads the source's previous-frame result, so a wire
+    /// into it may close a cycle (e.g. IMG Feedback).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub feedback: bool,
 }
 
 /// Parameter kinds (PRD §5.2 `atd-core`).
@@ -121,6 +125,39 @@ pub struct ParamSchema {
 }
 
 impl ParamSchema {
+    /// Checks a value against this parameter's kind. `min`/`max` are hard
+    /// limits (they are also the JSON Schema `minimum`/`maximum`).
+    pub fn validate(&self, value: &Value) -> Result<(), String> {
+        let numbers = |v: &Value, n: usize| {
+            v.as_array().is_some_and(|a| {
+                a.len() == n && a.iter().all(|x| x.as_f64().is_some_and(f64::is_finite))
+            })
+        };
+        let ok = match &self.kind {
+            ParamKind::Float { min, max } => value.as_f64().is_some_and(|v| {
+                v.is_finite() && min.is_none_or(|m| v >= m) && max.is_none_or(|m| v <= m)
+            }),
+            ParamKind::Int { min, max } => value
+                .as_i64()
+                .is_some_and(|v| min.is_none_or(|m| v >= m) && max.is_none_or(|m| v <= m)),
+            ParamKind::String | ParamKind::Path => value.is_string(),
+            ParamKind::Menu { options } => value
+                .as_str()
+                .is_some_and(|s| options.iter().any(|o| o == s)),
+            ParamKind::Toggle | ParamKind::Pulse => value.is_boolean(),
+            ParamKind::Colour => numbers(value, 4),
+            ParamKind::Vec { n } => numbers(value, usize::from(*n)),
+        };
+        if ok {
+            Ok(())
+        } else {
+            Err(format!(
+                "invalid value {value} for parameter `{}` ({:?})",
+                self.name, self.kind
+            ))
+        }
+    }
+
     /// JSON Schema fragment for this parameter's value.
     pub fn json_schema(&self) -> Value {
         let mut schema = match &self.kind {
@@ -180,6 +217,10 @@ pub struct OperatorSchema {
     pub capabilities: Vec<CapabilityRequirement>,
     /// Cook-time budget in microseconds at the reference resolution.
     pub cook_budget_us: u32,
+    /// Cooks every frame it is requested, even when nothing upstream changed
+    /// (generators driven by time, live inputs).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub time_dependent: bool,
 }
 
 impl OperatorSchema {
@@ -351,11 +392,13 @@ mod tests {
                 name: "image".into(),
                 wire: WireType::Img,
                 optional: true,
+                feedback: false,
             }],
             outputs: vec![SocketSchema {
                 name: "out".into(),
                 wire: WireType::Img,
                 optional: false,
+                feedback: false,
             }],
             capabilities: vec![CapabilityRequirement {
                 flag: "win+nvidia".parse().unwrap(),
@@ -364,6 +407,7 @@ mod tests {
                 },
             }],
             cook_budget_us: 500,
+            time_dependent: false,
         }
     }
 
@@ -451,6 +495,45 @@ mod tests {
             serde_json::to_string(&export).unwrap(),
             serde_json::to_string(&reg.export_json()).unwrap()
         );
+    }
+
+    #[test]
+    fn param_validation() {
+        let op = diffusion_fixture();
+        let strength = &op.params[1];
+        assert!(strength.validate(&json!(0.25)).is_ok());
+        assert!(strength.validate(&json!(1.5)).is_err());
+        assert!(strength.validate(&json!("x")).is_err());
+        let menu = ParamSchema {
+            name: "mode".into(),
+            label: "Mode".into(),
+            kind: ParamKind::Menu {
+                options: vec!["add".into(), "over".into()],
+            },
+            default: json!("over"),
+        };
+        assert!(menu.validate(&json!("add")).is_ok());
+        assert!(menu.validate(&json!("mul")).is_err());
+        let v3 = ParamSchema {
+            name: "t".into(),
+            label: "T".into(),
+            kind: ParamKind::Vec { n: 3 },
+            default: json!([0, 0, 0]),
+        };
+        assert!(v3.validate(&json!([1, 2.5, 3])).is_ok());
+        assert!(v3.validate(&json!([1, 2])).is_err());
+        let i = ParamSchema {
+            name: "n".into(),
+            label: "N".into(),
+            kind: ParamKind::Int {
+                min: Some(1),
+                max: None,
+            },
+            default: json!(1),
+        };
+        assert!(i.validate(&json!(4)).is_ok());
+        assert!(i.validate(&json!(0)).is_err());
+        assert!(i.validate(&json!(1.5)).is_err());
     }
 
     #[test]

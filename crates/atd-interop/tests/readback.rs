@@ -2,6 +2,14 @@
 
 use atd_interop::readback::{read_rgba8, test_pattern, write_rgba8};
 
+/// Skips without a GPU, unless `ATD_REQUIRE_GPU` is set (CI on Windows and
+/// macOS), where a missing adapter is a failure.
+fn no_gpu(what: &str) {
+    let required = std::env::var("ATD_REQUIRE_GPU").is_ok_and(|v| !v.is_empty() && v != "0");
+    assert!(!required, "ATD_REQUIRE_GPU is set but there is no {what}");
+    eprintln!("skipping: no {what}");
+}
+
 #[test]
 fn write_then_read_back() {
     let instance =
@@ -9,7 +17,7 @@ fn write_then_read_back() {
     let Ok(adapter) =
         pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
     else {
-        eprintln!("skipping: no GPU adapter");
+        no_gpu("GPU adapter");
         return;
     };
     let (device, queue) =

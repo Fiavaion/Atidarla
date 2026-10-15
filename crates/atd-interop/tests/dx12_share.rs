@@ -5,6 +5,14 @@
 use atd_interop::dx12::{SharedTexture, import, open_by_name};
 use atd_interop::readback::{read_rgba8, test_pattern, write_rgba8};
 
+/// Skips without a GPU, unless `ATD_REQUIRE_GPU` is set (CI on Windows and
+/// macOS), where a missing adapter is a failure.
+fn no_gpu(what: &str) {
+    let required = std::env::var("ATD_REQUIRE_GPU").is_ok_and(|v| !v.is_empty() && v != "0");
+    assert!(!required, "ATD_REQUIRE_GPU is set but there is no {what}");
+    eprintln!("skipping: no {what}");
+}
+
 const W: u32 = 96;
 const H: u32 = 40;
 
@@ -39,7 +47,7 @@ fn finish(device: &wgpu::Device, queue: &wgpu::Queue) {
 #[test]
 fn shared_texture_crosses_devices() {
     let Some((dev_a, queue_a, name)) = dx12_device() else {
-        eprintln!("skipping: no DX12 adapter");
+        no_gpu("DX12 adapter");
         return;
     };
     let (dev_b, queue_b, _) = dx12_device().unwrap();
@@ -74,7 +82,7 @@ fn shared_texture_crosses_devices() {
 #[test]
 fn shared_texture_opens_by_name() {
     let Some((dev_a, queue_a, _)) = dx12_device() else {
-        eprintln!("skipping: no DX12 adapter");
+        no_gpu("DX12 adapter");
         return;
     };
     let (dev_b, queue_b, _) = dx12_device().unwrap();
