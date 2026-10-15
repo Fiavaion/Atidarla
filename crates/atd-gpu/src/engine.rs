@@ -305,6 +305,10 @@ pub struct CookCtx<'a> {
     /// Seconds since the engine's time origin.
     pub time: f64,
     pub frame: u64,
+    /// Set by an operator whose result is provisional (e.g. a shader still
+    /// compiling on a worker thread): the engine cooks it again next frame
+    /// even if nothing upstream changed.
+    pub cook_again: bool,
 }
 
 impl CookCtx<'_> {
@@ -472,6 +476,8 @@ pub struct Engine {
     requested: Vec<NodeId>,
     inputs: Vec<Option<wgpu::Texture>>,
     sig_sources: Vec<Option<NodeId>>,
+    /// Nodes that asked to cook again next frame ([`CookCtx::cook_again`]).
+    again: Vec<NodeId>,
     released: Vec<wgpu::Texture>,
 }
 
@@ -530,6 +536,7 @@ impl Engine {
             requested: Vec::new(),
             inputs: Vec::new(),
             sig_sources: Vec::new(),
+            again: Vec::new(),
             released: Vec::new(),
         }
     }
@@ -649,6 +656,16 @@ impl Engine {
     /// Cooks what `requested` needs at `time` (seconds) and submits it.
     /// Returns how many nodes cooked (0 when everything was cached).
     pub fn cook(&mut self, requested: &[NodeId], time: f64) -> Result<usize, EngineError> {
+        if !self.again.is_empty() {
+            let net = &self.net;
+            let again = self
+                .again
+                .iter()
+                .copied()
+                .filter(|id| net.node(*id).is_some());
+            self.scheduler.mark_dirty(net, again);
+            self.again.clear();
+        }
         let Self {
             device,
             queue,
@@ -670,6 +687,7 @@ impl Engine {
             inputs,
             sig_sources,
             released,
+            again,
             ..
         } = self;
         scheduler.plan(net, registry, requested, plan)?;
@@ -796,9 +814,14 @@ impl Engine {
                 },
                 time,
                 frame: *frame,
+                cook_again: false,
             };
             let op = gpu_ops.get_mut(&id).expect("instance created above");
-            match op.cook(&mut ctx) {
+            let result = op.cook(&mut ctx);
+            if ctx.cook_again {
+                again.push(id);
+            }
+            match result {
                 Ok(()) => {
                     errors.remove(&id);
                     if let Some(old) = results.insert(id, output) {
@@ -820,6 +843,12 @@ impl Engine {
         }
         *frame += 1;
         Ok(plan.len())
+    }
+
+    /// True when an operator's last result was provisional (for example a
+    /// shader still compiling) and it will cook again on the next frame.
+    pub fn pending(&self) -> bool {
+        !self.again.is_empty()
     }
 
     /// Cooks one frame of the running patch: the viewed node (if any) plus

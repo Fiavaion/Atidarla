@@ -109,6 +109,13 @@ impl Image {
 
 fn cook_at(e: &mut Engine, node: NodeId, time: f64) -> Image {
     e.cook(&[node], time).unwrap();
+    // Shaders compile on a worker thread; the node is black until then.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while e.pending() {
+        assert!(std::time::Instant::now() < deadline, "shader compiled");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        e.cook(&[node], time).unwrap();
+    }
     assert_eq!(e.error(node), None);
     Image(read_rgba8(e.device(), e.queue(), e.result(node).expect("result")).unwrap())
 }

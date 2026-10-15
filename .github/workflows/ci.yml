@@ -9,8 +9,9 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
-  # Every pushed commit gets a full result; superseded PR runs are cancelled.
+  # Every pushed commit gets its own group (and a full result); superseded
+  # pull-request runs are cancelled.
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -62,8 +63,10 @@ jobs:
         run: cat bench-${{ matrix.name }}.json
       - name: ISF import (M1 AC2, FR-K6)
         # Translate, build and cook the public Vidvox ISF collection (MIT) at
-        # a pinned commit on the runner's GPU; fail below 90%.
+        # a pinned commit on the runner's GPU; fail below 90%. Slow compiles
+        # (FXC on WARP) are reported; one shader may take at most 60 s.
         if: matrix.gpu == '1'
+        timeout-minutes: 45
         shell: bash
         run: |
           git clone -q https://github.com/Vidvox/ISF-Files.git isf-corpus

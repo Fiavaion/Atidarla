@@ -65,6 +65,9 @@ enum Command {
         /// Fail unless at least this percentage of shaders pass.
         #[arg(long)]
         min_pass: Option<f64>,
+        /// With --gpu, seconds one shader may take to compile.
+        #[arg(long, default_value_t = 60)]
+        compile_timeout: u64,
         /// With --gpu, write a contact sheet of every output to this PNG.
         #[arg(long, requires = "gpu")]
         thumbs: Option<PathBuf>,
@@ -93,6 +96,7 @@ fn main() -> ExitCode {
             out,
             thumbs,
             min_pass,
+            compile_timeout,
         } => isf_import::run(
             &dir,
             &isf_import::Options {
@@ -102,6 +106,7 @@ fn main() -> ExitCode {
                 out: out.as_deref(),
                 thumbs: thumbs.as_deref(),
                 min_pass,
+                compile_timeout: std::time::Duration::from_secs(compile_timeout),
             },
         ),
         Command::Render { .. } => return not_yet("render", "M2 (FR-H1)"),

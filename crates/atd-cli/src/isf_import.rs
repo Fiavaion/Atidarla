@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use atd_core::graph::{Edit, Endpoint, Node, Wire};
@@ -48,6 +49,8 @@ pub struct Options<'a> {
     pub thumbs: Option<&'a Path>,
     /// Fail unless at least this percentage pass.
     pub min_pass: Option<f64>,
+    /// With `gpu`, how long one shader may take to compile.
+    pub compile_timeout: Duration,
 }
 
 /// Translates every `.fs` under `dir` and prints a summary.
@@ -107,7 +110,7 @@ pub fn run(dir: &Path, opts: &Options<'_>) -> Result<()> {
     }
 
     if opts.gpu {
-        gpu_check(defs, &mut entries, opts.thumbs)?;
+        gpu_check(defs, &mut entries, opts.thumbs, opts.compile_timeout)?;
     }
 
     let passed = entries.iter().filter(|e| e.passed()).count();
@@ -159,7 +162,12 @@ pub fn run(dir: &Path, opts: &Options<'_>) -> Result<()> {
 
 /// Builds every translated shader on the GPU and cooks it twice (t = 0
 /// and one frame later), with the test card on every image input.
-fn gpu_check(defs: Vec<IsfDef>, entries: &mut [Entry], thumbs: Option<&Path>) -> Result<()> {
+fn gpu_check(
+    defs: Vec<IsfDef>,
+    entries: &mut [Entry],
+    thumbs: Option<&Path>,
+    compile_timeout: Duration,
+) -> Result<()> {
     let gpu = GpuContext::headless().context("no GPU adapter for --gpu")?;
     eprintln!("isf-import: GPU {}", gpu.adapter.get_info().name);
     let mut registry = Registry::default();
@@ -221,8 +229,37 @@ fn gpu_check(defs: Vec<IsfDef>, entries: &mut [Entry], thumbs: Option<&Path>) ->
         }
         let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
         let mut error = None;
-        for frame in 0..2 {
-            if let Err(e) = engine.cook(&[node], f64::from(frame) / 60.0) {
+        // Pipelines compile on a worker thread; wait for them (bounded).
+        let start = Instant::now();
+        let mut compiled = true;
+        loop {
+            if let Err(e) = engine.cook(&[node], 0.0) {
+                error = Some(e.to_string());
+            }
+            if !engine.pending() {
+                break;
+            }
+            if start.elapsed() > compile_timeout {
+                compiled = false;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        let compile = start.elapsed();
+        if !compiled {
+            error = Some(format!(
+                "compile did not finish within {}s",
+                compile_timeout.as_secs()
+            ));
+        } else {
+            if compile > Duration::from_secs(2) {
+                eprintln!(
+                    "isf-import: slow compile {:.1}s: {}",
+                    compile.as_secs_f64(),
+                    entry.shader
+                );
+            }
+            if let Err(e) = engine.cook(&[node], 1.0 / 60.0) {
                 error = Some(e.to_string());
             }
             if let Some(e) = engine.error(node) {

@@ -167,9 +167,56 @@ impl IsfDef {
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
     ) -> Box<dyn GpuOp> {
-        match IsfOp::new(device, format, &self.schema.type_id, &self.shader) {
-            Ok(op) => Box::new(op),
-            Err(message) => Box::new(Broken(message)),
+        // Shader compilation can take seconds (FXC on Windows unrolls
+        // loops), so it runs on a worker thread, never on the render thread
+        // (rule 1). Until it finishes the node outputs transparent black and
+        // asks to be cooked again.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let device = device.clone();
+        let label = self.schema.type_id.clone();
+        let shader = self.shader.clone();
+        let spawned = std::thread::Builder::new()
+            .name("atd-isf-compile".into())
+            .spawn(move || {
+                let _ = tx.send(IsfOp::new(&device, format, &label, &shader));
+            });
+        match spawned {
+            Ok(_) => Box::new(Compiling::Pending(rx)),
+            Err(e) => Box::new(Compiling::Failed(format!(
+                "cannot start compiler thread: {e}"
+            ))),
+        }
+    }
+}
+
+/// An ISF operator whose pipelines are being built on a worker thread.
+enum Compiling {
+    Pending(std::sync::mpsc::Receiver<Result<IsfOp, String>>),
+    Ready(Box<IsfOp>),
+    Failed(String),
+}
+
+impl GpuOp for Compiling {
+    fn cook(&mut self, ctx: &mut CookCtx<'_>) -> Result<(), String> {
+        if let Self::Pending(rx) = self {
+            use std::sync::mpsc::TryRecvError;
+            *self = match rx.try_recv() {
+                Ok(Ok(op)) => Self::Ready(Box::new(op)),
+                Ok(Err(e)) => Self::Failed(e),
+                Err(TryRecvError::Disconnected) => {
+                    Self::Failed("ISF compiler thread failed".into())
+                }
+                Err(TryRecvError::Empty) => {
+                    clear(ctx.encoder, ctx.output);
+                    ctx.cook_again = true;
+                    return Ok(());
+                }
+            };
+        }
+        match self {
+            Self::Ready(op) => op.cook(ctx),
+            Self::Failed(e) => Err(e.clone()),
+            Self::Pending(_) => unreachable!("resolved above"),
         }
     }
 }
@@ -229,15 +276,6 @@ pub fn register(
         }
     }
     ids
-}
-
-/// A shader that failed to build on this device; reports why on every cook.
-struct Broken(String);
-
-impl GpuOp for Broken {
-    fn cook(&mut self, _: &mut CookCtx<'_>) -> Result<(), String> {
-        Err(self.0.clone())
-    }
 }
 
 /// One pass target: a ping-pong pair at the pass's current size.
