@@ -19,10 +19,10 @@ pub fn schema() -> OperatorSchema {
         type_id: "img.movie_in".into(),
         family: OpFamily::Img,
         label: "Movie In".into(),
-        summary: "Plays a movie file. HAP, HAP Alpha, HAP Q and HAP R are decoded natively and upload as GPU-compressed textures; other codecs arrive with FFmpeg.".into(),
+        summary: "Plays a movie or still image. HAP, HAP Alpha, HAP Q and HAP R are decoded natively and upload as GPU-compressed textures; PNG and JPEG stills load as one frame; other codecs arrive with FFmpeg.".into(),
         version: 1,
         params: vec![
-            ParamSchema::string("file", "File", "").help("Path to a `.mov` file (HAP family)."),
+            ParamSchema::string("file", "File", "").help("Path to a `.mov` file (HAP family) or a PNG/JPEG still."),
             ParamSchema::toggle("play", "Play", true).help("Advance the playhead; off holds the frame at Cue."),
             ParamSchema::toggle("loop", "Loop", true).help("Restart at the end; off holds the last frame."),
             ParamSchema::float("speed", "Speed", 1.0, None, None)
@@ -129,13 +129,24 @@ impl MovieIn {
         w: u32,
         h: u32,
     ) -> Result<(), String> {
-        let (format, mode, bytes, tw, th, rows, bpr) = if self.bc {
+        let (format, mode, bytes, tw, th, rows, bpr) = if frame.format == HapFormat::Rgba8 {
+            (
+                wgpu::TextureFormat::Rgba8Unorm,
+                0.0,
+                &frame.data[..],
+                w,
+                h,
+                h,
+                w * 4,
+            )
+        } else if self.bc {
             let (fmt, mode) = match frame.format {
                 HapFormat::Bc1 => (wgpu::TextureFormat::Bc1RgbaUnorm, 0.0),
                 HapFormat::Bc3 => (wgpu::TextureFormat::Bc3RgbaUnorm, 0.0),
                 HapFormat::YCoCgBc3 => (wgpu::TextureFormat::Bc3RgbaUnorm, 1.0),
                 HapFormat::Bc7 => (wgpu::TextureFormat::Bc7RgbaUnorm, 0.0),
                 HapFormat::Bc4 => (wgpu::TextureFormat::Bc4RUnorm, 2.0),
+                HapFormat::Rgba8 => unreachable!("handled above"),
             };
             let (bw, bh) = (w.div_ceil(4), h.div_ceil(4));
             let bpr = bw * frame.format.block_bytes() as u32;

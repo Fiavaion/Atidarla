@@ -16,6 +16,8 @@ pub enum HapFormat {
     Bc7,
     /// HAP Alpha-only: one channel in BC4.
     Bc4,
+    /// Uncompressed straight RGBA8 (still images).
+    Rgba8,
 }
 
 impl HapFormat {
@@ -24,6 +26,7 @@ impl HapFormat {
         match self {
             Self::Bc1 | Self::Bc4 => 8,
             Self::Bc3 | Self::YCoCgBc3 | Self::Bc7 => 16,
+            Self::Rgba8 => 64,
         }
     }
 

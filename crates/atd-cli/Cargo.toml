@@ -33,7 +33,7 @@ log.workspace = true
 wgpu.workspace = true
 pollster.workspace = true
 atd-interop.workspace = true
-png = "0.18"
+png.workspace = true
 
 [lints]
 workspace = true

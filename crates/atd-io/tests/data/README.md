@@ -16,3 +16,10 @@ for f in hap1 hap_alpha hap_q hap1_chunked hap1_raw; do
   ffmpeg -i $f.mov -frames:v 1 -ss 0.25 -f rawvideo -pix_fmt rgba $f.f2.rgba
 done
 ```
+
+Stills of the same frame:
+
+```sh
+ffmpeg -f lavfi -i "$SRC" -vf "select=eq(n\,2)" -frames:v 1 -q:v 2 still.jpg
+ffmpeg -f lavfi -i "$SRC" -vf "select=eq(n\,2),format=rgba" -frames:v 1 still.png
+```

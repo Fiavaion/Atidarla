@@ -2,7 +2,7 @@
 
 IMG · version 1 · cook budget 300 µs
 
-Plays a movie file. HAP, HAP Alpha, HAP Q and HAP R are decoded natively and upload as GPU-compressed textures; other codecs arrive with FFmpeg.
+Plays a movie or still image. HAP, HAP Alpha, HAP Q and HAP R are decoded natively and upload as GPU-compressed textures; PNG and JPEG stills load as one frame; other codecs arrive with FFmpeg.
 
 Cooks every frame (time-dependent).
 
@@ -20,7 +20,7 @@ None.
 
 | Name | Label | Type | Default | Range / options | Description |
 |---|---|---|---|---|---|
-| `file` | File | string | `""` |  | Path to a `.mov` file (HAP family). |
+| `file` | File | string | `""` |  | Path to a `.mov` file (HAP family) or a PNG/JPEG still. |
 | `play` | Play | toggle | `true` |  | Advance the playhead; off holds the frame at Cue. |
 | `loop` | Loop | toggle | `true` |  | Restart at the end; off holds the last frame. |
 | `speed` | Speed | float | `1.0` |  | Playback rate; negative plays backwards. |

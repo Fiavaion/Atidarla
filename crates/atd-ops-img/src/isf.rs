@@ -32,6 +32,8 @@ pub struct IsfDef {
     pub shader: IsfShader,
     /// Uses `TIME`, `TIMEDELTA`, `FRAMEINDEX`, `DATE` or persistent buffers.
     pub time_dependent: bool,
+    /// Directory `IMPORTED` image paths are relative to.
+    pub dir: Option<std::path::PathBuf>,
 }
 
 /// Operator type ID for a shader file stem: `img.isf_<slug>`.
@@ -131,9 +133,6 @@ impl IsfDef {
         if let Some(credit) = header.credit.as_deref().filter(|c| !c.trim().is_empty()) {
             summary.push_str(&format!(" ({credit})"));
         }
-        if !header.imported.is_empty() {
-            summary.push_str(" Imported images are not loaded yet and sample as black.");
-        }
         let passes = header.passes.len() as u32;
         let schema = OperatorSchema {
             type_id: type_id_for(stem),
@@ -158,7 +157,14 @@ impl IsfDef {
             schema,
             shader,
             time_dependent,
+            dir: None,
         })
+    }
+
+    /// Sets the directory `IMPORTED` images are loaded from.
+    pub fn with_dir(mut self, dir: impl Into<std::path::PathBuf>) -> Self {
+        self.dir = Some(dir.into());
+        self
     }
 
     /// Creates the operator instance (see [`OpLibrary::add`]).
@@ -175,13 +181,16 @@ impl IsfDef {
         let device = device.clone();
         let label = self.schema.type_id.clone();
         let shader = self.shader.clone();
+        let dir = self.dir.clone();
         let spawned = std::thread::Builder::new()
             .name("atd-isf-compile".into())
             .spawn(move || {
                 // A panic inside the driver's compiler must not take the
                 // reason with it: report it as the node's error.
                 let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    IsfOp::new(&device, format, &label, &shader)
+                    let mut op = IsfOp::new(&device, format, &label, &shader)?;
+                    op.load_imports(dir.as_deref());
+                    Ok(op)
                 }))
                 .unwrap_or_else(|panic| {
                     let msg = panic
@@ -252,7 +261,10 @@ pub fn load_dir(dir: &Path) -> std::io::Result<Loaded> {
         let fs = std::fs::read_to_string(&path)?;
         let vs = std::fs::read_to_string(path.with_extension("vs")).ok();
         match IsfDef::new(&stem, &fs, vs.as_deref()) {
-            Ok(def) => ok.push(def),
+            Ok(def) => ok.push(match path.parent() {
+                Some(dir) => def.with_dir(dir),
+                None => def,
+            }),
             Err(e) => failed.push((stem, e)),
         }
     }
@@ -317,6 +329,17 @@ pub struct IsfOp {
     last_time: Option<f64>,
     frame: i32,
     blit: FullscreenPass,
+    /// `IMPORTED` images, by index in the header.
+    imports: Vec<Import>,
+}
+
+/// An `IMPORTED` image: decoded on the compile thread, uploaded on the
+/// first cook.
+#[derive(Debug)]
+enum Import {
+    Missing,
+    Decoded(atd_io::image::Image),
+    Uploaded(wgpu::Texture),
 }
 
 impl IsfOp {
@@ -460,7 +483,70 @@ impl IsfOp {
                 "",
                 "return textureSample(in0, samp, uv);",
             ),
+            imports: Vec::new(),
         })
+    }
+
+    /// Decodes the header's `IMPORTED` images from `dir` (missing or
+    /// unreadable images sample as black, with a warning).
+    pub fn load_imports(&mut self, dir: Option<&std::path::Path>) {
+        self.imports = self
+            .shader
+            .header
+            .imported
+            .iter()
+            .map(|(name, path)| {
+                let Some(dir) = dir else {
+                    return Import::Missing;
+                };
+                match atd_io::image::load(&dir.join(path)) {
+                    Ok(image) => Import::Decoded(image),
+                    Err(e) => {
+                        log::warn!("ISF image {name}: {e}");
+                        Import::Missing
+                    }
+                }
+            })
+            .collect();
+    }
+
+    /// Uploads decoded imports (once).
+    fn upload_imports(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        for import in &mut self.imports {
+            if let Import::Decoded(image) = import {
+                let size = wgpu::Extent3d {
+                    width: image.width,
+                    height: image.height,
+                    depth_or_array_layers: 1,
+                };
+                let texture = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("atd-isf-import"),
+                    size,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
+                });
+                queue.write_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    &image.rgba,
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(image.width * 4),
+                        rows_per_image: Some(image.height),
+                    },
+                    size,
+                );
+                *import = Import::Uploaded(texture);
+            }
+        }
     }
 
     /// Writes the uniforms for pass `pass` (render size `size`) into `data`.
@@ -580,6 +666,7 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 
 impl GpuOp for IsfOp {
     fn cook(&mut self, ctx: &mut CookCtx<'_>) -> Result<(), String> {
+        self.upload_imports(ctx.device, ctx.queue);
         let (w, h) = (ctx.output.width(), ctx.output.height());
         let dt = self.last_time.map_or(0.0, |t| (ctx.time - t).max(0.0));
         self.last_time = Some(ctx.time);
@@ -644,7 +731,10 @@ impl GpuOp for IsfOp {
                                     .count();
                                 ctx.input_or_black(socket)
                             }
-                            TextureSource::Imported(_) => ctx.black,
+                            TextureSource::Imported(i) => match self.imports.get(*i) {
+                                Some(Import::Uploaded(t)) => t,
+                                _ => ctx.black,
+                            },
                             TextureSource::Target(name) => self
                                 .target(name)
                                 .buffers

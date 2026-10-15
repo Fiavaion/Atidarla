@@ -78,7 +78,10 @@ pub fn run(dir: &Path, opts: &Options<'_>) -> Result<()> {
             .unwrap_or_default();
         let fs = std::fs::read_to_string(path).with_context(|| format!("reading {name}"))?;
         let vs = std::fs::read_to_string(path.with_extension("vs")).ok();
-        let result = IsfDef::new(&stem, &fs, vs.as_deref());
+        let result = IsfDef::new(&stem, &fs, vs.as_deref()).map(|d| match path.parent() {
+            Some(dir) => d.with_dir(dir),
+            None => d,
+        });
         let passes = atd_gpu::isf::parse_header(&fs)
             .map(|h| h.passes.len())
             .unwrap_or(0);

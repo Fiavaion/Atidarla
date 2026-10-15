@@ -88,6 +88,11 @@ pub fn ycocg_to_rgb(px: [u8; 4]) -> [u8; 4] {
 /// `None` for formats without a CPU decoder (BC7).
 pub fn to_rgba(frame: &HapFrame, width: u32, height: u32, out: &mut Vec<u8>) -> Option<()> {
     let (w, h) = (width as usize, height as usize);
+    if frame.format == HapFormat::Rgba8 {
+        out.clear();
+        out.extend_from_slice(&frame.data);
+        return Some(());
+    }
     let bw = w.div_ceil(4);
     let bytes = frame.format.block_bytes();
     out.clear();
@@ -112,6 +117,7 @@ pub fn to_rgba(frame: &HapFrame, width: u32, height: u32, out: &mut Vec<u8>) -> 
                 }
             }
             HapFormat::Bc7 => return None,
+            HapFormat::Rgba8 => unreachable!("handled above"),
         }
         for (j, p) in px.iter().enumerate() {
             let (x, y) = (bx * 4 + j % 4, by * 4 + j / 4);

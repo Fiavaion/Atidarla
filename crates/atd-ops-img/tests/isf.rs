@@ -327,3 +327,36 @@ fn audio_inputs_read_channel_images_with_channel_0_at_the_bottom() {
     wire(&mut e, image, wave, "waveImage");
     assert_px(&cook_at(&mut e, wave, 0.0), 7, 7, [51, 230, 0, 255], 2);
 }
+
+const IMPORT: &str = r#"/*{
+    "INPUTS": [],
+    "IMPORTED": {"logo": {"PATH": "still.png"}}
+}*/
+void main() { gl_FragColor = IMG_NORM_PIXEL(logo, isf_FragNormCoord); }
+"#;
+
+#[test]
+fn imported_images_load_from_the_shader_directory() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../atd-io/tests/data");
+    let d = def("Import", IMPORT, None).with_dir(&dir);
+    let mut e = engine_or_skip!(vec![d]);
+    let n = add(&mut e, "img.isf_import", &[]);
+    let img = cook_at(&mut e, n, 0.0);
+    // The still is testsrc2 frame 2 (64×32) drawn over 32×16: each output
+    // pixel centre sits on the corner of a 2×2 source block, so bilinear
+    // sampling gives the block's average. Rows are not flipped.
+    let still = atd_io::image::load(&dir.join("still.png")).unwrap();
+    let src = |x: u32, y: u32, c: usize| u32::from(still.rgba[((y * 64 + x) * 4) as usize + c]);
+    for (x, y) in [(2, 2), (20, 5), (30, 14), (9, 11)] {
+        let mut want = [0u8; 4];
+        for (c, w) in want.iter_mut().enumerate() {
+            let sum = src(2 * x, 2 * y, c)
+                + src(2 * x + 1, 2 * y, c)
+                + src(2 * x, 2 * y + 1, c)
+                + src(2 * x + 1, 2 * y + 1, c);
+            *w = (sum as f32 / 4.0).round() as u8;
+        }
+        assert_px(&img, x, y, want, 3);
+    }
+    assert!(img.0.iter().any(|v| *v > 0), "not black");
+}

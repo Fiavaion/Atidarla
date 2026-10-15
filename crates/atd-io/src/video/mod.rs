@@ -124,7 +124,39 @@ impl MoviePlayer {
     }
 }
 
+/// A still image: one frame, decoded once.
+fn run_still(path: &std::path::Path, shared: &Shared) -> Result<(), String> {
+    let image = crate::image::load(path)?;
+    let codec = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("image")
+        .to_ascii_uppercase();
+    let _ = shared.info.set(MovieInfo {
+        width: image.width,
+        height: image.height,
+        frames: 1,
+        duration: 0.0,
+        rate: 0.0,
+        codec,
+        times: vec![0.0],
+    });
+    if let Ok(mut cache) = shared.cache.lock() {
+        cache.push((
+            0,
+            Arc::new(HapFrame {
+                format: HapFormat::Rgba8,
+                data: image.rgba,
+            }),
+        ));
+    }
+    Ok(())
+}
+
 fn run(path: &std::path::Path, shared: &Shared) -> Result<(), String> {
+    if crate::image::is_still(path) {
+        return run_still(path, shared);
+    }
     let track = mov::open(path).map_err(|e| e.to_string())?;
     let codec = track.codec_str();
     if !codec.starts_with("Hap") {

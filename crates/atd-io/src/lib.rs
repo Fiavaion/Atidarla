@@ -10,5 +10,6 @@
 //! with their operators.
 
 pub mod audio_in;
+pub mod image;
 pub mod osc;
 pub mod video;

@@ -181,3 +181,24 @@ fn set_file(e: &mut Engine, node: NodeId, file: &str) {
     )
     .unwrap();
 }
+
+#[test]
+fn stills_load_as_a_single_frame() {
+    let Some(mut e) = engine(false) else {
+        require_gpu();
+        return;
+    };
+    let node = movie(&mut e, "still.png", &[]);
+    let got = frame(&mut e, node, 0.0);
+    let want = std::fs::read(data("hap1.f2.rgba")).unwrap();
+    // The PNG is lossless; the HAP reference is BC1, hence the tolerance.
+    let mean = got
+        .iter()
+        .zip(&want)
+        .map(|(a, b)| f64::from(a.abs_diff(*b)))
+        .sum::<f64>()
+        / want.len() as f64;
+    assert!(mean < 6.0, "mean difference {mean}");
+    // Time does not change a still.
+    assert_eq!(frame(&mut e, node, 3.0), got);
+}
