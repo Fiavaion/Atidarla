@@ -1,0 +1,17 @@
+/target
+**/*.rs.bk
+.cache/
+*.atidarla/.cache/
+bench/results/*.json
+!bench/results/.gitkeep
+
+# Python / AI Host
+ai-host/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Editors / OS
+.DS_Store
+.idea/
+*.swp

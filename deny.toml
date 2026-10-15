@@ -1,0 +1,44 @@
+# cargo-deny policy (CLAUDE.md rule 3, PRD §10): no GPL, LGPL-static or
+# non-commercial code in core crates. Optional plugins that bind GPL code
+# (atd-plugin-link) must be excluded here when they gain such dependencies,
+# and are never linked into core builds.
+
+[graph]
+all-features = false
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[licenses]
+version = 2
+confidence-threshold = 0.93
+# Add licences here only when a dependency needs them (e.g. BSL-1.0 for
+# Clipper2 via Manifold, see docs/spikes/msh-licences.md).
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "Unlicense",
+]
+
+# Fonts bundled by egui (epaint_default_fonts): OFL for Hack/Noto/Emoji,
+# Ubuntu Font Licence for Ubuntu-Light. Both are permissive font licences.
+[[licenses.exceptions]]
+crate = "epaint_default_fonts"
+allow = ["OFL-1.1", "Ubuntu-font-1.0"]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

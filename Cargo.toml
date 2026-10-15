@@ -1,0 +1,63 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+default-members = ["crates/*"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/fiavaion/atidarla"
+authors = ["The Atidarla Contributors"]
+publish = false
+
+[workspace.dependencies]
+# Internal crates
+atd-core = { path = "crates/atd-core" }
+atd-gpu = { path = "crates/atd-gpu" }
+atd-kernel = { path = "crates/atd-kernel" }
+atd-ai = { path = "crates/atd-ai" }
+atd-agent = { path = "crates/atd-agent" }
+atd-format = { path = "crates/atd-format" }
+atd-io = { path = "crates/atd-io" }
+atd-interop = { path = "crates/atd-interop" }
+atd-py = { path = "crates/atd-py" }
+atd-stage = { path = "crates/atd-stage" }
+atd-timeline = { path = "crates/atd-timeline" }
+atd-ops-img = { path = "crates/atd-ops-img" }
+atd-ops-sig = { path = "crates/atd-ops-sig" }
+atd-ops-pnt = { path = "crates/atd-ops-pnt" }
+atd-ops-msh = { path = "crates/atd-ops-msh" }
+atd-ops-mat = { path = "crates/atd-ops-mat" }
+atd-ops-dat = { path = "crates/atd-ops-dat" }
+atd-ops-cmp = { path = "crates/atd-ops-cmp" }
+atd-ops-ai = { path = "crates/atd-ops-ai" }
+
+# Pinned stack (PRD A5). wgpu is pinned to one major per release train.
+wgpu = "=30.0.1"
+egui = "0.37"
+eframe = { version = "0.37", default-features = false }
+pyo3 = "0.30"
+
+# General
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+pollster = "0.4"
+log = "0.4"
+env_logger = "0.11"
+memmap2 = "0.9"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+
+[profile.dev.package."*"]
+opt-level = 2
