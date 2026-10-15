@@ -11,6 +11,7 @@
 //! generated docs page (`atidarla docs`) and CPU unit tests. Runnable example
 //! projects follow once the project format (PRD A11) is ratified.
 
+mod audio;
 mod ops;
 
 use atd_core::registry::Registry;

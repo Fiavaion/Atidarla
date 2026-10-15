@@ -4,6 +4,7 @@ use atd_core::registry::{OpFamily, OperatorSchema, ParamSchema, SocketSchema, Wi
 use atd_gpu::engine::{SigCtx, SigOp};
 
 use crate::Def;
+use crate::audio::{AudioFileIn, FFT_SIZES, Spectrum};
 
 fn sig(
     id: &str,
@@ -568,6 +569,49 @@ pub static DEFS: &[Def] = &[
             )
         },
         create: || Box::new(Limit),
+    },
+    Def {
+        schema: || {
+            sig(
+                "audio_file_in",
+                "Audio File In",
+                "Plays a WAV file as audio-rate channels (`left`/`right`, or `mono`). Decoding runs off the render thread.",
+                &[],
+                vec![
+                    ParamSchema::string("file", "File", "")
+                        .help("Path to a WAV file (PCM or float)."),
+                    ParamSchema::toggle("play", "Play", true).help("Advance the playhead."),
+                    ParamSchema::toggle("loop", "Loop", true)
+                        .help("Restart at the end of the file."),
+                    ParamSchema::float("gain", "Gain", 1.0, Some(0.0), None)
+                        .help("Scales the samples."),
+                ],
+                true,
+            )
+        },
+        create: || Box::<AudioFileIn>::default(),
+    },
+    Def {
+        schema: || {
+            let mut s = sig(
+                "spectrum",
+                "Spectrum",
+                "Band energies of an audio input (log-spaced `band1`…`bandN`, a full-scale sine reads about 1) plus its RMS `level`.",
+                &["in"],
+                vec![
+                    ParamSchema::menu("fft_size", "FFT Size", FFT_SIZES, "1024").help("Analysis window in samples; larger resolves lower frequencies but reacts more slowly."),
+                    ParamSchema::int("bands", "Bands", 8, Some(1), Some(32)).help("Number of log-spaced bands."),
+                    ParamSchema::float("min_freq", "Min Frequency", 30.0, Some(1.0), None).help("Lower edge of the first band in Hz."),
+                    ParamSchema::float("max_freq", "Max Frequency", 16_000.0, Some(1.0), None).help("Upper edge of the last band in Hz."),
+                    ParamSchema::float("smoothing", "Smoothing", 0.5, Some(0.0), Some(0.99)).help("Per-frame smoothing of band values (0 = none)."),
+                    ParamSchema::float("gain", "Gain", 1.0, Some(0.0), None).help("Scales the band and level outputs."),
+                ],
+                true,
+            );
+            s.cook_budget_us = 200;
+            s
+        },
+        create: || Box::<Spectrum>::default(),
     },
 ];
 

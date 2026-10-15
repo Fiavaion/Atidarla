@@ -37,6 +37,8 @@ pub const ENGINE_USAGE: wgpu::TextureUsages = wgpu::TextureUsages::RENDER_ATTACH
 pub struct Channels {
     names: Vec<String>,
     samples: usize,
+    /// Samples per second for audio-rate blocks; 0 at control rate.
+    rate: f32,
     /// Channel-major: channel `c` is `data[c * samples..(c + 1) * samples]`.
     data: Vec<f32>,
 }
@@ -58,14 +60,38 @@ impl Channels {
             self.names.extend(names.iter().map(|n| (*n).to_owned()));
         }
         self.samples = 1;
+        self.rate = 0.0;
         self.data.clear();
         self.data.extend_from_slice(values);
+    }
+
+    /// Shapes the buffer as an audio-rate block of `samples` per channel at
+    /// `rate` Hz (zeroed), reusing storage; fill it with [`Self::channel_mut`].
+    pub fn set_block(&mut self, names: &[&str], rate: f32, samples: usize) {
+        if self.names.len() != names.len() || self.names.iter().zip(names).any(|(a, b)| a != b) {
+            self.names.clear();
+            self.names.extend(names.iter().map(|n| (*n).to_owned()));
+        }
+        self.samples = samples;
+        self.rate = rate;
+        self.data.clear();
+        self.data.resize(names.len() * samples, 0.0);
+    }
+
+    /// Samples per second of an audio-rate block; 0 at control rate.
+    pub fn rate(&self) -> f32 {
+        self.rate
     }
 
     /// Rebuilds one-sample channels in place: [`ChannelWriter::push`] each
     /// channel; the writer trims leftovers when dropped. Name strings are
     /// reused, so a steady set of channels does not allocate.
     pub fn writer(&mut self) -> ChannelWriter<'_> {
+        if self.samples != 1 {
+            // Previous contents were a block; shrink to one sample per channel.
+            self.data.truncate(self.names.len().min(self.data.len()));
+            self.samples = 1;
+        }
         ChannelWriter { ch: self, n: 0 }
     }
 
@@ -75,6 +101,7 @@ impl Channels {
             self.names.clone_from(&other.names);
         }
         self.samples = other.samples;
+        self.rate = other.rate;
         self.data.clear();
         self.data.extend_from_slice(&other.data);
     }
@@ -162,6 +189,7 @@ impl Drop for ChannelWriter<'_> {
         self.ch.names.truncate(self.n);
         self.ch.data.truncate(self.n);
         self.ch.samples = 1;
+        self.ch.rate = 0.0;
     }
 }
 

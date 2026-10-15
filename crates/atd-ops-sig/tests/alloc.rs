@@ -6,7 +6,15 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use atd_core::graph::{Edit, Network, Node, NodeId, Param};
 use atd_core::registry::Registry;
-use atd_gpu::engine::{Channels, Params, SigCtx, SigInputs};
+use atd_gpu::engine::{Channels, Params, SigCtx, SigInputs, SigOp};
+
+type Case = (
+    String,
+    NodeId,
+    Vec<Option<NodeId>>,
+    Box<dyn SigOp>,
+    Channels,
+);
 use serde_json::json;
 
 struct Counting;
@@ -29,6 +37,25 @@ unsafe impl GlobalAlloc for Counting {
 
 #[global_allocator]
 static GLOBAL: Counting = Counting;
+
+/// A one-second stereo WAV in the temp directory.
+fn wav_path() -> String {
+    let path = std::env::temp_dir().join(format!("atd-alloc-{}.wav", std::process::id()));
+    let spec = hound::WavSpec {
+        channels: 2,
+        sample_rate: 48_000,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut w = hound::WavWriter::create(&path, spec).unwrap();
+    for i in 0..48_000 {
+        let v = ((i as f32 * 0.05).sin() * 10_000.0) as i16;
+        w.write_sample(v).unwrap();
+        w.write_sample(v).unwrap();
+    }
+    w.finalize().unwrap();
+    path.to_string_lossy().into_owned()
+}
 
 #[test]
 fn every_sig_operator_cooks_without_allocating() {
@@ -58,7 +85,7 @@ fn every_sig_operator_cooks_without_allocating() {
     );
     let b = source(&mut net, &mut sig, Channels::single(&["k"], &[2.0]));
 
-    let mut cases = Vec::new();
+    let mut cases: Vec<Case> = Vec::new();
     for def in atd_ops_sig::DEFS {
         let schema = (def.schema)();
         let id = net.alloc_id();
@@ -70,6 +97,17 @@ fn every_sig_operator_cooks_without_allocating() {
             },
         )
         .unwrap();
+        if schema.type_id == "sig.audio_file_in" {
+            net.apply(
+                &reg,
+                Edit::SetParam {
+                    node: id,
+                    param: "file".into(),
+                    value: Some(Param::constant(json!(wav_path()))),
+                },
+            )
+            .unwrap();
+        }
         if schema.type_id == "sig.select" {
             net.apply(
                 &reg,
@@ -93,7 +131,7 @@ fn every_sig_operator_cooks_without_allocating() {
         ));
     }
 
-    let mut run = |frames: usize, t0: f64| {
+    let run = |cases: &mut Vec<Case>, frames: usize, t0: f64| {
         for f in 0..frames {
             for (_, id, inputs, op, out) in cases.iter_mut() {
                 let mut ctx = SigCtx {
@@ -109,13 +147,26 @@ fn every_sig_operator_cooks_without_allocating() {
         }
     };
     let at_start = ALLOCS.load(Ordering::Relaxed);
-    run(3, 0.0);
+    // Warm up until the audio file has decoded on its worker thread.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        run(&mut cases, 3, 0.0);
+        let loaded = cases
+            .iter()
+            .any(|(ty, _, _, _, out)| ty == "sig.audio_file_in" && !out.is_empty());
+        if loaded {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "audio file decoded");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    run(&mut cases, 3, 0.0);
     assert!(
         ALLOCS.load(Ordering::Relaxed) > at_start,
         "the counter sees warm-up allocations"
     );
     let before = ALLOCS.load(Ordering::Relaxed);
-    run(100, 1.0);
+    run(&mut cases, 100, 1.0);
     let allocs = ALLOCS.load(Ordering::Relaxed) - before;
     assert_eq!(
         allocs, 0,

@@ -15,6 +15,7 @@ atd-gpu.workspace = true
 wgpu.workspace = true
 
 [dev-dependencies]
+hound.workspace = true
 atd-ops-sig.workspace = true
 atd-interop.workspace = true
 pollster.workspace = true

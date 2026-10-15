@@ -431,3 +431,82 @@ fn sig_channels_drive_img_parameters() {
         "the engine exposes channel results"
     );
 }
+
+/// The M1 acceptance pattern (audio-reactive patch) end to end: a WAV plays
+/// through Audio File In → Spectrum, whose `level` channel drives an IMG
+/// parameter rendered on the GPU.
+#[test]
+fn audio_drives_img_through_spectrum() {
+    let mut e = engine_or_skip!();
+    let path = std::env::temp_dir().join(format!("atd-reactive-{}.wav", std::process::id()));
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: 48_000,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut w = hound::WavWriter::create(&path, spec).unwrap();
+    for i in 0..48_000 {
+        let s = (std::f32::consts::TAU * 1000.0 * i as f32 / 48_000.0).sin() * 0.5;
+        w.write_sample((s * 32767.0) as i16).unwrap();
+    }
+    w.finalize().unwrap();
+
+    let audio = add(
+        &mut e,
+        "sig.audio_file_in",
+        &[("file", json!(path.to_string_lossy()))],
+    );
+    let spectrum = add(&mut e, "sig.spectrum", &[("smoothing", json!(0.0))]);
+    e.edit(
+        "wire",
+        [Edit::Connect {
+            wire: Wire::new(Endpoint::new(audio, "out"), Endpoint::new(spectrum, "in")),
+        }],
+    )
+    .unwrap();
+    let white = add(
+        &mut e,
+        "constant",
+        &[("colour", json!([1.0, 1.0, 1.0, 1.0]))],
+    );
+    let level = add(&mut e, "level", &[]);
+    wire(&mut e, white, level, "in");
+    e.edit(
+        "bind",
+        [Edit::SetParam {
+            node: level,
+            param: "brightness".into(),
+            value: Some(Param::bound(json!(0.0), spectrum, "level")),
+        }],
+    )
+    .unwrap();
+
+    // Silence until the file has decoded (off the render thread), then the
+    // tone's RMS (0.5 / sqrt 2 ≈ 0.354) sets the brightness.
+    let mut t = 0.0;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let px = loop {
+        t += 1.0 / 60.0;
+        e.cook(&[level], t).unwrap();
+        let p =
+            Image(read_rgba8(e.device(), e.queue(), e.result(level).unwrap()).unwrap()).px(1, 1);
+        // Wait until the 1024-sample window is full of tone.
+        if e.channels(spectrum)
+            .and_then(|c| c.value("level"))
+            .is_some_and(|l| l > 0.35)
+        {
+            break p;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "audio reached the image"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    };
+    assert!(
+        close(px, [90, 90, 90, 255], 3),
+        "brightness follows the audio level: {px:?}"
+    );
+    std::fs::remove_file(&path).ok();
+}
