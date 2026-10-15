@@ -1,0 +1,79 @@
+name: CI
+
+# PRD §9 M0: Windows and macOS (Apple Silicon) are required jobs; Linux is a
+# non-blocking build (A18). cargo-deny enforces the licence policy (rule 3).
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  rust:
+    name: Rust (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.optional }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: windows, os: windows-latest, optional: false, python: python }
+          - { name: macos-arm64, os: macos-latest, optional: false, python: python3 }
+          - { name: linux, os: ubuntu-latest, optional: true, python: python3 }
+    env:
+      ATD_PYTHON: ${{ matrix.python }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.0"
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace
+      - name: Bench (start-up cases)
+        run: cargo run -p atd-cli --release -- bench --out bench-${{ matrix.name }}.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-${{ matrix.name }}
+          path: bench-${{ matrix.name }}.json
+
+  deny:
+    name: cargo deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+
+  ai-host:
+    name: AI Host (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    defaults:
+      run:
+        working-directory: ai-host
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync
+      - run: uv run pytest -q

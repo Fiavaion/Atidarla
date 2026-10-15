@@ -34,6 +34,7 @@ Status key: **Ratified** = decided by Mark · **Carried** = ratified for NascD a
 | A17 | No telemetry; crash reports opt-in, written locally first | Carried | |
 | A18 | **Platform priority: Windows and macOS are the supported targets; Linux is nice-to-have** — kept compiling where cheap, never gates a milestone | Ratified 2026-10-15 | Mark |
 | A19 | **Platform-exclusive capabilities are allowed** when hardware or SDKs require it (e.g. NVIDIA real-time diffusion, Kinect/Orbbec, Spout vs Syphon); each is declared in the operator registry as a capability flag, shown in the UI, and degrades gracefully (route to LAN/cloud, hide, or substitute) on other platforms | Ratified 2026-10-15 (follows A7) | Mark |
+| A20 | **In-house dock widget in `atd-app`** until `egui_dock` supports egui 0.37 (it and `egui_tiles` target 0.36 as of 2026-10-15); same API shape so it can be swapped back. Keeps the A5 pins (egui 0.37, wgpu 30) intact | Proposed 2026-10-15 (M0) | `docs/milestones/M0.md` |
 
 ---
 

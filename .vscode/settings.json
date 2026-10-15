@@ -1,0 +1,10 @@
+{
+  "rust-analyzer.check.command": "clippy",
+  "rust-analyzer.cargo.features": [],
+  "editor.formatOnSave": true,
+  "[rust]": { "editor.defaultFormatter": "rust-lang.rust-analyzer" },
+  "python.testing.pytestEnabled": true,
+  "python.testing.cwd": "${workspaceFolder}/ai-host",
+  "python.testing.pytestArgs": ["tests"],
+  "files.exclude": { "**/target": true, "**/__pycache__": true }
+}
