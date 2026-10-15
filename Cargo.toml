@@ -36,6 +36,7 @@ atd-ops-ai = { path = "crates/atd-ops-ai" }
 
 # Pinned stack (PRD A5). wgpu is pinned to one major per release train.
 wgpu = "=30.0.1"
+naga = { version = "=30.0.1", features = ["glsl-in", "wgsl-in", "wgsl-out"] }
 egui = "0.37"
 eframe = { version = "0.37", default-features = false }
 pyo3 = "0.30"

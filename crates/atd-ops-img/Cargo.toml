@@ -13,6 +13,8 @@ publish.workspace = true
 atd-core.workspace = true
 atd-gpu.workspace = true
 wgpu.workspace = true
+pollster.workspace = true
+log.workspace = true
 
 [dev-dependencies]
 hound.workspace = true

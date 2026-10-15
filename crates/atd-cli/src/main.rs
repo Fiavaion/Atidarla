@@ -2,6 +2,7 @@
 
 mod bench;
 mod docs;
+mod isf_import;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -45,10 +46,34 @@ enum Command {
         #[arg(long)]
         check: bool,
     },
+    /// Translate ISF shaders (GLSL + JSON header) to WGSL operators (FR-K6).
+    IsfImport {
+        /// Directory searched recursively for `.fs` files (`.vs` alongside).
+        dir: PathBuf,
+        /// List every failure and group failures by kind.
+        #[arg(long)]
+        report: bool,
+        /// Also build every shader on a GPU and cook it for two frames.
+        #[arg(long)]
+        gpu: bool,
+        /// Write per-shader results as JSON.
+        #[arg(long)]
+        json: Option<PathBuf>,
+        /// Write the generated WGSL here.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Fail unless at least this percentage of shaders pass.
+        #[arg(long)]
+        min_pass: Option<f64>,
+        /// With --gpu, write a contact sheet of every output to this PNG.
+        #[arg(long, requires = "gpu")]
+        thumbs: Option<PathBuf>,
+    },
 }
 
 fn main() -> ExitCode {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn,naga=off"))
+        .init();
     let cli = Cli::parse();
     let result = match cli.command {
         Command::Bench { out, no_gpu } => bench::run(out.as_deref(), !no_gpu),
@@ -60,6 +85,25 @@ fn main() -> ExitCode {
             Ok(())
         }
         Command::Docs { out, check } => docs::run(&builtin_registry(), &out, check),
+        Command::IsfImport {
+            dir,
+            report,
+            gpu,
+            json,
+            out,
+            thumbs,
+            min_pass,
+        } => isf_import::run(
+            &dir,
+            &isf_import::Options {
+                report,
+                gpu,
+                json: json.as_deref(),
+                out: out.as_deref(),
+                thumbs: thumbs.as_deref(),
+                min_pass,
+            },
+        ),
         Command::Render { .. } => return not_yet("render", "M2 (FR-H1)"),
         Command::Run { .. } => return not_yet("run", "M3 (FR-H2)"),
         Command::Bake { .. } => return not_yet("bake", "M2"),

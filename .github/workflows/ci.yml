@@ -10,7 +10,8 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Every pushed commit gets a full result; superseded PR runs are cancelled.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -56,10 +57,22 @@ jobs:
       - name: Show bench JSON
         shell: bash
         run: cat bench-${{ matrix.name }}.json
+      - name: ISF import (M1 AC2, FR-K6)
+        # Translate, build and cook the public Vidvox ISF collection (MIT) at
+        # a pinned commit on the runner's GPU; fail below 90%.
+        if: matrix.gpu == '1'
+        shell: bash
+        run: |
+          git clone -q https://github.com/Vidvox/ISF-Files.git isf-corpus
+          git -C isf-corpus checkout -q 395072d48b3ce7351ccb20a5fda54470591324df
+          cargo run -p atd-cli --release -- isf-import isf-corpus/ISF --report --gpu --min-pass 90 --json isf-${{ matrix.name }}.json
       - uses: actions/upload-artifact@v4
         with:
           name: bench-${{ matrix.name }}
-          path: bench-${{ matrix.name }}.json
+          path: |
+            bench-${{ matrix.name }}.json
+            isf-${{ matrix.name }}.json
+          if-no-files-found: ignore
 
   app-smoke:
     # M0 AC2: the shell starts, renders frames and screenshots on each OS.

@@ -18,6 +18,7 @@ Prerequisites: Rust (the pinned toolchain in `rust-toolchain.toml` installs auto
 cargo run -p atd-app                     # the application shell
 cargo run -p atd-cli -- bench            # performance suite → JSON (FR-H4)
 cargo run -p atd-cli -- registry         # operator schemas as JSON
+cargo run -p atd-cli -- isf-import <dir> --report --gpu   # ISF shaders → WGSL, per-shader report
 cargo test --workspace                   # all Rust tests (needs Python on PATH for atd-py / atd-ai)
 cargo clippy --workspace --all-targets -- -D warnings
 cargo deny check                         # licence policy (cargo install cargo-deny)
@@ -25,6 +26,8 @@ cargo deny check                         # licence policy (cargo install cargo-d
 cd ai-host && uv sync && uv run pytest   # AI Host tests
 cd ai-host && uv run atd-ai-host --dev   # run a host standalone
 ```
+
+To use ISF shaders in the app, set `ATIDARLA_ISF_PATH` to one or more directories of `.fs` files. Use `;` between directories on Windows and `:` elsewhere. Each shader that translates appears as an `img.isf_*` operator.
 
 Set `ATD_PYTHON` to choose the interpreter the AI Host tests spawn (default: `python` on Windows, `python3` elsewhere).
 

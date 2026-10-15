@@ -8,6 +8,7 @@
 //! (`tests/ops.rs`). Runnable example projects follow once the project
 //! format (PRD A11) is ratified.
 
+pub mod isf;
 mod ops;
 mod ops2;
 mod stateful;

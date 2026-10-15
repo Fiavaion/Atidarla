@@ -8,9 +8,9 @@ use atd_gpu::fullscreen::FullscreenPass;
 use crate::ops::img;
 
 /// Internal simulation state format: half floats, filterable, renderable.
-const STATE: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+pub(crate) const STATE: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
-fn texture(
+pub(crate) fn texture(
     device: &wgpu::Device,
     w: u32,
     h: u32,
@@ -36,7 +36,7 @@ fn texture(
     })
 }
 
-fn clear(encoder: &mut wgpu::CommandEncoder, t: &wgpu::Texture) {
+pub(crate) fn clear(encoder: &mut wgpu::CommandEncoder, t: &wgpu::Texture) {
     let view = t.create_view(&Default::default());
     encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some("atd-clear"),
@@ -57,13 +57,14 @@ fn clear(encoder: &mut wgpu::CommandEncoder, t: &wgpu::Texture) {
 }
 
 /// Two state textures, read from one and written to the other each step.
-struct PingPong {
+#[derive(Debug)]
+pub(crate) struct PingPong {
     tex: [wgpu::Texture; 2],
     current: usize,
 }
 
 impl PingPong {
-    fn new(device: &wgpu::Device, w: u32, h: u32) -> Self {
+    pub(crate) fn new(device: &wgpu::Device, w: u32, h: u32) -> Self {
         Self {
             tex: [
                 texture(device, w, h, STATE, "atd-state-a"),
@@ -73,19 +74,19 @@ impl PingPong {
         }
     }
 
-    fn matches(&self, out: &wgpu::Texture) -> bool {
+    pub(crate) fn matches(&self, out: &wgpu::Texture) -> bool {
         self.tex[0].width() == out.width() && self.tex[0].height() == out.height()
     }
 
-    fn read(&self) -> &wgpu::Texture {
+    pub(crate) fn read(&self) -> &wgpu::Texture {
         &self.tex[self.current]
     }
 
-    fn write(&self) -> &wgpu::Texture {
+    pub(crate) fn write(&self) -> &wgpu::Texture {
         &self.tex[1 - self.current]
     }
 
-    fn swap(&mut self) {
+    pub(crate) fn swap(&mut self) {
         self.current = 1 - self.current;
     }
 }

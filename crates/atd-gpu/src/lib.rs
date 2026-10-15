@@ -7,6 +7,7 @@
 
 pub mod engine;
 pub mod fullscreen;
+pub mod isf;
 pub mod pool;
 
 use atd_core::{GpuVendor, PlatformInfo};

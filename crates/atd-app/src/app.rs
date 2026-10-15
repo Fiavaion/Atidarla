@@ -78,10 +78,12 @@ impl AtidarlaApp {
             let mut library = OpLibrary::default();
             atd_ops_img::library(&mut library);
             atd_ops_sig::library(&mut library);
+            let mut registry = builtin_registry();
+            load_isf(&mut registry, &mut library);
             Engine::new(
                 rs.device.clone(),
                 rs.queue.clone(),
-                builtin_registry(),
+                registry,
                 library,
                 EngineConfig {
                     width: 1280,
@@ -528,6 +530,27 @@ impl Panels {
 
 fn placeholder(ui: &mut Ui, text: &str) {
     ui.centered_and_justified(|ui| ui.weak(text));
+}
+
+/// Imports ISF shaders from the directories in `ATIDARLA_ISF_PATH` (FR-K6)
+/// as `img.isf_*` operators. Project-local `shaders/` folders follow the
+/// project format (PRD A11).
+fn load_isf(registry: &mut Registry, library: &mut OpLibrary) {
+    let Some(path) = std::env::var_os("ATIDARLA_ISF_PATH") else {
+        return;
+    };
+    for dir in std::env::split_paths(&path) {
+        match atd_ops_img::isf::load_dir(&dir) {
+            Ok((defs, failed)) => {
+                let ids = atd_ops_img::isf::register(defs, registry, library);
+                log::info!("ISF: {} operators from {}", ids.len(), dir.display());
+                for (name, err) in failed {
+                    log::warn!("ISF: {name} not imported: {err}");
+                }
+            }
+            Err(e) => log::warn!("ISF: cannot read {}: {e}", dir.display()),
+        }
+    }
 }
 
 fn builtin_registry() -> Registry {
