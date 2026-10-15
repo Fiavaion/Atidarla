@@ -7,7 +7,7 @@ A free, open-source real-time visual instrument for **Windows and macOS** (Linux
 > - the workspace, with CI on Windows (WARP) and macOS (Metal);
 > - capability flags, GPU texture sharing and the AI Host protocol prototype;
 > - the graph engine (undo, pull cook, zero allocations per frame);
-> - 32 IMG and 22 SIG operators;
+> - 32 IMG and 24 SIG operators;
 > - ISF import (99% of the public collection), HAP Movie In, and live Audio In;
 > - the Patch editor.
 >
@@ -28,7 +28,7 @@ A free, open-source real-time visual instrument for **Windows and macOS** (Linux
 | Navigate | drag the background or middle-drag to pan, scroll to zoom, click the minimap |
 | Inspect | viewer modes RGBA / RGB / R / G / B / A and exposure (EV); hover for pixel coordinates |
 
-Media: **Movie In** plays HAP / HAP Alpha / HAP Q / HAP R `.mov` files (decoded on the GPU as BC textures) and PNG/JPEG stills. **Audio In** captures the default input device (or `test-tone`). **Audio File In** plays WAV.
+Media: **Movie In** plays HAP / HAP Alpha / HAP Q / HAP R `.mov` files (decoded on the GPU as BC textures) and PNG/JPEG stills. **Audio In** captures the default input device (or `test-tone`). **Audio File In** plays WAV. **MIDI In/Out** and **OSC In/Out** connect controllers and other software.
 
 - Requirements and decisions: [`PRD.md`](PRD.md) (binding)
 - Evidence behind each decision: [`RESEARCH.md`](RESEARCH.md)

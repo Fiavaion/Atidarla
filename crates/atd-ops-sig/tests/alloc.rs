@@ -133,6 +133,17 @@ fn every_sig_operator_cooks_without_allocating() {
             )
             .unwrap();
         }
+        if schema.type_id.starts_with("sig.midi_") {
+            net.apply(
+                &reg,
+                Edit::SetParam {
+                    node: id,
+                    param: "device".into(),
+                    value: Some(Param::constant(json!("virtual"))),
+                },
+            )
+            .unwrap();
+        }
         if schema.type_id == "sig.osc_in" {
             net.apply(
                 &reg,
@@ -215,7 +226,9 @@ fn every_sig_operator_cooks_without_allocating() {
         allocs, 0,
         "SIG cooks allocated {allocs} times over 100 frames"
     );
-    for (ty, _, _, _, out) in cases.iter().filter(|c| c.0 != "sig.osc_in") {
+    // Inputs from the outside world have no channels until messages arrive.
+    let silent = ["sig.osc_in", "sig.midi_in"];
+    for (ty, _, _, _, out) in cases.iter().filter(|c| !silent.contains(&c.0.as_str())) {
         assert!(!out.is_empty(), "{ty} produced channels");
     }
 }
