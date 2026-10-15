@@ -13,11 +13,18 @@
 
 mod audio;
 mod ops;
+mod sig2;
 
 use atd_core::registry::Registry;
 use atd_gpu::engine::OpLibrary;
 
 pub use ops::DEFS;
+pub use sig2::DEFS2;
+
+/// Every SIG operator definition.
+pub fn defs() -> impl Iterator<Item = &'static Def> {
+    DEFS.iter().chain(DEFS2)
+}
 
 /// A SIG operator definition: schema plus implementation factory.
 #[derive(Debug)]
@@ -28,7 +35,7 @@ pub struct Def {
 
 /// Registers this family's operator schemas.
 pub fn register(registry: &mut Registry) {
-    for def in DEFS {
+    for def in defs() {
         registry
             .register((def.schema)())
             .expect("SIG operator schemas are valid and unique");
@@ -37,7 +44,7 @@ pub fn register(registry: &mut Registry) {
 
 /// Registers this family's implementations.
 pub fn library(library: &mut OpLibrary) {
-    for def in DEFS {
+    for def in defs() {
         let create = def.create;
         library.add_sig((def.schema)().type_id, move || create());
     }
@@ -51,7 +58,7 @@ mod tests {
     fn schemas_register_with_budgets_and_help() {
         let mut registry = Registry::default();
         register(&mut registry);
-        assert_eq!(registry.len(), DEFS.len());
+        assert_eq!(registry.len(), DEFS.len() + DEFS2.len());
         for op in registry.iter() {
             assert!(op.cook_budget_us > 0, "{} has a cook budget", op.type_id);
             assert!(!op.summary.is_empty());
@@ -73,7 +80,7 @@ mod tests {
     fn every_schema_has_an_implementation() {
         let mut lib = OpLibrary::default();
         library(&mut lib);
-        for def in DEFS {
+        for def in defs() {
             assert!(lib.contains(&(def.schema)().type_id));
         }
     }

@@ -20,17 +20,31 @@ use serde_json::json;
 struct Counting;
 static ALLOCS: AtomicUsize = AtomicUsize::new(0);
 
+thread_local! {
+    /// Only the cook thread is measured: I/O threads (OSC encoding, audio
+    /// decoding) may allocate by design.
+    static COUNTING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn counted() -> bool {
+    COUNTING.try_with(std::cell::Cell::get).unwrap_or(false)
+}
+
 // SAFETY: forwards to the system allocator; only counts calls.
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        ALLOCS.fetch_add(1, Ordering::Relaxed);
+        if counted() {
+            ALLOCS.fetch_add(1, Ordering::Relaxed);
+        }
         unsafe { System.alloc(layout) }
     }
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         unsafe { System.dealloc(ptr, layout) }
     }
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        ALLOCS.fetch_add(1, Ordering::Relaxed);
+        if counted() {
+            ALLOCS.fetch_add(1, Ordering::Relaxed);
+        }
         unsafe { System.realloc(ptr, layout, new_size) }
     }
 }
@@ -86,7 +100,7 @@ fn every_sig_operator_cooks_without_allocating() {
     let b = source(&mut net, &mut sig, Channels::single(&["k"], &[2.0]));
 
     let mut cases: Vec<Case> = Vec::new();
-    for def in atd_ops_sig::DEFS {
+    for def in atd_ops_sig::defs() {
         let schema = (def.schema)();
         let id = net.alloc_id();
         let name = net.unique_name("op");
@@ -104,6 +118,17 @@ fn every_sig_operator_cooks_without_allocating() {
                     node: id,
                     param: "file".into(),
                     value: Some(Param::constant(json!(wav_path()))),
+                },
+            )
+            .unwrap();
+        }
+        if schema.type_id == "sig.osc_in" {
+            net.apply(
+                &reg,
+                Edit::SetParam {
+                    node: id,
+                    param: "port".into(),
+                    value: Some(Param::constant(json!(0))),
                 },
             )
             .unwrap();
@@ -146,6 +171,7 @@ fn every_sig_operator_cooks_without_allocating() {
             }
         }
     };
+    COUNTING.with(|c| c.set(true));
     let at_start = ALLOCS.load(Ordering::Relaxed);
     // Warm up until the audio file has decoded on its worker thread.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
@@ -168,11 +194,12 @@ fn every_sig_operator_cooks_without_allocating() {
     let before = ALLOCS.load(Ordering::Relaxed);
     run(&mut cases, 100, 1.0);
     let allocs = ALLOCS.load(Ordering::Relaxed) - before;
+    COUNTING.with(|c| c.set(false));
     assert_eq!(
         allocs, 0,
         "SIG cooks allocated {allocs} times over 100 frames"
     );
-    for (ty, _, _, _, out) in &cases {
+    for (ty, _, _, _, out) in cases.iter().filter(|c| c.0 != "sig.osc_in") {
         assert!(!out.is_empty(), "{ty} produced channels");
     }
 }

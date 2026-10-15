@@ -35,6 +35,7 @@ pub(crate) fn img(
         capabilities: vec![],
         cook_budget_us,
         time_dependent: false,
+        sink: false,
     }
 }
 

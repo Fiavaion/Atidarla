@@ -161,9 +161,9 @@ const BAND_NAMES: [&str; 32] = [
 
 pub const FFT_SIZES: &[&str] = &["512", "1024", "2048", "4096"];
 
-/// Band energies (log-spaced) and RMS level of an audio-rate input.
+/// A sliding analysis window over an audio-rate input with a cached FFT.
 #[derive(Default)]
-pub struct Spectrum {
+pub struct FftWindow {
     size: usize,
     fft: Option<Arc<dyn Fft<f32>>>,
     window: Vec<f32>,
@@ -171,12 +171,13 @@ pub struct Spectrum {
     ring: Vec<f32>,
     buf: Vec<Complex32>,
     scratch: Vec<Complex32>,
-    smoothed: Vec<f32>,
-    rate: f32,
+    /// Sample rate of the input, once known.
+    pub rate: f32,
 }
 
-impl Spectrum {
-    fn prepare(&mut self, size: usize) {
+impl FftWindow {
+    /// Sets the window size (allocates only when it changes).
+    pub fn prepare(&mut self, size: usize) {
         if self.size == size && self.fft.is_some() {
             return;
         }
@@ -192,8 +193,15 @@ impl Spectrum {
         self.buf = vec![Complex32::default(); size];
     }
 
-    /// Appends mono samples, keeping the last `size`.
-    fn push(&mut self, input: &Channels) {
+    pub fn size(&self) -> usize {
+        self.size
+    }
+
+    /// Appends the input's samples (mixed to mono), keeping the last `size`.
+    pub fn push(&mut self, input: &Channels) {
+        if input.rate() > 0.0 {
+            self.rate = input.rate();
+        }
         let n = input.samples();
         if n == 0 || input.is_empty() {
             return;
@@ -207,30 +215,48 @@ impl Spectrum {
             *slot = (0..input.len()).map(|c| input.channel(c)[s]).sum::<f32>() / channels;
         }
     }
+
+    /// RMS of the current window.
+    pub fn rms(&self) -> f32 {
+        (self.ring.iter().map(|s| s * s).sum::<f32>() / self.size.max(1) as f32).sqrt()
+    }
+
+    /// Windowed FFT of the current window; bins `0..size/2` are meaningful.
+    pub fn analyse(&mut self) -> &[Complex32] {
+        for (b, (s, w)) in self.buf.iter_mut().zip(self.ring.iter().zip(&self.window)) {
+            *b = Complex32::new(s * w, 0.0);
+        }
+        let fft = self.fft.as_ref().expect("prepare() first");
+        fft.process_with_scratch(&mut self.buf, &mut self.scratch);
+        &self.buf
+    }
+
+    /// The input sample rate, or 48 kHz before any audio arrived.
+    pub fn rate_or_default(&self) -> f32 {
+        if self.rate > 0.0 { self.rate } else { 48_000.0 }
+    }
+}
+
+/// Band energies (log-spaced) and RMS level of an audio-rate input.
+#[derive(Default)]
+pub struct Spectrum {
+    win: FftWindow,
+    smoothed: Vec<f32>,
 }
 
 impl SigOp for Spectrum {
     fn cook(&mut self, ctx: &mut SigCtx<'_>) -> Result<(), String> {
         let p = ctx.params;
         let size: usize = p.str("fft_size").parse().unwrap_or(1024);
-        self.prepare(size);
+        self.win.prepare(size);
         if let Some(input) = ctx.inputs.get(0) {
-            if input.rate() > 0.0 {
-                self.rate = input.rate();
-            }
-            self.push(input);
+            self.win.push(input);
         }
         let bands = (p.i64("bands").clamp(1, 32)) as usize;
         self.smoothed.resize(bands, 0.0);
 
-        let rms = (self.ring.iter().map(|s| s * s).sum::<f32>() / size as f32).sqrt();
-        for (b, (s, w)) in self.buf.iter_mut().zip(self.ring.iter().zip(&self.window)) {
-            *b = Complex32::new(s * w, 0.0);
-        }
-        let fft = self.fft.as_ref().expect("prepared");
-        fft.process_with_scratch(&mut self.buf, &mut self.scratch);
-
-        let rate = if self.rate > 0.0 { self.rate } else { 48_000.0 };
+        let rms = self.win.rms();
+        let rate = self.win.rate_or_default();
         let nyquist = rate / 2.0;
         let lo = p.f32("min_freq").clamp(1.0, nyquist);
         let hi = p.f32("max_freq").clamp(lo * 1.001, nyquist);
@@ -239,13 +265,14 @@ impl SigOp for Spectrum {
         let norm = 4.0 / size as f32;
         let smoothing = p.f32("smoothing").clamp(0.0, 0.99);
         let gain = p.f32("gain");
+        let spectrum = self.win.analyse();
         let mut w = ctx.output.writer();
         for (b, name) in BAND_NAMES.iter().enumerate().take(bands) {
             let f0 = lo * (hi / lo).powf(b as f32 / bands as f32);
             let f1 = lo * (hi / lo).powf((b + 1) as f32 / bands as f32);
             let i0 = ((f0 / bin_hz).floor() as usize).max(1);
             let i1 = ((f1 / bin_hz).ceil() as usize).clamp(i0 + 1, size / 2);
-            let peak = self.buf[i0..i1]
+            let peak = spectrum[i0..i1]
                 .iter()
                 .map(|c| c.norm())
                 .fold(0.0, f32::max)

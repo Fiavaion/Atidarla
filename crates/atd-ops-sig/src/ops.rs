@@ -6,7 +6,7 @@ use atd_gpu::engine::{SigCtx, SigOp};
 use crate::Def;
 use crate::audio::{AudioFileIn, FFT_SIZES, Spectrum};
 
-fn sig(
+pub(crate) fn sig(
     id: &str,
     label: &str,
     summary: &str,
@@ -32,6 +32,7 @@ fn sig(
         capabilities: vec![],
         cook_budget_us: 20,
         time_dependent,
+        sink: false,
     }
 }
 

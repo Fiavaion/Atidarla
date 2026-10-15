@@ -280,13 +280,19 @@ impl AtidarlaApp {
         if p.viewed.is_some_and(|v| engine.network().node(v).is_none()) {
             p.viewed = None;
         }
-        let Some(viewed) = p.viewed else { return };
-        let cooked = match engine.cook(&[viewed], self.start.elapsed().as_secs_f64()) {
+        let viewed = p.viewed;
+        let cooked = match engine.cook_frame(viewed, self.start.elapsed().as_secs_f64()) {
             Ok(n) => n,
             Err(e) => {
                 p.patch.status(e.to_string());
                 0
             }
+        };
+        let Some(viewed) = viewed else {
+            if cooked > 0 {
+                ctx.request_repaint();
+            }
+            return;
         };
         if cooked > 0 {
             // Something changed or is animating: keep frames coming.

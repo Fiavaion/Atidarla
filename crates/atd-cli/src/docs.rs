@@ -60,6 +60,12 @@ pub fn page(op: &OperatorSchema) -> String {
     if op.time_dependent {
         let _ = writeln!(s, "Cooks every frame (time-dependent).\n");
     }
+    if op.sink {
+        let _ = writeln!(
+            s,
+            "Sink: cooked every frame even when nothing downstream is viewed, because it has external side effects.\n"
+        );
+    }
 
     for (title, sockets) in [("Inputs", &op.inputs), ("Outputs", &op.outputs)] {
         let _ = writeln!(s, "## {title}\n");

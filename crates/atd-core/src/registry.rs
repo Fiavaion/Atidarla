@@ -305,6 +305,10 @@ pub struct OperatorSchema {
     /// (generators driven by time, live inputs).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub time_dependent: bool,
+    /// Has external side effects (network, devices, files), so the engine
+    /// cooks it every frame even when nothing downstream is viewed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sink: bool,
 }
 
 impl OperatorSchema {
@@ -494,6 +498,7 @@ mod tests {
             }],
             cook_budget_us: 500,
             time_dependent: false,
+            sink: false,
         }
     }
 

@@ -51,6 +51,7 @@ fn schema(type_id: &str, inputs: Vec<SocketSchema>, time_dependent: bool) -> Ope
         capabilities: vec![],
         cook_budget_us: 10,
         time_dependent,
+        sink: false,
     }
 }
 

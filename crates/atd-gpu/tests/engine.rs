@@ -46,6 +46,7 @@ fn schema(
         capabilities: vec![],
         cook_budget_us: 1000,
         time_dependent,
+        sink: false,
     }
 }
 
@@ -321,4 +322,54 @@ fn removing_a_node_frees_its_state() {
     e.undo().unwrap();
     e.cook(&[fill], 1.0).unwrap();
     assert_eq!(pixel(&e, fill), [0, 0, 0, 255]);
+}
+
+#[test]
+fn sinks_cook_without_being_viewed() {
+    if engine().is_none() {
+        return no_gpu();
+    }
+    // A registry where one operator is a sink.
+    let instance =
+        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    let adapter =
+        pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+            .unwrap();
+    let (device, queue) =
+        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
+    let mut reg = Registry::default();
+    let mut sink = schema("img.sink", vec![], vec![], false);
+    sink.sink = true;
+    reg.register(sink).unwrap();
+    reg.register(schema("img.plain", vec![], vec![], false))
+        .unwrap();
+    let mut lib = OpLibrary::default();
+    for ty in ["img.sink", "img.plain"] {
+        lib.add(ty, |d, f| {
+            Box::new(Fill(FullscreenPass::new(
+                d,
+                "fill",
+                f,
+                0,
+                "",
+                "return params.v[0];",
+            )))
+        });
+    }
+    let config = EngineConfig {
+        width: W,
+        height: H,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+    };
+    let mut e = Engine::new(device, queue, reg, lib, config);
+    let s = add(&mut e, "img.sink", "sink1");
+    let p = add(&mut e, "img.plain", "plain1");
+    assert_eq!(e.cook_frame(None, 0.0).unwrap(), 1);
+    assert!(e.result(s).is_some(), "the sink cooked with nothing viewed");
+    assert!(e.result(p).is_none(), "ordinary nodes stay lazy");
+    assert_eq!(
+        e.cook_frame(Some(p), 1.0).unwrap(),
+        1,
+        "viewing adds the viewed node; the sink is cached"
+    );
 }

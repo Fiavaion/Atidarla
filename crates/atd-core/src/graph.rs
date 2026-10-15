@@ -755,6 +755,7 @@ pub(crate) mod tests {
             capabilities: vec![],
             cook_budget_us: 100,
             time_dependent: false,
+            sink: false,
         }
     }
 

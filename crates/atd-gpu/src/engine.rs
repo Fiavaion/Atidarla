@@ -78,6 +78,24 @@ impl Channels {
         self.data.resize(names.len() * samples, 0.0);
     }
 
+    /// Like [`Self::set_block`], taking the channel names from `like`
+    /// (no allocation when they already match).
+    pub fn set_block_like(&mut self, like: &Channels, rate: f32, samples: usize) {
+        if self.names != like.names {
+            self.names.clone_from(&like.names);
+        }
+        self.samples = samples;
+        self.rate = rate;
+        self.data.clear();
+        self.data.resize(self.names.len() * samples, 0.0);
+    }
+
+    /// Reserves room for `values` samples in total, so growing blocks up to
+    /// that size does not reallocate.
+    pub fn reserve(&mut self, values: usize) {
+        self.data.reserve(values.saturating_sub(self.data.len()));
+    }
+
     /// Samples per second of an audio-rate block; 0 at control rate.
     pub fn rate(&self) -> f32 {
         self.rate
@@ -448,6 +466,7 @@ pub struct Engine {
     last_time: Option<f64>,
     // Per-frame scratch, reused.
     plan: Vec<NodeId>,
+    requested: Vec<NodeId>,
     inputs: Vec<Option<wgpu::Texture>>,
     sig_sources: Vec<Option<NodeId>>,
     released: Vec<wgpu::Texture>,
@@ -505,6 +524,7 @@ impl Engine {
             frame: 0,
             last_time: None,
             plan: Vec::new(),
+            requested: Vec::new(),
             inputs: Vec::new(),
             sig_sources: Vec::new(),
             released: Vec::new(),
@@ -791,6 +811,23 @@ impl Engine {
         }
         *frame += 1;
         Ok(plan.len())
+    }
+
+    /// Cooks one frame of the running patch: the viewed node (if any) plus
+    /// every sink (operators with external side effects, such as OSC Out),
+    /// which must run even when nothing downstream is viewed.
+    pub fn cook_frame(&mut self, viewed: Option<NodeId>, time: f64) -> Result<usize, EngineError> {
+        let mut requested = std::mem::take(&mut self.requested);
+        requested.clear();
+        requested.extend(viewed);
+        for node in self.net.nodes() {
+            if self.registry.get(&node.type_id).is_some_and(|s| s.sink) && Some(node.id) != viewed {
+                requested.push(node.id);
+            }
+        }
+        let result = self.cook(&requested, time);
+        self.requested = requested;
+        result
     }
 
     /// The latest image of an IMG node, if it has cooked successfully.
