@@ -5,7 +5,8 @@
 //! sealed as soon as no parameter widget is being dragged or focused.
 //! Expressions arrive once their evaluation model is decided (see M1.md).
 
-use atd_core::graph::{Edit, NodeId, Param};
+use atd_core::graph::{ChannelRef, Edit, NodeId, Param};
+use atd_core::registry::WireType;
 use atd_core::registry::{ParamKind, ParamSchema};
 use atd_gpu::engine::Engine;
 use egui::{DragValue, Ui};
@@ -42,7 +43,7 @@ pub fn ui(ui: &mut Ui, engine: &mut Engine, node: NodeId) -> Option<String> {
     let mut error = None;
     let mut active = false;
     egui::Grid::new(("atd-params", node.0))
-        .num_columns(3)
+        .num_columns(4)
         .striped(true)
         .show(ui, |ui| {
             for p in &schema.params {
@@ -56,11 +57,40 @@ pub fn ui(ui: &mut Ui, engine: &mut Engine, node: NodeId) -> Option<String> {
                     .node(node)
                     .is_some_and(|n| n.params.contains_key(&p.name));
                 ui.label(&p.label).on_hover_text(&p.help);
-                let (new, busy) = widget(ui, p, &current);
-                active |= busy;
+                let bind = engine
+                    .network()
+                    .node(node)
+                    .and_then(|n| n.params.get(&p.name))
+                    .and_then(|p| p.bind.clone());
+                let new = match &bind {
+                    Some(b) => {
+                        let live = engine.channels(b.node).and_then(|c| c.value(&b.channel));
+                        let src = engine
+                            .network()
+                            .node(b.node)
+                            .map_or("?", |n| n.name.as_str());
+                        let chan = if b.channel.is_empty() {
+                            "first"
+                        } else {
+                            b.channel.as_str()
+                        };
+                        match live {
+                            Some(v) => ui.label(format!("{v:.3}")),
+                            None => ui.weak("—"),
+                        }
+                        .on_hover_text(format!("Follows {src}:{chan}"));
+                        None
+                    }
+                    None => {
+                        let (new, busy) = widget(ui, p, &current);
+                        active |= busy;
+                        new
+                    }
+                };
+                let rebind = bind_widget(ui, engine, node, p, bind.as_ref());
                 let reset = ui
                     .add_enabled(overridden, egui::Button::new("reset").small())
-                    .on_hover_text("Reset to default")
+                    .on_hover_text("Reset to default (and unbind)")
                     .clicked();
                 ui.end_row();
 
@@ -69,6 +99,14 @@ pub fn ui(ui: &mut Ui, engine: &mut Engine, node: NodeId) -> Option<String> {
                         node,
                         param: p.name.clone(),
                         value: None,
+                    })
+                } else if let Some(rebind) = rebind {
+                    let mut param = Param::constant(current.clone());
+                    param.bind = rebind;
+                    Some(Edit::SetParam {
+                        node,
+                        param: p.name.clone(),
+                        value: Some(param),
                     })
                 } else {
                     new.filter(|v| *v != current).map(|v| Edit::SetParam {
@@ -93,6 +131,70 @@ pub fn ui(ui: &mut Ui, engine: &mut Engine, node: NodeId) -> Option<String> {
         engine.seal_history();
     }
     error
+}
+
+/// The channel-binding dropdown (FR-P2 channel export). Returns
+/// `Some(new binding)` when the user changes it.
+fn bind_widget(
+    ui: &mut Ui,
+    engine: &Engine,
+    node: NodeId,
+    p: &ParamSchema,
+    current: Option<&ChannelRef>,
+) -> Option<Option<ChannelRef>> {
+    if !matches!(
+        p.kind,
+        ParamKind::Float { .. } | ParamKind::Int { .. } | ParamKind::Toggle
+    ) {
+        ui.label("");
+        return None;
+    }
+    let net = engine.network();
+    let label = |r: &ChannelRef| {
+        let n = net.node(r.node).map_or("?", |n| n.name.as_str());
+        if r.channel.is_empty() {
+            n.to_owned()
+        } else {
+            format!("{n}:{}", r.channel)
+        }
+    };
+    let mut options: Vec<ChannelRef> = Vec::new();
+    for n in net.nodes() {
+        let is_sig = engine
+            .registry()
+            .get(&n.type_id)
+            .is_some_and(|s| s.outputs.iter().any(|o| o.wire == WireType::Sig));
+        if !is_sig || n.id == node {
+            continue;
+        }
+        match engine.channels(n.id).filter(|c| !c.is_empty()) {
+            Some(c) => options.extend(c.names().map(|ch| ChannelRef {
+                node: n.id,
+                channel: ch.to_owned(),
+            })),
+            None => options.push(ChannelRef {
+                node: n.id,
+                channel: String::new(),
+            }),
+        }
+    }
+    let mut chosen = current.cloned();
+    let text = current.map_or_else(|| "bind…".to_owned(), label);
+    egui::ComboBox::from_id_salt(("atd-bind", node.0, &p.name))
+        .selected_text(text)
+        .width(110.0)
+        .show_ui(ui, |ui| {
+            ui.selectable_value(&mut chosen, None, "none");
+            for o in &options {
+                ui.selectable_value(&mut chosen, Some(o.clone()), label(o));
+            }
+            if options.is_empty() {
+                ui.weak("Add a SIG operator to bind to");
+            }
+        })
+        .response
+        .on_hover_text("Drive this parameter from a SIG channel");
+    (chosen.as_ref() != current).then_some(chosen)
 }
 
 /// Draws the widget for one parameter. Returns the new value if the user

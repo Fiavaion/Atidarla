@@ -138,6 +138,11 @@ impl Scheduler {
                         needs = true;
                     }
                 }
+                for b in net.bindings_of(n) {
+                    if self.included.contains(&b.node) {
+                        needs = true;
+                    }
+                }
                 if needs {
                     self.included.insert(n);
                     out.push(n);
@@ -158,6 +163,12 @@ impl Scheduler {
             for (input, src) in net.inputs_of(n) {
                 if !is_feedback(input) && self.marks.get(&src.node) != Some(&Mark::Done) {
                     self.stack.push((src.node, false));
+                }
+            }
+            // Channel bindings are dependencies too; dangling ones are inert.
+            for b in net.bindings_of(n) {
+                if net.node(b.node).is_some() && self.marks.get(&b.node) != Some(&Mark::Done) {
+                    self.stack.push((b.node, false));
                 }
             }
             self.stack[first..].reverse();
@@ -285,6 +296,34 @@ mod tests {
         assert!(s.is_dirty(m2));
         s.plan(&net, &reg, &[m2], &mut plan).unwrap();
         assert_eq!(plan, [a, m1, m2]);
+    }
+
+    #[test]
+    fn bound_parameters_follow_time_dependent_channels() {
+        let reg = test_registry();
+        let mut net = Network::default();
+        let lfo = add(&mut net, &reg, "sig.lfo");
+        let g = add(&mut net, &reg, "img.gen");
+        net.apply(
+            &reg,
+            Edit::SetParam {
+                node: g,
+                param: "gain".into(),
+                value: Some(Param::bound(json!(1.0), lfo, "")),
+            },
+        )
+        .unwrap();
+        let mut s = Scheduler::default();
+        let mut plan = Vec::new();
+        s.plan(&net, &reg, &[g], &mut plan).unwrap();
+        assert_eq!(plan, [lfo, g], "the channel source cooks first");
+        cook_all(&mut s, &plan);
+        s.plan(&net, &reg, &[g], &mut plan).unwrap();
+        assert_eq!(
+            plan,
+            [lfo, g],
+            "a time-dependent channel re-cooks its consumer every frame"
+        );
     }
 
     #[test]

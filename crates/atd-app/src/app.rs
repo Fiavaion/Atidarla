@@ -53,6 +53,7 @@ struct Panels {
     viewed: Option<NodeId>,
     viewer_tex: Option<egui::TextureId>,
     canvas_rect: egui::Rect,
+    history: crate::channels::ChannelHistory,
 }
 
 impl AtidarlaApp {
@@ -76,6 +77,7 @@ impl AtidarlaApp {
         let mut engine = rs.map(|rs| {
             let mut library = OpLibrary::default();
             atd_ops_img::library(&mut library);
+            atd_ops_sig::library(&mut library);
             Engine::new(
                 rs.device.clone(),
                 rs.queue.clone(),
@@ -106,6 +108,7 @@ impl AtidarlaApp {
                 viewed,
                 viewer_tex: None,
                 canvas_rect: egui::Rect::NOTHING,
+                history: Default::default(),
             },
             smoke: smoke.map(Smoke::new),
             start: Instant::now(),
@@ -114,7 +117,8 @@ impl AtidarlaApp {
 }
 
 /// A small starting network so a new user sees the engine working:
-/// Noise → Kaleidoscope → Level. Returns the node to view.
+/// Noise → Kaleidoscope → Level, animated by two LFOs bound to Noise `z`
+/// and Kaleidoscope `rotation`. Returns the node to view.
 fn demo_patch(engine: &mut Engine) -> Option<NodeId> {
     let node = |engine: &mut Engine, ty: &str, name: &str, x: f32| {
         let id = engine.alloc_id();
@@ -125,6 +129,10 @@ fn demo_patch(engine: &mut Engine) -> Option<NodeId> {
     let (noise, n1) = node(engine, "img.noise", "noise1", 40.0);
     let (kal, n2) = node(engine, "img.kaleidoscope", "kaleidoscope1", 240.0);
     let (lvl, n3) = node(engine, "img.level", "level1", 440.0);
+    let (drift, mut n4) = node(engine, "sig.lfo", "drift", 40.0);
+    let (spin, mut n5) = node(engine, "sig.lfo", "spin", 240.0);
+    n4.pos[1] = 260.0;
+    n5.pos[1] = 260.0;
     let wire = |a: NodeId, b: NodeId| Edit::Connect {
         wire: Wire::new(Endpoint::new(a, "out"), Endpoint::new(b, "in")),
     };
@@ -137,12 +145,30 @@ fn demo_patch(engine: &mut Engine) -> Option<NodeId> {
         Edit::AddNode { node: n1 },
         Edit::AddNode { node: n2 },
         Edit::AddNode { node: n3 },
+        Edit::AddNode { node: n4 },
+        Edit::AddNode { node: n5 },
         wire(noise, kal),
         wire(kal, lvl),
         set(noise, "scale", json!(3.0)),
         set(noise, "monochrome", json!(false)),
         set(kal, "segments", json!(8)),
         set(lvl, "contrast", json!(1.3)),
+        // drift: a slow ramp moving through the noise; spin: a gentle sway.
+        set(drift, "waveform", json!("ramp")),
+        set(drift, "frequency", json!(0.02)),
+        set(drift, "amplitude", json!(5.0)),
+        set(spin, "frequency", json!(0.05)),
+        set(spin, "amplitude", json!(45.0)),
+        Edit::SetParam {
+            node: noise,
+            param: "z".into(),
+            value: Some(Param::bound(json!(0.0), drift, "lfo")),
+        },
+        Edit::SetParam {
+            node: kal,
+            param: "rotation".into(),
+            value: Some(Param::bound(json!(0.0), spin, "lfo")),
+        },
     ];
     match engine.edit("demo patch", edits) {
         Ok(()) => Some(lvl),
@@ -262,6 +288,16 @@ impl AtidarlaApp {
                 0
             }
         };
+        if cooked > 0 {
+            // Something changed or is animating: keep frames coming.
+            ctx.request_repaint();
+        }
+        if let Some(ch) = engine.channels(viewed) {
+            if cooked > 0 || p.history.is_empty() {
+                p.history.push(viewed, ch);
+            }
+            return;
+        }
         let (Some(rs), Some(tex)) = (frame.wgpu_render_state(), engine.result(viewed)) else {
             return;
         };
@@ -283,8 +319,6 @@ impl AtidarlaApp {
                     ))
                 }
             }
-            // Show the new result on the next frame.
-            ctx.request_repaint();
         }
     }
 }
@@ -350,6 +384,23 @@ impl TabViewer for Panels {
 
 impl Panels {
     fn viewer_ui(&mut self, ui: &mut Ui) {
+        if let (Some(engine), Some(viewed)) = (&self.engine, self.viewed)
+            && let Some(ch) = engine.channels(viewed)
+        {
+            let name = engine
+                .network()
+                .node(viewed)
+                .map_or("?", |n| n.name.as_str());
+            ui.horizontal(|ui| {
+                ui.strong(name);
+                ui.weak(match ch.len() {
+                    1 => "1 channel".to_owned(),
+                    n => format!("{n} channels"),
+                });
+            });
+            self.history.ui(ui, ch);
+            return;
+        }
         let (Some(engine), Some(viewed), Some(tex)) = (&self.engine, self.viewed, self.viewer_tex)
         else {
             placeholder(ui, "Select a node to view its output.");

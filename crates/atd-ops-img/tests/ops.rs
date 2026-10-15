@@ -20,8 +20,10 @@ fn engine() -> Option<Engine> {
         pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()?;
     let mut reg = Registry::default();
     atd_ops_img::register(&mut reg);
+    atd_ops_sig::register(&mut reg);
     let mut lib = OpLibrary::default();
     atd_ops_img::library(&mut lib);
+    atd_ops_sig::library(&mut lib);
     let config = EngineConfig {
         width: W,
         height: H,
@@ -49,10 +51,15 @@ macro_rules! engine_or_skip {
 }
 
 fn add(e: &mut Engine, ty: &str, params: &[(&str, Value)]) -> NodeId {
+    let full = if ty.contains('.') {
+        ty.to_owned()
+    } else {
+        format!("img.{ty}")
+    };
     let id = e.alloc_id();
-    let name = e.network().unique_name(ty);
+    let name = e.network().unique_name(full.split('.').nth(1).unwrap());
     let mut edits = vec![Edit::AddNode {
-        node: Node::new(id, format!("img.{ty}"), name),
+        node: Node::new(id, full.clone(), name),
     }];
     for (p, v) in params {
         edits.push(Edit::SetParam {
@@ -62,7 +69,7 @@ fn add(e: &mut Engine, ty: &str, params: &[(&str, Value)]) -> NodeId {
         });
     }
     e.edit("add", edits)
-        .unwrap_or_else(|err| panic!("img.{ty}: {err}"));
+        .unwrap_or_else(|err| panic!("{full}: {err}"));
     id
 }
 
@@ -366,4 +373,61 @@ fn blur_softens_edges_and_keeps_flat_areas() {
     assert!(edge > 40 && edge < 215, "edge is softened: {edge}");
     assert_px(&img, 0, 8, [0, 0, 0, 255], 3);
     assert_px(&img, W - 1, 8, [255, 255, 255, 255], 3);
+}
+
+#[test]
+fn sig_channels_drive_img_parameters() {
+    let mut e = engine_or_skip!();
+    let white = add(
+        &mut e,
+        "constant",
+        &[("colour", json!([1.0, 1.0, 1.0, 1.0]))],
+    );
+    let level = add(&mut e, "level", &[]);
+    wire(&mut e, white, level, "in");
+    let k = add(&mut e, "sig.constant", &[("value1", json!(0.5))]);
+    e.edit(
+        "bind",
+        [Edit::SetParam {
+            node: level,
+            param: "brightness".into(),
+            value: Some(Param::bound(json!(1.0), k, "chan1")),
+        }],
+    )
+    .unwrap();
+    assert_px(&cook(&mut e, level), 1, 1, [128, 128, 128, 255], 2);
+    // Changing the channel source re-cooks the bound IMG node.
+    set(&mut e, k, "value1", json!(0.25));
+    assert_px(&cook(&mut e, level), 1, 1, [64, 64, 64, 255], 2);
+
+    // A time-dependent LFO animates it: square wave between 0 and 1.
+    let lfo = add(
+        &mut e,
+        "sig.lfo",
+        &[
+            ("waveform", json!("square")),
+            ("amplitude", json!(0.5)),
+            ("offset", json!(0.5)),
+        ],
+    );
+    e.edit(
+        "bind",
+        [Edit::SetParam {
+            node: level,
+            param: "brightness".into(),
+            value: Some(Param::bound(json!(1.0), lfo, "lfo")),
+        }],
+    )
+    .unwrap();
+    let at = |e: &mut Engine, t: f64| {
+        e.cook(&[level], t).unwrap();
+        Image(read_rgba8(e.device(), e.queue(), e.result(level).unwrap()).unwrap()).px(1, 1)
+    };
+    assert!(close(at(&mut e, 0.1), [255, 255, 255, 255], 1));
+    assert!(close(at(&mut e, 0.6), [0, 0, 0, 255], 1));
+    assert!(close(at(&mut e, 1.2), [255, 255, 255, 255], 1));
+    assert!(
+        e.channels(lfo).is_some(),
+        "the engine exposes channel results"
+    );
 }

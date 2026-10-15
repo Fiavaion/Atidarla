@@ -38,12 +38,42 @@ pub struct Param {
     /// Expression source (Python, M1); `value` holds its last result.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expr: Option<String>,
+    /// Channel export (FR-P2): the parameter follows a SIG channel; `value`
+    /// is the fallback when the channel is unavailable. Resolved natively,
+    /// never through Python, so it is safe on the cook path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bind: Option<ChannelRef>,
 }
 
 impl Param {
     pub fn constant(value: Value) -> Self {
-        Self { value, expr: None }
+        Self {
+            value,
+            expr: None,
+            bind: None,
+        }
     }
+
+    /// A parameter driven by `channel` of SIG node `node`, falling back to `value`.
+    pub fn bound(value: Value, node: NodeId, channel: impl Into<String>) -> Self {
+        Self {
+            value,
+            expr: None,
+            bind: Some(ChannelRef {
+                node,
+                channel: channel.into(),
+            }),
+        }
+    }
+}
+
+/// A reference to one channel of a SIG node's output.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct ChannelRef {
+    pub node: NodeId,
+    /// Channel name; empty means the first channel.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub channel: String,
 }
 
 /// One operator instance.
@@ -132,6 +162,8 @@ pub enum GraphError {
     Cycle(String),
     #[error("wire {0} does not exist")]
     NoWire(String),
+    #[error("invalid channel binding: {0}")]
+    InvalidBinding(String),
 }
 
 /// A single, invertible change to a network.
@@ -318,13 +350,32 @@ impl Network {
             .map(|(to, from)| (to.socket.as_str(), from))
     }
 
-    /// Nodes fed by any output of `node`, in ID order, without duplicates.
+    /// Channel bindings on `node`'s parameters. Does not allocate.
+    pub fn bindings_of(&self, node: NodeId) -> impl Iterator<Item = &ChannelRef> {
+        self.nodes
+            .get(&node)
+            .into_iter()
+            .flat_map(|n| n.params.values().filter_map(|p| p.bind.as_ref()))
+    }
+
+    /// Nodes that depend on `node` through a wire or a channel binding, in ID
+    /// order, without duplicates.
     pub fn downstream_of(&self, node: NodeId) -> BTreeSet<NodeId> {
-        self.inputs
+        let wired = self
+            .inputs
             .iter()
             .filter(|(_, from)| from.node == node)
-            .map(|(to, _)| to.node)
-            .collect()
+            .map(|(to, _)| to.node);
+        let bound = self
+            .nodes
+            .values()
+            .filter(|n| {
+                n.params
+                    .values()
+                    .any(|p| p.bind.as_ref().is_some_and(|b| b.node == node))
+            })
+            .map(|n| n.id);
+        wired.chain(bound).collect()
     }
 
     /// The parameter value of a node, falling back to the schema default.
@@ -376,8 +427,8 @@ impl Network {
             })
     }
 
-    /// True if `to` is reachable from `from` following wires forward,
-    /// ignoring wires into feedback inputs.
+    /// True if `to` is reachable from `from` following wires and channel
+    /// bindings forward, ignoring wires into feedback inputs.
     fn reaches(&self, registry: &Registry, from: NodeId, to: NodeId) -> bool {
         let mut stack = vec![from];
         let mut seen = BTreeSet::new();
@@ -401,8 +452,47 @@ impl Network {
                     stack.push(input.node);
                 }
             }
+            for other in self.nodes.values() {
+                if other
+                    .params
+                    .values()
+                    .any(|p| p.bind.as_ref().is_some_and(|b| b.node == n))
+                {
+                    stack.push(other.id);
+                }
+            }
         }
         false
+    }
+
+    fn validate_binding(
+        &self,
+        registry: &Registry,
+        node: NodeId,
+        param: &crate::registry::ParamSchema,
+        bind: &ChannelRef,
+    ) -> Result<(), GraphError> {
+        use crate::registry::ParamKind;
+        if !matches!(
+            param.kind,
+            ParamKind::Float { .. } | ParamKind::Int { .. } | ParamKind::Toggle
+        ) {
+            return Err(GraphError::InvalidBinding(format!(
+                "parameter `{}` is not numeric and cannot follow a channel",
+                param.name
+            )));
+        }
+        let source = self.schema(registry, bind.node)?;
+        if !source.outputs.iter().any(|o| o.wire == WireType::Sig) {
+            return Err(GraphError::InvalidBinding(format!(
+                "{} (`{}`) has no SIG output",
+                bind.node, source.type_id
+            )));
+        }
+        if bind.node == node || self.reaches(registry, node, bind.node) {
+            return Err(GraphError::Cycle(format!("binding {} → {node}", bind.node)));
+        }
+        Ok(())
     }
 
     fn validate_node(&self, registry: &Registry, node: &Node) -> Result<(), GraphError> {
@@ -573,9 +663,13 @@ impl Network {
                     })?;
                 if let Some(v) = &value {
                     ps.validate(&v.value).map_err(GraphError::InvalidValue)?;
+                    if let Some(bind) = &v.bind {
+                        self.validate_binding(registry, node, ps, bind)?;
+                    }
                 }
                 // A constant equal to the default is stored as "no override".
-                let value = value.filter(|v| v.expr.is_some() || v.value != ps.default);
+                let value =
+                    value.filter(|v| v.expr.is_some() || v.bind.is_some() || v.value != ps.default);
                 let n = self
                     .nodes
                     .get_mut(&node)
@@ -965,6 +1059,64 @@ pub(crate) mod tests {
                 .collect::<Vec<_>>(),
             [("a".into(), g)]
         );
+    }
+
+    #[test]
+    fn bindings_validate_and_count_as_dependencies() {
+        let reg = test_registry();
+        let mut net = Network::default();
+        let lfo = add(&mut net, &reg, "sig.lfo");
+        let g = add(&mut net, &reg, "img.gen");
+        let mix = add(&mut net, &reg, "img.mix");
+        connect(&mut net, &reg, g, mix, "a");
+        let bind = |src: NodeId| Param::bound(json!(1.0), src, "");
+
+        net.apply(
+            &reg,
+            Edit::SetParam {
+                node: g,
+                param: "gain".into(),
+                value: Some(bind(lfo)),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            net.bindings_of(g).map(|b| b.node).collect::<Vec<_>>(),
+            [lfo]
+        );
+        assert!(
+            net.downstream_of(lfo).contains(&g),
+            "bound nodes are downstream"
+        );
+
+        // Binding to a node without a SIG output is rejected.
+        let err = net
+            .apply(
+                &reg,
+                Edit::SetParam {
+                    node: mix,
+                    param: "gain".into(),
+                    value: Some(bind(g)),
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(err, GraphError::InvalidBinding(_)), "{err:?}");
+
+        // A binding may not close a loop: lfo's own parameter cannot follow lfo.
+        let err = net
+            .apply(
+                &reg,
+                Edit::SetParam {
+                    node: lfo,
+                    param: "gain".into(),
+                    value: Some(bind(lfo)),
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(err, GraphError::Cycle(_)));
+
+        // A bound parameter is kept even when its fallback equals the default.
+        assert!(net.node(g).unwrap().params.contains_key("gain"));
     }
 
     #[test]

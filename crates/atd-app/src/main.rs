@@ -2,6 +2,7 @@
 
 mod app;
 mod canvas;
+mod channels;
 mod dock;
 mod params;
 mod patch;

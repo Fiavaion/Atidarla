@@ -314,6 +314,7 @@ dependencies = [
  "atd-core",
  "atd-gpu",
  "atd-interop",
+ "atd-ops-sig",
  "pollster 0.4.0",
  "serde_json",
  "wgpu",
@@ -345,6 +346,8 @@ name = "atd-ops-sig"
 version = "0.0.1"
 dependencies = [
  "atd-core",
+ "atd-gpu",
+ "serde_json",
 ]
 
 [[package]]

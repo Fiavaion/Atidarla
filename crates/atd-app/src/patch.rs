@@ -212,6 +212,21 @@ impl PatchEditor {
             draw_wire(&painter, a, b, colour, zoom, feedback);
         }
 
+        // Channel bindings: dashed lines from the SIG source to the bound
+        // node's header (exports, FR-P2).
+        for node in net.nodes() {
+            for b in net.bindings_of(node.id) {
+                let Some(src) = net.node(b.node) else {
+                    continue;
+                };
+                let a = to_screen(output_pos(node_pos(src.id).unwrap_or_default(), 0));
+                let t =
+                    to_screen(node_pos(node.id).unwrap_or_default() + Vec2::new(0.0, HEADER * 0.5));
+                let c = wire_colour(WireType::Sig).gamma_multiply(0.7);
+                draw_wire(&painter, a, t, c, zoom, true);
+            }
+        }
+
         // Nodes and sockets.
         let mut input_targets: Vec<(Pos2, NodeId, String, WireType)> = Vec::new();
         for node in net.nodes() {
