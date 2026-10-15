@@ -6,6 +6,7 @@ use egui::{RichText, Ui};
 
 use crate::canvas::NodeCanvas;
 use crate::dock::{DockState, TabViewer};
+use crate::smoke::{Smoke, SmokeArgs};
 
 /// Flags shown in the Platform panel so the capability mechanism is visible
 /// before any flagged operator exists (PRD A7, A19).
@@ -33,6 +34,7 @@ pub enum Tab {
 pub struct AtidarlaApp {
     dock: DockState<Tab>,
     panels: Panels,
+    smoke: Option<Smoke>,
 }
 
 /// Everything the tabs render, split from the dock so both can be borrowed.
@@ -44,7 +46,7 @@ struct Panels {
 }
 
 impl AtidarlaApp {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, smoke: Option<SmokeArgs>) -> Self {
         let info = cc
             .wgpu_render_state
             .as_ref()
@@ -54,6 +56,12 @@ impl AtidarlaApp {
             .map_or_else(PlatformInfo::host, atd_gpu::platform_info);
         let adapter = info.as_ref().map(atd_gpu::AdapterReport::from_info);
         log::info!("platform: {platform:?}");
+        if smoke.is_some() {
+            println!(
+                "{}",
+                serde_json::json!({ "platform": platform, "adapter": adapter })
+            );
+        }
 
         let dock = DockState::new(
             vec![Tab::Operators, Tab::Platform],
@@ -69,6 +77,7 @@ impl AtidarlaApp {
                 registry: builtin_registry(),
                 canvas: NodeCanvas::default(),
             },
+            smoke: smoke.map(Smoke::new),
         }
     }
 }
@@ -103,6 +112,9 @@ impl eframe::App for AtidarlaApp {
             });
         });
         self.dock.show(ui, &mut self.panels);
+        if let Some(smoke) = &mut self.smoke {
+            smoke.tick(ui.ctx());
+        }
     }
 }
 

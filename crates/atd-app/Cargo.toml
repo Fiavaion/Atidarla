@@ -29,6 +29,8 @@ eframe = { workspace = true, features = ["wgpu", "default_fonts", "x11", "waylan
 wgpu.workspace = true
 env_logger.workspace = true
 log.workspace = true
+serde_json.workspace = true
+png = "0.18"
 
 [lints]
 workspace = true

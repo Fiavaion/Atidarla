@@ -210,6 +210,8 @@ dependencies = [
  "egui",
  "env_logger",
  "log",
+ "png",
+ "serde_json",
  "wgpu",
 ]
 
