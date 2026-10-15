@@ -9,7 +9,7 @@ use atd_gpu::engine::Params;
 
 use crate::{Def, Packed};
 
-fn img(
+pub(crate) fn img(
     id: &str,
     label: &str,
     summary: &str,

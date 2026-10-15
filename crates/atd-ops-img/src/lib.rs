@@ -9,12 +9,21 @@
 //! format (PRD A11) is ratified.
 
 mod ops;
+mod ops2;
+mod stateful;
 
 use atd_core::registry::Registry;
 use atd_gpu::engine::{CookCtx, GpuOp, OpLibrary};
 use atd_gpu::fullscreen::{FullscreenPass, MAX_PARAM_VEC4};
 
 pub use ops::DEFS;
+pub use ops2::DEFS2;
+pub use stateful::STATEFUL;
+
+/// Every declarative (single-pass) operator definition.
+pub fn defs() -> impl Iterator<Item = &'static Def> {
+    DEFS.iter().chain(DEFS2)
+}
 
 /// Parameter data for one cook: up to [`MAX_PARAM_VEC4`] `vec4f` slots.
 #[derive(Debug, Clone, Copy, Default)]
@@ -71,16 +80,22 @@ impl GpuOp for ShaderOp {
 
 /// Registers this family's operator schemas.
 pub fn register(registry: &mut Registry) {
-    for def in DEFS {
+    let schemas = defs()
+        .map(|d| (d.schema)())
+        .chain(STATEFUL.iter().map(|s| (s.0)()));
+    for schema in schemas {
         registry
-            .register((def.schema)())
+            .register(schema)
             .expect("IMG operator schemas are valid and unique");
     }
 }
 
 /// Registers this family's GPU implementations.
 pub fn library(library: &mut OpLibrary) {
-    for def in DEFS {
+    for (schema, factory) in STATEFUL {
+        library.add(schema().type_id, factory);
+    }
+    for def in defs() {
         let schema = (def.schema)();
         let inputs = schema.inputs.len();
         let label = schema.type_id.clone();
@@ -102,7 +117,7 @@ mod tests {
     fn schemas_register_with_budgets_and_help() {
         let mut registry = Registry::default();
         register(&mut registry);
-        assert_eq!(registry.len(), DEFS.len());
+        assert_eq!(registry.len(), DEFS.len() + DEFS2.len() + STATEFUL.len());
         for op in registry.iter() {
             assert!(op.cook_budget_us > 0, "{} has a cook budget", op.type_id);
             assert!(!op.summary.is_empty(), "{} has a summary", op.type_id);
@@ -128,8 +143,11 @@ mod tests {
     fn every_schema_has_an_implementation() {
         let mut lib = OpLibrary::default();
         library(&mut lib);
-        for def in DEFS {
+        for def in defs() {
             assert!(lib.contains(&(def.schema)().type_id));
+        }
+        for (schema, _) in STATEFUL {
+            assert!(lib.contains(&schema().type_id));
         }
     }
 }

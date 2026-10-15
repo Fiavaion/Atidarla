@@ -510,3 +510,300 @@ fn audio_drives_img_through_spectrum() {
     );
     std::fs::remove_file(&path).ok();
 }
+
+#[test]
+fn shape_draws_circle_rectangle_polygon() {
+    let mut e = engine_or_skip!();
+    let s = add(
+        &mut e,
+        "shape",
+        &[("size", json!([0.5, 0.5])), ("softness", json!(0.0))],
+    );
+    let img = cook(&mut e, s);
+    assert_px(&img, W / 2, H / 2, [255, 255, 255, 255], 0);
+    assert_px(&img, 0, 0, [0, 0, 0, 0], 0);
+    set(&mut e, s, "shape", json!("rectangle"));
+    let img = cook(&mut e, s);
+    assert_px(&img, W / 2, H / 2, [255, 255, 255, 255], 0);
+    assert_px(&img, 0, H / 2, [0, 0, 0, 0], 0);
+    set(&mut e, s, "shape", json!("polygon"));
+    assert_px(&cook(&mut e, s), W / 2, H / 2, [255, 255, 255, 255], 0);
+}
+
+#[test]
+fn blend_channel_mix_lookup() {
+    let mut e = engine_or_skip!();
+    let red = add(
+        &mut e,
+        "constant",
+        &[("colour", json!([1.0, 0.0, 0.0, 1.0]))],
+    );
+    let blue = add(
+        &mut e,
+        "constant",
+        &[("colour", json!([0.0, 0.0, 1.0, 1.0]))],
+    );
+    let b = add(&mut e, "blend", &[]);
+    wire(&mut e, red, b, "a");
+    wire(&mut e, blue, b, "b");
+    assert_px(&cook(&mut e, b), 1, 1, [128, 0, 128, 255], 2);
+
+    let c = add(
+        &mut e,
+        "constant",
+        &[("colour", json!([1.0, 0.5, 0.25, 1.0]))],
+    );
+    let m = add(
+        &mut e,
+        "channel_mix",
+        &[
+            ("red", json!([0.0, 1.0, 0.0, 0.0])),
+            ("blue", json!([1.0, 0.0, 0.0, 0.0])),
+        ],
+    );
+    wire(&mut e, c, m, "in");
+    assert_px(&cook(&mut e, m), 1, 1, [128, 128, 255, 255], 2);
+
+    let grey = add(
+        &mut e,
+        "constant",
+        &[("colour", json!([0.25, 0.25, 0.25, 1.0]))],
+    );
+    let lut = add(&mut e, "ramp", &[("colour_b", json!([1.0, 0.0, 0.0, 1.0]))]);
+    let l = add(&mut e, "lookup", &[]);
+    wire(&mut e, grey, l, "in");
+    wire(&mut e, lut, l, "lut");
+    assert_px(&cook(&mut e, l), 1, 1, [64, 0, 0, 255], 6);
+}
+
+#[test]
+fn remap_and_displace() {
+    let mut e = engine_or_skip!();
+    let ramp = add(&mut e, "ramp", &[]);
+    let map = add(
+        &mut e,
+        "constant",
+        &[("colour", json!([0.75, 0.5, 0.0, 1.0]))],
+    );
+    let r = add(&mut e, "remap", &[]);
+    wire(&mut e, ramp, r, "in");
+    wire(&mut e, map, r, "map");
+    let img = cook(&mut e, r);
+    assert_px(&img, 0, 0, img.px(W - 1, H - 1), 0);
+    assert!(
+        close(img.px(3, 3), [191, 191, 191, 255], 8),
+        "{:?}",
+        img.px(3, 3)
+    );
+
+    let base = cook(&mut e, ramp);
+    let by = add(
+        &mut e,
+        "constant",
+        &[("colour", json!([0.75, 0.5, 0.0, 1.0]))],
+    );
+    let d = add(&mut e, "displace", &[("amount", json!(0.4))]);
+    wire(&mut e, ramp, d, "in");
+    wire(&mut e, by, d, "by");
+    let img = cook(&mut e, d);
+    let shift = img.px(10, 5)[0] as i32 - base.px(10, 5)[0] as i32;
+    assert!(
+        (shift - 26).abs() <= 3,
+        "displaced by 0.1 of the width: {shift}"
+    );
+}
+
+#[test]
+fn keys() {
+    let mut e = engine_or_skip!();
+    let green = add(
+        &mut e,
+        "constant",
+        &[("colour", json!([0.0, 1.0, 0.0, 1.0]))],
+    );
+    let ck = add(&mut e, "chroma_key", &[]);
+    wire(&mut e, green, ck, "in");
+    assert_eq!(cook(&mut e, ck).px(1, 1)[3], 0, "green is keyed");
+    set(&mut e, green, "colour", json!([1.0, 0.0, 0.0, 1.0]));
+    assert_eq!(cook(&mut e, ck).px(1, 1)[3], 255, "red is kept");
+
+    let grey = add(
+        &mut e,
+        "constant",
+        &[("colour", json!([0.25, 0.25, 0.25, 1.0]))],
+    );
+    let lk = add(&mut e, "luma_key", &[]);
+    wire(&mut e, grey, lk, "in");
+    assert_eq!(cook(&mut e, lk).px(1, 1)[3], 255, "inside the range");
+    set(&mut e, lk, "low", json!(0.5));
+    set(&mut e, lk, "high", json!(1.0));
+    assert_eq!(cook(&mut e, lk).px(1, 1)[3], 0, "outside the range");
+}
+
+#[test]
+fn edge_normal_slope() {
+    let mut e = engine_or_skip!();
+    let ramp = add(&mut e, "ramp", &[]);
+    let t = add(&mut e, "threshold", &[]);
+    wire(&mut e, ramp, t, "in");
+    let edge = add(&mut e, "edge", &[]);
+    wire(&mut e, t, edge, "in");
+    let img = cook(&mut e, edge);
+    assert!(
+        img.px(W / 2, 8)[0] > 200 || img.px(W / 2 - 1, 8)[0] > 200,
+        "edge at the step"
+    );
+    assert_px(&img, 2, 8, [0, 0, 0, 255], 0);
+
+    let flat = add(
+        &mut e,
+        "constant",
+        &[("colour", json!([0.5, 0.5, 0.5, 1.0]))],
+    );
+    let n = add(&mut e, "normal_map", &[]);
+    wire(&mut e, flat, n, "in");
+    assert_px(&cook(&mut e, n), 4, 4, [128, 128, 255, 255], 1);
+    let s = add(&mut e, "slope", &[]);
+    wire(&mut e, flat, s, "in");
+    assert_px(&cook(&mut e, s), 4, 4, [128, 128, 128, 255], 1);
+    wire(&mut e, ramp, s, "in");
+    assert!(
+        cook(&mut e, s).px(10, 8)[0] > 128,
+        "a rising ramp has positive x slope"
+    );
+}
+
+#[test]
+fn bloom_glows_beyond_bright_areas() {
+    let mut e = engine_or_skip!();
+    let dot = add(
+        &mut e,
+        "shape",
+        &[
+            ("size", json!([0.2, 0.2])),
+            ("background", json!([0.0, 0.0, 0.0, 1.0])),
+            ("softness", json!(0.0)),
+        ],
+    );
+    let b = add(
+        &mut e,
+        "bloom",
+        &[
+            ("threshold", json!(0.5)),
+            ("size", json!(6.0)),
+            ("intensity", json!(4.0)),
+        ],
+    );
+    wire(&mut e, dot, b, "in");
+    let without = cook(&mut e, dot);
+    let with = cook(&mut e, b);
+    let x = W / 2 + 3;
+    assert_eq!(without.px(x, H / 2)[0], 0, "outside the dot is black");
+    assert!(
+        with.px(x, H / 2)[0] > 10,
+        "bloom spills outside: {:?}",
+        with.px(x, H / 2)
+    );
+}
+
+#[test]
+fn crop_and_switch() {
+    let mut e = engine_or_skip!();
+    let ramp = add(&mut e, "ramp", &[]);
+    let c = add(
+        &mut e,
+        "crop",
+        &[("min", json!([0.5, 0.0])), ("max", json!([1.0, 1.0]))],
+    );
+    wire(&mut e, ramp, c, "in");
+    let img = cook(&mut e, c);
+    assert!(
+        img.px(0, 8)[0].abs_diff(128) <= 6,
+        "left edge now starts mid-ramp: {:?}",
+        img.px(0, 8)
+    );
+
+    let colours = [
+        [1.0, 0.0, 0.0, 1.0],
+        [0.0, 1.0, 0.0, 1.0],
+        [0.0, 0.0, 1.0, 1.0],
+        [1.0, 1.0, 1.0, 1.0],
+    ];
+    let sw = add(&mut e, "switch", &[("index", json!(2.0))]);
+    for (i, col) in colours.iter().enumerate() {
+        let k = add(&mut e, "constant", &[("colour", json!(col))]);
+        wire(&mut e, k, sw, &format!("in{i}"));
+    }
+    assert_px(&cook(&mut e, sw), 1, 1, [0, 0, 255, 255], 0);
+    set(&mut e, sw, "index", json!(0.5));
+    set(&mut e, sw, "blend", json!(true));
+    assert_px(&cook(&mut e, sw), 1, 1, [128, 128, 0, 255], 2);
+}
+
+#[test]
+fn cache_delays_frames() {
+    let mut e = engine_or_skip!();
+    let k = add(&mut e, "constant", &[]);
+    let c = add(&mut e, "cache", &[("delay", json!(2))]);
+    wire(&mut e, k, c, "in");
+    let seq = [[255u8, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 255]];
+    let mut seen = Vec::new();
+    for (t, col) in seq.iter().enumerate() {
+        let f = col.map(|v| f64::from(v) / 255.0);
+        set(&mut e, k, "colour", json!([f[0], f[1], f[2], 1.0]));
+        e.cook(&[c], t as f64).unwrap();
+        let px = Image(read_rgba8(e.device(), e.queue(), e.result(c).unwrap()).unwrap()).px(1, 1);
+        seen.push([px[0], px[1], px[2]]);
+    }
+    // Until two frames of history exist, the oldest frame is shown.
+    assert_eq!(seen, [seq[0], seq[0], seq[0], seq[1]]);
+}
+
+#[test]
+fn ripple_spreads_waves_and_resets() {
+    let mut e = engine_or_skip!();
+    let drop = add(
+        &mut e,
+        "shape",
+        &[("size", json!([0.15, 0.15])), ("softness", json!(0.0))],
+    );
+    let r = add(&mut e, "ripple", &[]);
+    wire(&mut e, drop, r, "drive");
+    let mut img = Image(Vec::new());
+    for t in 0..6 {
+        e.cook(&[r], t as f64).unwrap();
+        img = Image(read_rgba8(e.device(), e.queue(), e.result(r).unwrap()).unwrap());
+    }
+    let lums: Vec<u8> = img.0.chunks(4).map(|p| p[0]).collect();
+    assert!(
+        lums.iter().max().unwrap() - lums.iter().min().unwrap() > 20,
+        "waves vary the surface"
+    );
+    set(&mut e, r, "reset", json!(true));
+    e.cook(&[r], 7.0).unwrap();
+    // With the drive still on, only the drive area moves right after a reset.
+    let img = Image(read_rgba8(e.device(), e.queue(), e.result(r).unwrap()).unwrap());
+    assert_px(&img, 0, 0, [128, 128, 128, 255], 1);
+}
+
+#[test]
+fn reaction_diffusion_grows_from_the_seed() {
+    let mut e = engine_or_skip!();
+    let rd = add(&mut e, "reaction_diffusion", &[("steps", json!(32))]);
+    let first = cook(&mut e, rd);
+    assert!(
+        first.px(W / 2, H / 2)[0] > 200,
+        "the centre seed shows colour B"
+    );
+    assert_px(&first, 0, 0, [0, 0, 0, 255], 1);
+    let mut img = first;
+    for t in 1..20 {
+        e.cook(&[rd], t as f64).unwrap();
+        img = Image(read_rgba8(e.device(), e.queue(), e.result(rd).unwrap()).unwrap());
+    }
+    let lit = img.0.chunks(4).filter(|p| p[0] > 60).count();
+    assert!(
+        lit > 4,
+        "pattern present after 20 frames ({lit} lit pixels)"
+    );
+}
