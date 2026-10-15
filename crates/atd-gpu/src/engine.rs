@@ -850,6 +850,26 @@ impl Engine {
         Ok(plan.len())
     }
 
+    /// Replaces the network (e.g. a loaded project) after validating it
+    /// against the registry. Undo history, operator instances and cached
+    /// results start afresh; on error the current network is kept.
+    pub fn load(&mut self, net: Network) -> Result<(), EngineError> {
+        let net = net.validated(&self.registry)?;
+        self.net = net;
+        self.history = History::default();
+        self.scheduler = Scheduler::default();
+        self.gpu_ops.clear();
+        self.sig_ops.clear();
+        self.sig.clear();
+        self.errors.clear();
+        self.again.clear();
+        self.last_time = None;
+        // Textures may still be read by a submitted frame: release them
+        // with the next frame's.
+        self.released.extend(self.results.drain().map(|(_, t)| t));
+        Ok(())
+    }
+
     /// True when an operator's last result was provisional (for example a
     /// shader still compiling) and it will cook again on the next frame.
     pub fn pending(&self) -> bool {

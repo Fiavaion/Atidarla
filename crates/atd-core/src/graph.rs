@@ -346,6 +346,49 @@ impl TryFrom<NetworkRepr> for Network {
 }
 
 impl Network {
+    /// Checks a network that came from outside (a file, the clipboard, an
+    /// agent) against `registry`: every node, parameter, wire and binding
+    /// goes through the same validation as an edit. Returns the network
+    /// unchanged if it is valid.
+    pub fn validated(self, registry: &Registry) -> Result<Network, GraphError> {
+        let mut net = Network::default();
+        let mut bound = Vec::new();
+        for node in self.nodes.values() {
+            let mut node = node.clone();
+            for (name, param) in &mut node.params {
+                if param.bind.is_some() {
+                    bound.push((node.id, name.clone(), param.clone()));
+                    param.bind = None;
+                }
+            }
+            net.apply(registry, Edit::AddNode { node })?;
+        }
+        for wire in self.wires() {
+            net.apply(registry, Edit::Connect { wire })?;
+        }
+        for (node, param, value) in bound {
+            net.apply(
+                registry,
+                Edit::SetParam {
+                    node,
+                    param,
+                    value: Some(value),
+                },
+            )?;
+        }
+        for comment in self.comments.values() {
+            net.apply(
+                registry,
+                Edit::AddComment {
+                    comment: comment.clone(),
+                },
+            )?;
+        }
+        net.next_id = net.next_id.max(self.next_id);
+        debug_assert_eq!(net, self, "validation rebuilds the same network");
+        Ok(self)
+    }
+
     /// Reserves a fresh comment ID (from the node ID counter).
     pub fn alloc_comment_id(&mut self) -> CommentId {
         CommentId(self.alloc_id().0)
@@ -1322,6 +1365,49 @@ pub(crate) mod tests {
             serde_json::to_string(&net).unwrap(),
             old.replace("[0,0]", "[0.0,0.0]")
         );
+    }
+
+    #[test]
+    fn validation_accepts_valid_networks_and_rejects_schema_errors() {
+        let reg = test_registry();
+        let mut net = Network::default();
+        let g = add(&mut net, &reg, "img.gen");
+        let mix = add(&mut net, &reg, "img.mix");
+        connect(&mut net, &reg, g, mix, "a");
+        let note = net.alloc_comment_id();
+        net.apply(
+            &reg,
+            Edit::AddComment {
+                comment: Comment {
+                    id: note,
+                    text: "n".into(),
+                    pos: [0.0, 0.0],
+                    size: [10.0, 10.0],
+                },
+            },
+        )
+        .unwrap();
+        let text = serde_json::to_string(&net).unwrap();
+        let back: Network = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.validated(&reg).unwrap(), net);
+
+        // Structurally fine JSON that the registry rejects.
+        let unknown = text.replace("img.gen", "img.nope");
+        let parsed: Network = serde_json::from_str(&unknown).unwrap();
+        assert!(matches!(
+            parsed.validated(&reg),
+            Err(GraphError::UnknownType(_))
+        ));
+        let bad_param = text.replace(
+            r#""name":"mix1","pos":[0.0,0.0]"#,
+            r#""name":"mix1","pos":[0.0,0.0],"params":{"nope":{"value":1}}"#,
+        );
+        assert_ne!(bad_param, text);
+        let parsed: Network = serde_json::from_str(&bad_param).unwrap();
+        assert!(matches!(
+            parsed.validated(&reg),
+            Err(GraphError::NoParam { .. })
+        ));
     }
 
     #[test]
