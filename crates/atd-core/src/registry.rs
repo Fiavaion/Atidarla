@@ -122,9 +122,90 @@ pub struct ParamSchema {
     #[serde(flatten)]
     pub kind: ParamKind,
     pub default: Value,
+    /// One or two sentences for the docs page, tooltips and the assistant.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub help: String,
 }
 
 impl ParamSchema {
+    fn new(name: &str, label: &str, kind: ParamKind, default: Value) -> Self {
+        Self {
+            name: name.into(),
+            label: label.into(),
+            kind,
+            default,
+            help: String::new(),
+        }
+    }
+
+    /// A float with optional hard limits.
+    pub fn float(
+        name: &str,
+        label: &str,
+        default: f64,
+        min: Option<f64>,
+        max: Option<f64>,
+    ) -> Self {
+        Self::new(
+            name,
+            label,
+            ParamKind::Float { min, max },
+            Value::from(default),
+        )
+    }
+
+    pub fn int(name: &str, label: &str, default: i64, min: Option<i64>, max: Option<i64>) -> Self {
+        Self::new(
+            name,
+            label,
+            ParamKind::Int { min, max },
+            Value::from(default),
+        )
+    }
+
+    pub fn toggle(name: &str, label: &str, default: bool) -> Self {
+        Self::new(name, label, ParamKind::Toggle, Value::from(default))
+    }
+
+    pub fn pulse(name: &str, label: &str) -> Self {
+        Self::new(name, label, ParamKind::Pulse, Value::from(false))
+    }
+
+    pub fn string(name: &str, label: &str, default: &str) -> Self {
+        Self::new(name, label, ParamKind::String, Value::from(default))
+    }
+
+    pub fn menu(name: &str, label: &str, options: &[&str], default: &str) -> Self {
+        debug_assert!(options.contains(&default), "menu default must be an option");
+        let options = options.iter().map(|o| (*o).to_owned()).collect();
+        Self::new(
+            name,
+            label,
+            ParamKind::Menu { options },
+            Value::from(default),
+        )
+    }
+
+    pub fn colour(name: &str, label: &str, rgba: [f64; 4]) -> Self {
+        Self::new(name, label, ParamKind::Colour, Value::from(rgba.to_vec()))
+    }
+
+    pub fn vec(name: &str, label: &str, default: &[f64]) -> Self {
+        let n = u8::try_from(default.len()).expect("vector parameters have at most 255 components");
+        Self::new(
+            name,
+            label,
+            ParamKind::Vec { n },
+            Value::from(default.to_vec()),
+        )
+    }
+
+    /// Adds help text.
+    pub fn help(mut self, help: &str) -> Self {
+        self.help = help.into();
+        self
+    }
+
     /// Checks a value against this parameter's kind. `min`/`max` are hard
     /// limits (they are also the JSON Schema `minimum`/`maximum`).
     pub fn validate(&self, value: &Value) -> Result<(), String> {
@@ -192,6 +273,9 @@ impl ParamSchema {
             }),
         };
         schema["title"] = json!(self.label);
+        if !self.help.is_empty() {
+            schema["description"] = json!(self.help);
+        }
         schema["default"] = self.default.clone();
         schema
     }
@@ -377,6 +461,7 @@ mod tests {
                     label: "Prompt".into(),
                     kind: ParamKind::String,
                     default: json!(""),
+                    help: String::new(),
                 },
                 ParamSchema {
                     name: "strength".into(),
@@ -386,6 +471,7 @@ mod tests {
                         max: Some(1.0),
                     },
                     default: json!(0.5),
+                    help: String::new(),
                 },
             ],
             inputs: vec![SocketSchema {
@@ -498,6 +584,25 @@ mod tests {
     }
 
     #[test]
+    fn builders_produce_valid_defaults() {
+        let params = [
+            ParamSchema::float("a", "A", 0.5, Some(0.0), Some(1.0)),
+            ParamSchema::int("b", "B", 3, Some(1), None),
+            ParamSchema::toggle("c", "C", true),
+            ParamSchema::pulse("d", "D"),
+            ParamSchema::string("e", "E", "hi"),
+            ParamSchema::menu("f", "F", &["x", "y"], "y"),
+            ParamSchema::colour("g", "G", [1.0, 0.5, 0.0, 1.0]),
+            ParamSchema::vec("h", "H", &[0.0, 1.0]).help("A 2-vector."),
+        ];
+        for p in &params {
+            p.validate(&p.default)
+                .unwrap_or_else(|e| panic!("{}: {e}", p.name));
+        }
+        assert_eq!(params[7].json_schema()["description"], "A 2-vector.");
+    }
+
+    #[test]
     fn param_validation() {
         let op = diffusion_fixture();
         let strength = &op.params[1];
@@ -511,6 +616,7 @@ mod tests {
                 options: vec!["add".into(), "over".into()],
             },
             default: json!("over"),
+            help: String::new(),
         };
         assert!(menu.validate(&json!("add")).is_ok());
         assert!(menu.validate(&json!("mul")).is_err());
@@ -519,6 +625,7 @@ mod tests {
             label: "T".into(),
             kind: ParamKind::Vec { n: 3 },
             default: json!([0, 0, 0]),
+            help: String::new(),
         };
         assert!(v3.validate(&json!([1, 2.5, 3])).is_ok());
         assert!(v3.validate(&json!([1, 2])).is_err());
@@ -530,6 +637,7 @@ mod tests {
                 max: None,
             },
             default: json!(1),
+            help: String::new(),
         };
         assert!(i.validate(&json!(4)).is_ok());
         assert!(i.validate(&json!(0)).is_err());

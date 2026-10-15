@@ -1,0 +1,33 @@
+# Composite (`img.composite`)
+
+IMG · version 1 · cook budget 120 µs
+
+Combines input A with input B using a blend operation.
+
+## Inputs
+
+| Name | Type | Notes |
+|---|---|---|
+| `a` | Img | optional |
+| `b` | Img | optional |
+
+## Outputs
+
+| Name | Type | Notes |
+|---|---|---|
+| `out` | Img |  |
+
+## Parameters
+
+| Name | Label | Type | Default | Range / options | Description |
+|---|---|---|---|---|---|
+| `operation` | Operation | menu | `"over"` | `over`, `add`, `multiply`, `screen`, `subtract`, `difference`, `maximum`, `minimum`, `average` | How A combines with B. `over` places A on top of B using A's alpha. |
+| `opacity` | Opacity | float | `1.0` | 0 – 1 | Mix between B alone (0) and the full result (1). |
+
+## Platforms
+
+All platforms.
+
+## Example
+
+Pending: runnable example projects arrive with the project format (PRD A11, Proposed).

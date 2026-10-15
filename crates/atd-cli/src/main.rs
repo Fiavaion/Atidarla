@@ -1,6 +1,7 @@
 //! `atidarla` — headless entry points (PRD §7.10).
 
 mod bench;
+mod docs;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -35,6 +36,15 @@ enum Command {
     Serve { project: Option<PathBuf> },
     /// Print the operator registry as JSON (schemas + capability flags).
     Registry,
+    /// Generate operator reference pages from the registry.
+    Docs {
+        /// Output directory.
+        #[arg(long, default_value = "docs/operators")]
+        out: PathBuf,
+        /// Fail if the committed pages differ from the generated ones.
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -49,6 +59,7 @@ fn main() -> ExitCode {
             );
             Ok(())
         }
+        Command::Docs { out, check } => docs::run(&builtin_registry(), &out, check),
         Command::Render { .. } => return not_yet("render", "M2 (FR-H1)"),
         Command::Run { .. } => return not_yet("run", "M3 (FR-H2)"),
         Command::Bake { .. } => return not_yet("bake", "M2"),

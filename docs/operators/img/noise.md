@@ -1,0 +1,36 @@
+# Noise (`img.noise`)
+
+IMG · version 1 · cook budget 400 µs
+
+Fractal gradient noise. Animate `z` to move through it over time.
+
+## Inputs
+
+None.
+
+## Outputs
+
+| Name | Type | Notes |
+|---|---|---|
+| `out` | Img |  |
+
+## Parameters
+
+| Name | Label | Type | Default | Range / options | Description |
+|---|---|---|---|---|---|
+| `scale` | Scale | float | `4.0` | ≥ 0 | Noise features across the image width. |
+| `octaves` | Octaves | int | `3` | 1 – 8 | Layers of detail, each twice the frequency of the last. |
+| `roughness` | Roughness | float | `0.5` | 0 – 1 | Amplitude ratio between successive octaves. |
+| `seed` | Seed | int | `0` |  | Selects a different noise pattern. |
+| `z` | Z | float | `0.0` |  | Position along the third axis; drive it with time to animate. |
+| `amplitude` | Amplitude | float | `0.5` |  | Output = noise × amplitude + offset. |
+| `offset` | Offset | float | `0.5` |  | Added after amplitude. |
+| `monochrome` | Monochrome | toggle | `true` |  | One noise value in RGB; off gives three independent channels. |
+
+## Platforms
+
+All platforms.
+
+## Example
+
+Pending: runnable example projects arrive with the project format (PRD A11, Proposed).

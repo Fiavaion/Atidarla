@@ -654,6 +654,7 @@ pub(crate) mod tests {
                     max: Some(10.0),
                 },
                 default: json!(1.0),
+                help: String::new(),
             }],
             inputs,
             outputs,

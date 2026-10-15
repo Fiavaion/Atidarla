@@ -49,6 +49,8 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+      - name: Operator docs are current
+        run: cargo run -p atd-cli -- docs --check
       - name: Bench (start-up cases)
         run: cargo run -p atd-cli --release -- bench --out bench-${{ matrix.name }}.json
       - name: Show bench JSON
