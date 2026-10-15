@@ -1,8 +1,13 @@
 //! Atidarla GPU layer (PRD §5.2): wgpu device and queue, texture and buffer
 //! pools, per-frame render-graph compile, WGSL/WESL library.
 //!
-//! **Status (M0):** device bring-up, adapter reporting and GPU-vendor
-//! detection for capability flags. Pools and the render graph land in M1.
+//! **Status:** device bring-up, adapter reporting and GPU-vendor detection
+//! (M0); M1 pre-work: the texture pool ([`pool`]), full-screen passes
+//! ([`fullscreen`]) and the cooking [`engine`].
+
+pub mod engine;
+pub mod fullscreen;
+pub mod pool;
 
 use atd_core::{GpuVendor, PlatformInfo};
 use serde::Serialize;
