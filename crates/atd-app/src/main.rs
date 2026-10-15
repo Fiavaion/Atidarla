@@ -3,6 +3,8 @@
 mod app;
 mod canvas;
 mod dock;
+mod params;
+mod patch;
 mod smoke;
 
 use std::process::ExitCode;

@@ -324,7 +324,8 @@ impl Engine {
     }
 
     /// Cooks what `requested` needs at `time` (seconds) and submits it.
-    pub fn cook(&mut self, requested: &[NodeId], time: f64) -> Result<(), EngineError> {
+    /// Returns how many nodes cooked (0 when everything was cached).
+    pub fn cook(&mut self, requested: &[NodeId], time: f64) -> Result<usize, EngineError> {
         let Self {
             device,
             queue,
@@ -425,7 +426,7 @@ impl Engine {
             pool.release(t);
         }
         *frame += 1;
-        Ok(())
+        Ok(plan.len())
     }
 
     /// The latest result of `node`, if it has cooked successfully.
@@ -444,5 +445,27 @@ impl Engine {
 
     pub fn frame(&self) -> u64 {
         self.frame
+    }
+}
+
+impl Engine {
+    /// Applies `edits`, merging with the previous step while `key` repeats
+    /// and the history is not sealed (one undo step per gesture).
+    pub fn edit_coalesced(
+        &mut self,
+        label: &str,
+        key: &str,
+        edits: impl IntoIterator<Item = Edit>,
+    ) -> Result<(), EngineError> {
+        let committed =
+            self.history
+                .commit_coalesced(&mut self.net, &self.registry, label, key, edits)?;
+        self.after_change(committed.dirty);
+        Ok(())
+    }
+
+    /// Ends the current gesture (see [`Self::edit_coalesced`]).
+    pub fn seal_history(&mut self) {
+        self.history.seal();
     }
 }

@@ -16,6 +16,8 @@ struct Step {
     label: String,
     /// Edits that revert the step, in application order.
     edits: Vec<Edit>,
+    /// Steps with the same key merge while unsealed (a slider drag).
+    merge: Option<String>,
 }
 
 /// Outcome of a committed transaction, undo or redo.
@@ -91,11 +93,55 @@ impl History {
         label: impl Into<String>,
         edits: impl IntoIterator<Item = Edit>,
     ) -> Result<Committed, GraphError> {
+        self.push(net, registry, label.into(), None, edits)
+    }
+
+    /// Like [`Self::commit`], but merges into the previous step when that
+    /// step has the same `key` and has not been sealed, so a continuous
+    /// gesture (dragging a slider) is one undo step. The merged step keeps
+    /// the inverse captured before the gesture began.
+    pub fn commit_coalesced(
+        &mut self,
+        net: &mut Network,
+        registry: &Registry,
+        label: impl Into<String>,
+        key: impl Into<String>,
+        edits: impl IntoIterator<Item = Edit>,
+    ) -> Result<Committed, GraphError> {
+        let key = key.into();
+        let merging = self.redo.is_empty()
+            && self
+                .undo
+                .last()
+                .is_some_and(|s| s.merge.as_deref() == Some(key.as_str()));
+        if merging {
+            let (_, dirty) = transact(net, registry, edits)?;
+            return Ok(Committed { dirty });
+        }
+        self.push(net, registry, label.into(), Some(key), edits)
+    }
+
+    /// Ends any ongoing coalescing, so the next edit starts a new step.
+    pub fn seal(&mut self) {
+        if let Some(step) = self.undo.last_mut() {
+            step.merge = None;
+        }
+    }
+
+    fn push(
+        &mut self,
+        net: &mut Network,
+        registry: &Registry,
+        label: String,
+        merge: Option<String>,
+        edits: impl IntoIterator<Item = Edit>,
+    ) -> Result<Committed, GraphError> {
         let (inverse, dirty) = transact(net, registry, edits)?;
         if !inverse.is_empty() {
             self.undo.push(Step {
-                label: label.into(),
+                label,
                 edits: inverse,
+                merge,
             });
             if self.undo.len() > self.limit {
                 self.undo.remove(0);
@@ -154,6 +200,7 @@ impl History {
                 to.push(Step {
                     label: step.label,
                     edits: inverse,
+                    merge: None,
                 });
                 Ok(Some(Committed { dirty }))
             }
@@ -296,6 +343,42 @@ mod tests {
             history.undo(&mut net, &reg).unwrap().unwrap().dirty,
             vec![g]
         );
+    }
+
+    #[test]
+    fn coalesced_edits_are_one_step_until_sealed() {
+        let reg = test_registry();
+        let mut net = Network::default();
+        let g = add(&mut net, &reg, "img.gen");
+        let mut history = History::default();
+        let gain = |v: f64| Edit::SetParam {
+            node: g,
+            param: "gain".into(),
+            value: Some(Param::constant(json!(v))),
+        };
+        for v in [2.0, 3.0, 4.0] {
+            history
+                .commit_coalesced(&mut net, &reg, "drag gain", "gain", [gain(v)])
+                .unwrap();
+        }
+        history.seal();
+        history
+            .commit_coalesced(&mut net, &reg, "drag gain", "gain", [gain(5.0)])
+            .unwrap();
+        assert_eq!(net.param_value(&reg, g, "gain"), Some(&json!(5.0)));
+        history.undo(&mut net, &reg).unwrap();
+        assert_eq!(
+            net.param_value(&reg, g, "gain"),
+            Some(&json!(4.0)),
+            "second gesture undone alone"
+        );
+        history.undo(&mut net, &reg).unwrap();
+        assert_eq!(
+            net.param_value(&reg, g, "gain"),
+            Some(&json!(1.0)),
+            "first gesture undone in one step"
+        );
+        assert!(!history.can_undo());
     }
 
     #[test]

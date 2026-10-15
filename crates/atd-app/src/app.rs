@@ -1,11 +1,16 @@
 //! Top-level application state and panel contents.
 
+use std::time::Instant;
+
+use atd_core::graph::{Edit, Endpoint, Node, NodeId, Param, Wire};
 use atd_core::registry::{Availability, OpFamily};
 use atd_core::{CapabilityFlag, PlatformInfo, Registry};
-use egui::{RichText, Ui};
+use atd_gpu::engine::{Engine, EngineConfig, OpLibrary};
+use egui::{Key, KeyboardShortcut, Modifiers, RichText, Ui};
+use serde_json::json;
 
-use crate::canvas::NodeCanvas;
 use crate::dock::{DockState, TabViewer};
+use crate::patch::PatchEditor;
 use crate::smoke::{Smoke, SmokeArgs};
 
 /// Flags shown in the Platform panel so the capability mechanism is visible
@@ -35,22 +40,25 @@ pub struct AtidarlaApp {
     dock: DockState<Tab>,
     panels: Panels,
     smoke: Option<Smoke>,
+    start: Instant,
 }
 
 /// Everything the tabs render, split from the dock so both can be borrowed.
 struct Panels {
     platform: PlatformInfo,
     adapter: Option<atd_gpu::AdapterReport>,
-    registry: Registry,
-    canvas: NodeCanvas,
+    engine: Option<Engine>,
+    patch: PatchEditor,
+    /// Node shown in the viewer: the selection, or the last selected node.
+    viewed: Option<NodeId>,
+    viewer_tex: Option<egui::TextureId>,
+    canvas_rect: egui::Rect,
 }
 
 impl AtidarlaApp {
     pub fn new(cc: &eframe::CreationContext<'_>, smoke: Option<SmokeArgs>) -> Self {
-        let info = cc
-            .wgpu_render_state
-            .as_ref()
-            .map(|rs| rs.adapter.get_info());
+        let rs = cc.wgpu_render_state.as_ref();
+        let info = rs.map(|rs| rs.adapter.get_info());
         let platform = info
             .as_ref()
             .map_or_else(PlatformInfo::host, atd_gpu::platform_info);
@@ -63,9 +71,28 @@ impl AtidarlaApp {
             );
         }
 
+        // The engine shares eframe's device, so the viewer shows engine
+        // textures directly.
+        let mut engine = rs.map(|rs| {
+            let mut library = OpLibrary::default();
+            atd_ops_img::library(&mut library);
+            Engine::new(
+                rs.device.clone(),
+                rs.queue.clone(),
+                builtin_registry(),
+                library,
+                EngineConfig {
+                    width: 1280,
+                    height: 720,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                },
+            )
+        });
+        let viewed = engine.as_mut().and_then(demo_patch);
+
         let dock = DockState::new(
             vec![Tab::Operators, Tab::Platform],
-            vec![Tab::Parameters, Tab::Viewer],
+            vec![Tab::Viewer, Tab::Parameters],
             vec![Tab::Timeline],
             vec![Tab::Patch, Tab::Stage],
         );
@@ -74,10 +101,54 @@ impl AtidarlaApp {
             panels: Panels {
                 platform,
                 adapter,
-                registry: builtin_registry(),
-                canvas: NodeCanvas::default(),
+                engine,
+                patch: PatchEditor::with_selection(viewed),
+                viewed,
+                viewer_tex: None,
+                canvas_rect: egui::Rect::NOTHING,
             },
             smoke: smoke.map(Smoke::new),
+            start: Instant::now(),
+        }
+    }
+}
+
+/// A small starting network so a new user sees the engine working:
+/// Noise → Kaleidoscope → Level. Returns the node to view.
+fn demo_patch(engine: &mut Engine) -> Option<NodeId> {
+    let node = |engine: &mut Engine, ty: &str, name: &str, x: f32| {
+        let id = engine.alloc_id();
+        let mut n = Node::new(id, ty, name);
+        n.pos = [x, 80.0];
+        (id, n)
+    };
+    let (noise, n1) = node(engine, "img.noise", "noise1", 40.0);
+    let (kal, n2) = node(engine, "img.kaleidoscope", "kaleidoscope1", 240.0);
+    let (lvl, n3) = node(engine, "img.level", "level1", 440.0);
+    let wire = |a: NodeId, b: NodeId| Edit::Connect {
+        wire: Wire::new(Endpoint::new(a, "out"), Endpoint::new(b, "in")),
+    };
+    let set = |node: NodeId, p: &str, v: serde_json::Value| Edit::SetParam {
+        node,
+        param: p.into(),
+        value: Some(Param::constant(v)),
+    };
+    let edits = vec![
+        Edit::AddNode { node: n1 },
+        Edit::AddNode { node: n2 },
+        Edit::AddNode { node: n3 },
+        wire(noise, kal),
+        wire(kal, lvl),
+        set(noise, "scale", json!(3.0)),
+        set(noise, "monochrome", json!(false)),
+        set(kal, "segments", json!(8)),
+        set(lvl, "contrast", json!(1.3)),
+    ];
+    match engine.edit("demo patch", edits) {
+        Ok(()) => Some(lvl),
+        Err(e) => {
+            log::warn!("demo patch failed: {e}");
+            None
         }
     }
 }
@@ -89,7 +160,8 @@ impl std::fmt::Debug for AtidarlaApp {
 }
 
 impl eframe::App for AtidarlaApp {
-    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
+        self.shortcuts(ui);
         egui::Panel::top("menu_bar").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
@@ -97,8 +169,38 @@ impl eframe::App for AtidarlaApp {
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 });
+                ui.menu_button("Edit", |ui| {
+                    let (undo, redo) = self.panels.engine.as_ref().map_or((None, None), |e| {
+                        (
+                            e.history().undo_label().map(str::to_owned),
+                            e.history().redo_label().map(str::to_owned),
+                        )
+                    });
+                    let u = ui.add_enabled(
+                        undo.is_some(),
+                        egui::Button::new(format!("Undo {}", undo.unwrap_or_default())),
+                    );
+                    let r = ui.add_enabled(
+                        redo.is_some(),
+                        egui::Button::new(format!("Redo {}", redo.unwrap_or_default())),
+                    );
+                    if let Some(e) = &mut self.panels.engine {
+                        if u.clicked() {
+                            let _ = e.undo();
+                        }
+                        if r.clicked() {
+                            let _ = e.redo();
+                        }
+                    }
+                });
                 ui.menu_button("View", |ui| {
-                    for tab in [Tab::Patch, Tab::Stage, Tab::Timeline, Tab::Platform] {
+                    for tab in [
+                        Tab::Patch,
+                        Tab::Stage,
+                        Tab::Timeline,
+                        Tab::Viewer,
+                        Tab::Platform,
+                    ] {
                         if ui.button(tab_title(tab)).clicked() {
                             self.dock.focus(|t| *t == tab);
                         }
@@ -112,8 +214,77 @@ impl eframe::App for AtidarlaApp {
             });
         });
         self.dock.show(ui, &mut self.panels);
+        self.cook_and_present(ui.ctx(), frame);
         if let Some(smoke) = &mut self.smoke {
             smoke.tick(ui.ctx());
+        }
+    }
+}
+
+impl AtidarlaApp {
+    fn shortcuts(&mut self, ui: &Ui) {
+        let Some(engine) = &mut self.panels.engine else {
+            return;
+        };
+        if ui.ctx().egui_wants_keyboard_input() {
+            return;
+        }
+        let undo = KeyboardShortcut::new(Modifiers::COMMAND, Key::Z);
+        let redo = KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
+        let redo_y = KeyboardShortcut::new(Modifiers::COMMAND, Key::Y);
+        // Check the longer shortcut first: Cmd+Shift+Z also matches Cmd+Z.
+        if ui.input_mut(|i| i.consume_shortcut(&redo) || i.consume_shortcut(&redo_y)) {
+            let _ = engine.redo();
+        } else if ui.input_mut(|i| i.consume_shortcut(&undo)) {
+            let _ = engine.undo();
+        }
+    }
+
+    /// Cooks the viewed node and hands its texture to egui.
+    fn cook_and_present(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        let p = &mut self.panels;
+        let Some(engine) = &mut p.engine else { return };
+        if let Some(sel) = p
+            .patch
+            .selected
+            .filter(|s| engine.network().node(*s).is_some())
+        {
+            p.viewed = Some(sel);
+        }
+        if p.viewed.is_some_and(|v| engine.network().node(v).is_none()) {
+            p.viewed = None;
+        }
+        let Some(viewed) = p.viewed else { return };
+        let cooked = match engine.cook(&[viewed], self.start.elapsed().as_secs_f64()) {
+            Ok(n) => n,
+            Err(e) => {
+                p.patch.status(e.to_string());
+                0
+            }
+        };
+        let (Some(rs), Some(tex)) = (frame.wgpu_render_state(), engine.result(viewed)) else {
+            return;
+        };
+        if cooked > 0 || p.viewer_tex.is_none() {
+            let view = tex.create_view(&Default::default());
+            let mut renderer = rs.renderer.write();
+            match p.viewer_tex {
+                Some(id) => renderer.update_egui_texture_from_wgpu_texture(
+                    &rs.device,
+                    &view,
+                    wgpu::FilterMode::Linear,
+                    id,
+                ),
+                None => {
+                    p.viewer_tex = Some(renderer.register_native_texture(
+                        &rs.device,
+                        &view,
+                        wgpu::FilterMode::Linear,
+                    ))
+                }
+            }
+            // Show the new result on the next frame.
+            ctx.request_repaint();
         }
     }
 }
@@ -151,14 +322,26 @@ impl TabViewer for Panels {
 
     fn ui(&mut self, ui: &mut Ui, tab: &mut Tab) {
         match tab {
-            Tab::Patch => self.canvas.ui(ui),
+            Tab::Patch => match &mut self.engine {
+                Some(engine) => {
+                    self.canvas_rect = ui.available_rect_before_wrap();
+                    self.patch.ui(ui, engine);
+                }
+                None => placeholder(ui, "No GPU device: the engine is unavailable."),
+            },
             Tab::Stage => placeholder(ui, "Clip deck, layers and outputs arrive in M3."),
             Tab::Timeline => placeholder(ui, "Keyframes, cues and timecode arrive in M3."),
-            Tab::Parameters => placeholder(ui, "Select a node to edit its parameters (M1)."),
-            Tab::Viewer => placeholder(
-                ui,
-                "Texture, channel, geometry and table viewers arrive in M1–M2.",
-            ),
+            Tab::Parameters => match (&mut self.engine, self.patch.selected) {
+                (Some(engine), Some(node)) => {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        if let Some(e) = crate::params::ui(ui, engine, node) {
+                            self.patch.status(e);
+                        }
+                    });
+                }
+                _ => placeholder(ui, "Select a node to edit its parameters."),
+            },
+            Tab::Viewer => self.viewer_ui(ui),
             Tab::Operators => self.operators_ui(ui),
             Tab::Platform => self.platform_ui(ui),
         }
@@ -166,35 +349,76 @@ impl TabViewer for Panels {
 }
 
 impl Panels {
-    fn operators_ui(&self, ui: &mut Ui) {
-        if self.registry.is_empty() {
-            ui.weak("No operators registered yet. The first IMG and SIG operators land in M1.");
+    fn viewer_ui(&mut self, ui: &mut Ui) {
+        let (Some(engine), Some(viewed), Some(tex)) = (&self.engine, self.viewed, self.viewer_tex)
+        else {
+            placeholder(ui, "Select a node to view its output.");
             return;
-        }
+        };
+        let name = engine
+            .network()
+            .node(viewed)
+            .map_or("?", |n| n.name.as_str());
+        let cfg = engine.config();
+        ui.horizontal(|ui| {
+            ui.strong(name);
+            ui.weak(format!("{}×{} {:?}", cfg.width, cfg.height, cfg.format));
+            if let Some(e) = engine.error(viewed) {
+                ui.colored_label(egui::Color32::from_rgb(230, 80, 80), e);
+            }
+        });
+        let avail = ui.available_size();
+        let aspect = cfg.width as f32 / cfg.height as f32;
+        let size = if avail.x / avail.y.max(1.0) > aspect {
+            egui::vec2(avail.y * aspect, avail.y)
+        } else {
+            egui::vec2(avail.x, avail.x / aspect)
+        };
+        ui.centered_and_justified(|ui| {
+            ui.add(egui::Image::new((tex, size)).fit_to_exact_size(size));
+        });
+    }
+
+    fn operators_ui(&mut self, ui: &mut Ui) {
+        let Some(engine) = &mut self.engine else {
+            placeholder(ui, "No GPU device: the engine is unavailable.");
+            return;
+        };
+        ui.weak("Click to add to the patch (or press Tab over the canvas).");
+        let mut add = None;
         egui::ScrollArea::vertical().show(ui, |ui| {
             for family in OpFamily::ALL {
-                let ops: Vec<_> = self.registry.family(family).collect();
+                let ops: Vec<_> = engine.registry().family(family).collect();
                 if ops.is_empty() {
                     continue;
                 }
                 ui.collapsing(format!("{family} ({})", ops.len()), |ui| {
                     for op in ops {
-                        match Registry::availability(op, &self.platform) {
-                            Availability::Native => {
-                                ui.label(&op.label);
+                        let label = match Registry::availability(op, &self.platform) {
+                            Availability::Native => RichText::new(&op.label),
+                            Availability::Fallback { flag, .. } => {
+                                RichText::new(format!("{}  [{flag}]", op.label))
                             }
-                            Availability::Fallback { flag, fallback } => {
-                                ui.horizontal(|ui| {
-                                    ui.label(&op.label);
-                                    ui.label(RichText::new(flag.to_string()).small().strong())
-                                        .on_hover_text(fallback.explanation());
-                                });
-                            }
+                        };
+                        if ui
+                            .selectable_label(false, label)
+                            .on_hover_text(&op.summary)
+                            .clicked()
+                        {
+                            add = Some(op.type_id.clone());
                         }
                     }
                 });
             }
         });
+        if let Some(type_id) = add {
+            let at = if self.canvas_rect.is_positive() {
+                self.patch.centre(self.canvas_rect)
+            } else {
+                egui::pos2(100.0, 100.0)
+            };
+            self.patch.add_node(engine, &type_id, at);
+        }
     }
 
     fn platform_ui(&self, ui: &mut Ui) {
