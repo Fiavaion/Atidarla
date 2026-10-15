@@ -64,7 +64,7 @@ fn hash1(i: i64, seed: i64) -> f32 {
 }
 
 /// Smooth 1D value noise in [-1, 1].
-fn noise1(t: f64, seed: i64) -> f32 {
+pub(crate) fn noise1(t: f64, seed: i64) -> f32 {
     let i = t.floor();
     let f = (t - i) as f32;
     let u = f * f * (3.0 - 2.0 * f);
@@ -78,7 +78,7 @@ const MATH_OPS: &[&str] = &[
     "add", "subtract", "multiply", "divide", "maximum", "minimum",
 ];
 
-fn wave(kind: &str, x: f64) -> f32 {
+pub(crate) fn wave(kind: &str, x: f64) -> f32 {
     let x = x.rem_euclid(1.0);
     (match kind {
         "triangle" => 1.0 - 4.0 * ((x + 0.25).rem_euclid(1.0) - 0.5).abs(),
