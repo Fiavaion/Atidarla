@@ -956,17 +956,20 @@ fn generate(
         s
     };
 
-    // Fragment stage.
+    // Fragment stage. Images have one mip level, so sampling at LOD 0 is
+    // exact; it also avoids implicit-derivative samples inside loops, which
+    // FXC (Direct3D) can only compile by unrolling the loop, slowly or not
+    // at all (X3511).
     let mut fs = common.clone();
     fs.push_str("layout(location = 0) in vec2 isf_FragNormCoord;\n");
     fs.push_str(&varying_decls("in"));
     fs.push_str("layout(location = 0) out vec4 atd_out;\nvec4 atd_fc;\n");
     fs.push_str(concat!(
-        "#define IMG_NORM_PIXEL(i, c) texture(sampler2D(i, atd_samp), atd_flip(c))\n",
-        "#define IMG_PIXEL(i, c) texture(sampler2D(i, atd_samp), atd_flip((c) / IMG_SIZE(i)))\n",
+        "#define IMG_NORM_PIXEL(i, c) textureLod(sampler2D(i, atd_samp), atd_flip(c), 0.0)\n",
+        "#define IMG_PIXEL(i, c) textureLod(sampler2D(i, atd_samp), atd_flip((c) / IMG_SIZE(i)), 0.0)\n",
         "#define IMG_THIS_NORM_PIXEL(i) IMG_NORM_PIXEL(i, isf_FragNormCoord)\n",
         "#define IMG_THIS_PIXEL(i) IMG_NORM_PIXEL(i, isf_FragNormCoord)\n",
-        "#define texture2D(i, c) texture(sampler2D(i, atd_samp), atd_flip(c))\n",
+        "#define texture2D(i, c) textureLod(sampler2D(i, atd_samp), atd_flip(c), 0.0)\n",
         "#define gl_FragColor atd_out\n",
         "#define gl_FragCoord atd_fc\n",
         "#define main isf_main\n",
