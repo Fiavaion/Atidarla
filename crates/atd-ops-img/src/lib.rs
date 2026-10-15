@@ -8,6 +8,7 @@
 //! (`tests/ops.rs`). Runnable example projects follow once the project
 //! format (PRD A11) is ratified.
 
+mod channel_image;
 pub mod isf;
 mod ops;
 mod ops2;
@@ -83,7 +84,8 @@ impl GpuOp for ShaderOp {
 pub fn register(registry: &mut Registry) {
     let schemas = defs()
         .map(|d| (d.schema)())
-        .chain(STATEFUL.iter().map(|s| (s.0)()));
+        .chain(STATEFUL.iter().map(|s| (s.0)()))
+        .chain([channel_image::schema()]);
     for schema in schemas {
         registry
             .register(schema)
@@ -93,6 +95,7 @@ pub fn register(registry: &mut Registry) {
 
 /// Registers this family's GPU implementations.
 pub fn library(library: &mut OpLibrary) {
+    library.add(channel_image::schema().type_id, channel_image::create);
     for (schema, factory) in STATEFUL {
         library.add(schema().type_id, factory);
     }
@@ -118,7 +121,10 @@ mod tests {
     fn schemas_register_with_budgets_and_help() {
         let mut registry = Registry::default();
         register(&mut registry);
-        assert_eq!(registry.len(), DEFS.len() + DEFS2.len() + STATEFUL.len());
+        assert_eq!(
+            registry.len(),
+            DEFS.len() + DEFS2.len() + STATEFUL.len() + 1
+        );
         for op in registry.iter() {
             assert!(op.cook_budget_us > 0, "{} has a cook budget", op.type_id);
             assert!(!op.summary.is_empty(), "{} has a summary", op.type_id);
@@ -150,5 +156,6 @@ mod tests {
         for (schema, _) in STATEFUL {
             assert!(lib.contains(&schema().type_id));
         }
+        assert!(lib.contains(&channel_image::schema().type_id));
     }
 }

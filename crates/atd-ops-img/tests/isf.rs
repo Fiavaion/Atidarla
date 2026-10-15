@@ -22,8 +22,10 @@ fn engine(defs: Vec<IsfDef>) -> Option<Engine> {
         pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()?;
     let mut reg = Registry::default();
     atd_ops_img::register(&mut reg);
+    atd_ops_sig::register(&mut reg);
     let mut lib = OpLibrary::default();
     atd_ops_img::library(&mut lib);
+    atd_ops_sig::library(&mut lib);
     let n = defs.len();
     assert_eq!(register(defs, &mut reg, &mut lib).len(), n);
     let config = EngineConfig {
@@ -285,4 +287,36 @@ fn vertex_shaders_feed_varyings() {
     let x0 = img.px(0, 0)[0];
     assert!(x0.abs_diff(66) <= 3, "x at the left edge is shifted: {x0}");
     assert!(img.px(0, 0)[1] > 240);
+}
+
+const AUDIO: &str = r#"/*{
+    "INPUTS": [{"NAME": "waveImage", "TYPE": "audio"}]
+}*/
+void main() {
+    float ch0 = IMG_NORM_PIXEL(waveImage, vec2(0.5, 0.25)).r;
+    float ch1 = IMG_NORM_PIXEL(waveImage, vec2(0.5, 0.75)).r;
+    gl_FragColor = vec4(ch0, ch1, 0.0, 1.0);
+}
+"#;
+
+#[test]
+fn audio_inputs_read_channel_images_with_channel_0_at_the_bottom() {
+    let d = def("Wave", AUDIO, None);
+    assert_eq!(d.schema.inputs[0].name, "waveImage");
+    let mut e = engine_or_skip!(vec![d]);
+    let sig = add(
+        &mut e,
+        "sig.constant",
+        &[
+            ("name1", json!("left")),
+            ("value1", json!(0.2)),
+            ("name2", json!("right")),
+            ("value2", json!(0.9)),
+        ],
+    );
+    let image = add(&mut e, "img.channel_image", &[]);
+    let wave = add(&mut e, "img.isf_wave", &[]);
+    wire(&mut e, sig, image, "sig");
+    wire(&mut e, image, wave, "waveImage");
+    assert_px(&cook_at(&mut e, wave, 0.0), 7, 7, [51, 230, 0, 255], 2);
 }

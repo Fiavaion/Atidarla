@@ -295,6 +295,9 @@ pub struct CookCtx<'a> {
     /// One entry per input socket in schema order; `None` if unconnected,
     /// not an IMG input, or the source has no result.
     pub inputs: &'a [Option<wgpu::Texture>],
+    /// SIG inputs by input index (`None` for IMG sockets), for operators
+    /// that turn channels into images.
+    pub sig_inputs: SigInputs<'a>,
     /// A 1×1 transparent black texture, for unconnected inputs.
     pub black: &'a wgpu::Texture,
     pub output: &'a wgpu::Texture,
@@ -763,12 +766,14 @@ impl Engine {
             }
 
             inputs.clear();
+            sig_sources.clear();
             for socket in &schema.inputs {
                 let src = net
                     .inputs_of(id)
                     .find(|(name, _)| *name == socket.name)
                     .map(|(_, src)| src.node);
                 inputs.push(src.and_then(|s| results.get(&s)).cloned());
+                sig_sources.push(src.filter(|_| socket.wire == WireType::Sig));
             }
 
             let output = pool.acquire(key);
@@ -777,6 +782,10 @@ impl Engine {
                 queue,
                 encoder: &mut encoder,
                 inputs,
+                sig_inputs: SigInputs {
+                    sources: sig_sources,
+                    sig,
+                },
                 black,
                 output: &output,
                 params: Params {

@@ -807,3 +807,52 @@ fn reaction_diffusion_grows_from_the_seed() {
         "pattern present after 20 frames ({lit} lit pixels)"
     );
 }
+
+#[test]
+fn channel_image_draws_channels_as_rows_or_columns() {
+    let mut e = engine_or_skip!();
+    let sig = add(
+        &mut e,
+        "sig.constant",
+        &[
+            ("name1", json!("a")),
+            ("value1", json!(0.25)),
+            ("name2", json!("b")),
+            ("value2", json!(0.75)),
+        ],
+    );
+    let img = add(&mut e, "channel_image", &[("interpolate", json!(false))]);
+    wire(&mut e, sig, img, "sig");
+
+    // Samples layout: one row per channel, channel 0 at the bottom.
+    let out = cook(&mut e, img);
+    assert_px(&out, 3, H - 1, [64, 64, 64, 255], 2);
+    assert_px(&out, W - 1, 0, [191, 191, 191, 255], 2);
+
+    // Channels layout: channels along x.
+    set(&mut e, img, "layout", json!("channels"));
+    let out = cook(&mut e, img);
+    assert_px(&out, 0, 5, [64, 64, 64, 255], 2);
+    assert_px(&out, W - 1, 5, [191, 191, 191, 255], 2);
+
+    // Interpolated: the ends are exact and the middle blends.
+    set(&mut e, img, "interpolate", json!(true));
+    let out = cook(&mut e, img);
+    assert_px(&out, 0, 5, [66, 66, 66, 255], 4);
+    assert_px(&out, W / 2, 5, [128, 128, 128, 255], 6);
+    assert_px(&out, W - 1, 5, [189, 189, 189, 255], 4);
+
+    // Scale and offset map −1…1 to 0…1; with no input the image is black.
+    set(&mut e, img, "scale", json!(0.5));
+    set(&mut e, img, "offset", json!(0.5));
+    set(&mut e, img, "interpolate", json!(false));
+    assert_px(&cook(&mut e, img), 0, 5, [159, 159, 159, 255], 2);
+    e.edit(
+        "unwire",
+        [Edit::Disconnect {
+            wire: Wire::new(Endpoint::new(sig, "out"), Endpoint::new(img, "sig")),
+        }],
+    )
+    .unwrap();
+    assert_px(&cook(&mut e, img), 0, 5, [0, 0, 0, 255], 0);
+}
