@@ -233,6 +233,7 @@ dependencies = [
  "env_logger",
  "log",
  "png",
+ "pollster 0.4.0",
  "serde_json",
  "wgpu",
 ]

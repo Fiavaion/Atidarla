@@ -1,17 +1,23 @@
 //! The Patch editor (FR-P1): nodes, sockets and wires drawn over the canvas
 //! and edited through the engine's undoable history.
 //!
-//! - Drag a node to move it; click to select it.
+//! - Click a node to select it; Shift/Ctrl/Cmd-click adds or removes it
+//!   from the selection; Shift-drag the background to box-select; Ctrl+A
+//!   selects all. Drag a node to move the selection.
 //! - Drag from an output socket (right side) to an input socket to wire.
 //!   Right-click an input socket to disconnect it.
 //! - Tab or double-click the background to search for an operator to add.
-//! - Delete/Backspace removes the selected node.
+//! - Delete/Backspace removes the selection; Ctrl+C/X/V copy, cut and paste
+//!   it through the system clipboard (as a JSON fragment); Ctrl+D
+//!   duplicates it. Each of these is one undo step.
 //!
 //! Drawing reads the engine immutably and queues edits, which are applied
 //! after the frame's layout as undo steps.
 
+use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
+use atd_core::fragment::Fragment;
 use atd_core::graph::{Edit, Endpoint, Node, NodeId, Wire};
 use atd_core::registry::{OpFamily, OperatorSchema, Registry, WireType};
 use atd_gpu::engine::Engine;
@@ -29,6 +35,10 @@ const SOCKET_R: f32 = 5.0;
 /// Screen distance within which a wire drop snaps to an input socket.
 const SNAP: f32 = 14.0;
 const STATUS_FOR: Duration = Duration::from_secs(5);
+/// Below this zoom, nodes and wires draw in a cheap, text-free form.
+const LOD_ZOOM: f32 = 0.35;
+/// Minimap size in screen points.
+const MINIMAP: Vec2 = Vec2::new(180.0, 120.0);
 
 /// Node size in canvas units.
 pub fn node_size(schema: &OperatorSchema) -> Vec2 {
@@ -107,7 +117,14 @@ enum Drag {
         output: String,
         start: Pos2,
     },
+    /// Box selection from `start` (screen).
+    Select {
+        start: Pos2,
+    },
 }
+
+/// Canvas offset of pasted and duplicated nodes.
+const PASTE_OFFSET: [f32; 2] = [30.0, 30.0];
 
 #[derive(Debug)]
 struct Search {
@@ -122,7 +139,10 @@ struct Search {
 #[derive(Debug, Default)]
 pub struct PatchEditor {
     pub view: View,
+    /// The active node: shown in the viewer and parameter panel.
     pub selected: Option<NodeId>,
+    /// Every selected node (contains `selected`).
+    pub selection: BTreeSet<NodeId>,
     drag: Option<Drag>,
     search: Option<Search>,
     status: Option<(String, Instant)>,
@@ -132,8 +152,49 @@ impl PatchEditor {
     pub fn with_selection(selected: Option<NodeId>) -> Self {
         Self {
             selected,
+            selection: selected.into_iter().collect(),
             ..Default::default()
         }
+    }
+
+    /// Selects only `id` (or nothing).
+    pub fn select_only(&mut self, id: Option<NodeId>) {
+        self.selected = id;
+        self.selection = id.into_iter().collect();
+    }
+
+    /// Adds `id` to the selection or removes it.
+    fn toggle(&mut self, id: NodeId) {
+        if self.selection.remove(&id) {
+            if self.selected == Some(id) {
+                self.selected = self.selection.iter().next_back().copied();
+            }
+        } else {
+            self.selection.insert(id);
+            self.selected = Some(id);
+        }
+    }
+
+    /// Edits that paste `fragment` moved by `offset`; selects the copies.
+    fn paste_edits(
+        &mut self,
+        engine: &mut Engine,
+        fragment: &Fragment,
+        offset: [f32; 2],
+    ) -> Vec<Edit> {
+        let mut ids = Vec::with_capacity(fragment.nodes.len());
+        for _ in &fragment.nodes {
+            ids.push(engine.alloc_id());
+        }
+        let mut next = ids.iter().copied();
+        let (edits, new_ids) = fragment.paste(
+            engine.network(),
+            || next.next().expect("one ID per node"),
+            offset,
+        );
+        self.selection = new_ids.iter().copied().collect();
+        self.selected = new_ids.last().copied();
+        edits
     }
 
     /// Shows a transient message at the bottom of the canvas.
@@ -148,7 +209,7 @@ impl PatchEditor {
         let mut node = Node::new(id, type_id, engine.network().unique_name(short));
         node.pos = [at.x.round(), at.y.round()];
         match engine.edit(&format!("add {short}"), [Edit::AddNode { node }]) {
-            Ok(()) => self.selected = Some(id),
+            Ok(()) => self.select_only(Some(id)),
             Err(e) => self.status(e.to_string()),
         }
     }
@@ -161,7 +222,19 @@ impl PatchEditor {
     pub fn ui(&mut self, ui: &mut Ui, engine: &mut Engine) {
         let (rect, bg) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
         let origin = rect.min;
-        self.view.handle_input(ui, &bg, origin);
+        let shift = ui.input(|i| i.modifiers.shift);
+        let boxing = matches!(self.drag, Some(Drag::Select { .. }));
+        if !boxing && !(shift && bg.drag_started()) {
+            self.view.handle_input(ui, &bg, origin);
+        }
+        // Forget nodes removed since the last frame (undo, deletes).
+        {
+            let net = engine.network();
+            self.selection.retain(|id| net.node(*id).is_some());
+            if self.selected.is_some_and(|id| net.node(id).is_none()) {
+                self.selected = self.selection.iter().next_back().copied();
+            }
+        }
         let painter = ui.painter_at(rect);
         paint_grid(ui, &painter, rect, origin, self.view);
         let view = self.view;
@@ -173,19 +246,25 @@ impl PatchEditor {
         let net = engine.network();
         let reg = engine.registry();
 
-        // Snapshot of the node being dragged (the closure must not borrow self).
-        let dragging = match &self.drag {
-            Some(Drag::Node { id, offset }) => Some((*id, *offset)),
-            _ => None,
+        // Snapshot of the nodes being dragged (the closure must not borrow
+        // self): the whole selection when dragging a selected node.
+        let (moving, drag_offset): (BTreeSet<NodeId>, Vec2) = match &self.drag {
+            Some(Drag::Node { id, offset }) if self.selection.contains(id) => {
+                (self.selection.clone(), *offset)
+            }
+            Some(Drag::Node { id, offset }) => (BTreeSet::from([*id]), *offset),
+            _ => (BTreeSet::new(), Vec2::ZERO),
         };
         let node_pos = |id: NodeId| -> Option<Pos2> {
             let n = net.node(id)?;
             let p = Pos2::new(n.pos[0], n.pos[1]);
-            Some(match dragging {
-                Some((d, offset)) if d == id => p + offset,
-                _ => p,
+            Some(if moving.contains(&id) {
+                p + drag_offset
+            } else {
+                p
             })
         };
+        let modifier = ui.input(|i| i.modifiers.shift || i.modifiers.command);
 
         // Wires, under the nodes.
         for wire in net.wires() {
@@ -236,12 +315,31 @@ impl PatchEditor {
             let pos = node_pos(node.id).unwrap_or_default();
             let size = node_size(schema) * zoom;
             let screen = Rect::from_min_size(to_screen(pos), size);
+            // Culling: off-screen nodes are neither drawn nor hit-tested
+            // (sockets reach SNAP beyond the node's edge).
+            if !rect.intersects(screen.expand(SNAP)) {
+                continue;
+            }
             let resp = ui.interact(
                 screen,
                 Id::unique(("atd-node", node.id.0)),
                 Sense::click_and_drag(),
             );
-            if resp.clicked() || resp.drag_started() {
+            if resp.clicked() {
+                if modifier {
+                    self.toggle(node.id);
+                } else {
+                    self.select_only(Some(node.id));
+                }
+            } else if resp.drag_started() {
+                if !self.selection.contains(&node.id) {
+                    if modifier {
+                        self.selection.insert(node.id);
+                    } else {
+                        self.selection.clear();
+                        self.selection.insert(node.id);
+                    }
+                }
                 self.selected = Some(node.id);
             }
             if resp.drag_started() {
@@ -261,18 +359,50 @@ impl PatchEditor {
                 && id == node.id
                 && offset != Vec2::ZERO
             {
-                let p = Pos2::new(node.pos[0], node.pos[1]) + offset;
-                pending.push((
-                    format!("move {}", node.name),
-                    vec![Edit::Move {
-                        node: id,
-                        pos: [p.x.round(), p.y.round()],
-                    }],
-                ));
+                let moves: Vec<Edit> = moving
+                    .iter()
+                    .filter_map(|m| net.node(*m))
+                    .map(|n| {
+                        let p = Pos2::new(n.pos[0], n.pos[1]) + offset;
+                        Edit::Move {
+                            node: n.id,
+                            pos: [p.x.round(), p.y.round()],
+                        }
+                    })
+                    .collect();
+                let label = if moves.len() == 1 {
+                    format!("move {}", node.name)
+                } else {
+                    format!("move {} nodes", moves.len())
+                };
+                pending.push((label, moves));
             }
 
             let error = engine.error(node.id);
-            let selected = self.selected == Some(node.id);
+            let selected = self.selection.contains(&node.id);
+            let active = self.selected == Some(node.id);
+            if zoom < LOD_ZOOM {
+                // Far out: one rect per node, no sockets to hit or draw
+                // (zoom in to wire). Wire drops still find inputs.
+                painter.rect_filled(screen, 1.0, family_colour(schema.family));
+                if selected || error.is_some() {
+                    let colour = if error.is_some() {
+                        Color32::from_rgb(230, 70, 70)
+                    } else {
+                        ui.visuals().selection.stroke.color
+                    };
+                    painter.rect_stroke(screen, 1.0, Stroke::new(1.5, colour), StrokeKind::Outside);
+                }
+                for (i, s) in schema.inputs.iter().enumerate() {
+                    input_targets.push((
+                        to_screen(input_pos(pos, i)),
+                        node.id,
+                        s.name.clone(),
+                        s.wire,
+                    ));
+                }
+                continue;
+            }
             let r = CornerRadius::same((6.0 * zoom).clamp(1.0, 12.0) as u8);
             painter.rect_filled(screen, r, ui.visuals().window_fill);
             let header = Rect::from_min_size(screen.min, Vec2::new(size.x, HEADER * zoom));
@@ -288,11 +418,12 @@ impl PatchEditor {
             );
             let stroke = match (error.is_some(), selected) {
                 (true, _) => Stroke::new(2.0, Color32::from_rgb(230, 70, 70)),
+                (false, true) if active => Stroke::new(2.5, Color32::WHITE),
                 (false, true) => Stroke::new(2.0, ui.visuals().selection.stroke.color),
                 _ => Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
             };
             painter.rect_stroke(screen, r, stroke, StrokeKind::Outside);
-            if zoom > 0.35 {
+            {
                 painter.text(
                     header.left_center() + Vec2::new(8.0 * zoom, 0.0),
                     Align2::LEFT_CENTER,
@@ -308,7 +439,9 @@ impl PatchEditor {
                     ui.visuals().weak_text_color(),
                 );
             }
-            if let Some(e) = error {
+            if let Some(e) = error
+                && resp.hovered()
+            {
                 resp.on_hover_text(e);
             }
 
@@ -340,12 +473,14 @@ impl PatchEditor {
                         ui.visuals().text_color(),
                     );
                 }
-                sr.on_hover_text(format!(
-                    "{} ({:?}){}",
-                    s.name,
-                    s.wire,
-                    if s.feedback { ", feedback" } else { "" }
-                ));
+                if sr.hovered() {
+                    sr.on_hover_text(format!(
+                        "{} ({:?}){}",
+                        s.name,
+                        s.wire,
+                        if s.feedback { ", feedback" } else { "" }
+                    ));
+                }
             }
             for (i, s) in schema.outputs.iter().enumerate() {
                 let c = to_screen(output_pos(pos, i));
@@ -359,7 +494,9 @@ impl PatchEditor {
                     });
                 }
                 painter.circle_filled(c, SOCKET_R * zoom.max(0.5), wire_colour(s.wire));
-                sr.on_hover_text(format!("{} ({:?}) — drag to an input", s.name, s.wire));
+                if sr.hovered() {
+                    sr.on_hover_text(format!("{} ({:?}) — drag to an input", s.name, s.wire));
+                }
             }
         }
 
@@ -409,6 +546,7 @@ impl PatchEditor {
                 ui.visuals().weak_text_color(),
             );
         }
+        self.minimap(ui, &painter, rect, origin, engine);
         painter.text(
             rect.left_bottom() + Vec2::new(8.0, -8.0),
             Align2::LEFT_BOTTOM,
@@ -431,8 +569,45 @@ impl PatchEditor {
             }
         }
 
-        if bg.clicked() {
-            self.selected = None;
+        // Box selection (Shift-drag on the background) adds to the selection.
+        if bg.drag_started_by(egui::PointerButton::Primary)
+            && shift
+            && let Some(p) = pointer
+        {
+            self.drag = Some(Drag::Select { start: p });
+        }
+        if let Some(Drag::Select { start }) = &self.drag {
+            let start = *start;
+            if let Some(p) = pointer {
+                let r = Rect::from_two_pos(start, p);
+                painter.rect(
+                    r,
+                    2.0,
+                    ui.visuals().selection.bg_fill.gamma_multiply(0.25),
+                    Stroke::new(1.0, ui.visuals().selection.stroke.color),
+                    StrokeKind::Inside,
+                );
+                if ui.input(|i| i.pointer.any_released()) {
+                    for node in net.nodes() {
+                        let Some(schema) = reg.get(&node.type_id) else {
+                            continue;
+                        };
+                        let pos = Pos2::new(node.pos[0], node.pos[1]);
+                        let screen = Rect::from_min_size(to_screen(pos), node_size(schema) * zoom);
+                        if r.intersects(screen) {
+                            self.selection.insert(node.id);
+                            self.selected = Some(node.id);
+                        }
+                    }
+                    self.drag = None;
+                }
+            } else {
+                self.drag = None;
+            }
+        }
+
+        if bg.clicked() && !modifier {
+            self.select_only(None);
         }
         let tab = bg.hovered() && ui.input(|i| i.key_pressed(Key::Tab));
         if (bg.double_clicked() || tab)
@@ -446,14 +621,76 @@ impl PatchEditor {
             });
         }
         let typing = ui.ctx().egui_wants_keyboard_input();
-        if !typing
-            && self.search.is_none()
-            && ui.rect_contains_pointer(rect)
-            && ui.input(|i| i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace))
-            && let Some(id) = self.selected.take()
-        {
-            let name = net.node(id).map_or(String::new(), |n| n.name.clone());
-            pending.push((format!("delete {name}"), vec![Edit::RemoveNode { id }]));
+        let keys = !typing && self.search.is_none() && ui.rect_contains_pointer(rect);
+        let mut clipboard: Option<Fragment> = None;
+        let mut paste: Option<(Fragment, [f32; 2])> = None;
+        let mut delete = false;
+        if keys {
+            let (select_all, duplicate, del, events) = ui.input(|i| {
+                (
+                    i.modifiers.command && i.key_pressed(Key::A),
+                    i.modifiers.command && i.key_pressed(Key::D),
+                    i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace),
+                    i.events.clone(),
+                )
+            });
+            if select_all {
+                self.selection = net.nodes().map(|n| n.id).collect();
+                self.selected = self.selection.iter().next_back().copied();
+            }
+            delete = del;
+            for event in events {
+                match event {
+                    egui::Event::Copy if !self.selection.is_empty() => {
+                        clipboard = Some(Fragment::copy(net, &self.selection));
+                    }
+                    egui::Event::Cut if !self.selection.is_empty() => {
+                        clipboard = Some(Fragment::copy(net, &self.selection));
+                        delete = true;
+                    }
+                    egui::Event::Paste(text) => match Fragment::from_json(&text) {
+                        Some(f) if !f.is_empty() => {
+                            // Paste at the pointer, else next to the original.
+                            let o = f.origin();
+                            let offset = match pointer {
+                                Some(p) => {
+                                    let c = view.to_canvas(origin, p);
+                                    [c.x.round() - o[0], c.y.round() - o[1]]
+                                }
+                                None => PASTE_OFFSET,
+                            };
+                            paste = Some((f, offset));
+                        }
+                        _ => {}
+                    },
+                    _ => {}
+                }
+            }
+            if duplicate && !self.selection.is_empty() {
+                paste = Some((Fragment::copy(net, &self.selection), PASTE_OFFSET));
+            }
+        }
+        if delete && !self.selection.is_empty() {
+            let removes: Vec<Edit> = self
+                .selection
+                .iter()
+                .map(|id| Edit::RemoveNode { id: *id })
+                .collect();
+            let label = match removes.len() {
+                1 => format!(
+                    "delete {}",
+                    self.selection
+                        .first()
+                        .and_then(|id| net.node(*id))
+                        .map_or("", |n| n.name.as_str())
+                ),
+                n => format!("delete {n} nodes"),
+            };
+            pending.push((label, removes));
+            self.select_only(None);
+        }
+        if let Some(f) = &clipboard {
+            ui.ctx().copy_text(f.to_json());
         }
 
         let chosen = self.search_ui(ui, reg);
@@ -465,6 +702,84 @@ impl PatchEditor {
         if let Some((type_id, at)) = chosen {
             self.add_node(engine, &type_id, at);
         }
+        if let Some((fragment, offset)) = paste {
+            let n = fragment.nodes.len();
+            let edits = self.paste_edits(engine, &fragment, offset);
+            if let Err(e) = engine.edit(&format!("paste {n} nodes"), edits) {
+                self.select_only(None);
+                self.status(e.to_string());
+            }
+        }
+    }
+
+    /// Overview of the whole network in the bottom-right corner, with the
+    /// visible area outlined; click or drag on it to move the view there.
+    fn minimap(
+        &mut self,
+        ui: &mut Ui,
+        painter: &egui::Painter,
+        rect: Rect,
+        origin: Pos2,
+        engine: &Engine,
+    ) {
+        let net = engine.network();
+        let reg = engine.registry();
+        if net.is_empty() || rect.width() < 300.0 || rect.height() < 200.0 {
+            return;
+        }
+        let visible = Rect::from_two_pos(
+            self.view.to_canvas(origin, rect.min),
+            self.view.to_canvas(origin, rect.max),
+        );
+        let mut bounds = visible;
+        for node in net.nodes() {
+            let size = reg.get(&node.type_id).map_or(Vec2::splat(40.0), node_size);
+            let p = Pos2::new(node.pos[0], node.pos[1]);
+            bounds = bounds.union(Rect::from_min_size(p, size));
+        }
+        let bounds = bounds.expand(40.0);
+        let map = Rect::from_min_size(
+            rect.right_bottom() - Vec2::new(MINIMAP.x + 10.0, MINIMAP.y + 10.0),
+            MINIMAP,
+        );
+        let scale = (map.width() / bounds.width()).min(map.height() / bounds.height());
+        let inner = Rect::from_center_size(map.center(), bounds.size() * scale);
+        let to_map = |p: Pos2| inner.min + (p - bounds.min) * scale;
+
+        painter.rect_filled(map, 4.0, ui.visuals().window_fill.gamma_multiply(0.85));
+        painter.rect_stroke(
+            map,
+            4.0,
+            Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
+            StrokeKind::Inside,
+        );
+        for node in net.nodes() {
+            let Some(schema) = reg.get(&node.type_id) else {
+                continue;
+            };
+            let p = to_map(Pos2::new(node.pos[0], node.pos[1]));
+            let r = Rect::from_min_size(p, (node_size(schema) * scale).max(Vec2::splat(2.0)));
+            let colour = if self.selection.contains(&node.id) {
+                ui.visuals().selection.stroke.color
+            } else {
+                family_colour(schema.family)
+            };
+            painter.rect_filled(r, 0.0, colour);
+        }
+        painter.rect_stroke(
+            Rect::from_two_pos(to_map(visible.min), to_map(visible.max)).intersect(map),
+            0.0,
+            Stroke::new(1.0, Color32::WHITE),
+            StrokeKind::Inside,
+        );
+        let resp = ui.interact(map, Id::unique("atd-minimap"), Sense::click_and_drag());
+        if (resp.clicked() || resp.dragged())
+            && let Some(p) = resp.interact_pointer_pos()
+        {
+            let target = bounds.min + (p - inner.min) / scale;
+            self.view.offset = rect.center() - origin - target.to_vec2() * self.view.zoom;
+        }
+        resp.on_hover_text("Overview: click or drag to move the view");
     }
 
     /// The add-operator popup. Returns the chosen type and canvas position.
@@ -523,6 +838,20 @@ impl PatchEditor {
 fn draw_wire(painter: &egui::Painter, a: Pos2, b: Pos2, colour: Color32, zoom: f32, dashed: bool) {
     let dx = ((b.x - a.x).abs() * 0.5).max(40.0 * zoom);
     let points = [a, a + Vec2::new(dx, 0.0), b - Vec2::new(dx, 0.0), b];
+    // Culling: the curve stays inside its control points' bounding box.
+    if !painter.clip_rect().intersects(Rect::from_points(&points)) {
+        return;
+    }
+    if zoom < LOD_ZOOM {
+        // Far out, curves are not worth tessellating.
+        let colour = if dashed {
+            colour.gamma_multiply(0.5)
+        } else {
+            colour
+        };
+        painter.line_segment([a, b], Stroke::new(1.0, colour));
+        return;
+    }
     let width = (2.0 * zoom).clamp(1.0, 3.0);
     if dashed {
         let curve =
@@ -570,5 +899,90 @@ mod tests {
         );
         assert!(search(&reg, "zzzz").is_empty());
         assert_eq!(search(&reg, "").len(), reg.len());
+    }
+
+    /// FR-P1: a 2,000-node network stays interactive. Times layout plus
+    /// tessellation of the whole Patch editor, headless, at 100% zoom (most
+    /// nodes culled) and at 10% (every node visible).
+    #[test]
+    fn two_thousand_nodes_stay_interactive() {
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let adapter =
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()));
+        let Ok(adapter) = adapter else {
+            let required =
+                std::env::var("ATD_REQUIRE_GPU").is_ok_and(|v| !v.is_empty() && v != "0");
+            assert!(
+                !required,
+                "ATD_REQUIRE_GPU is set but there is no GPU adapter"
+            );
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
+        let mut library = atd_gpu::engine::OpLibrary::default();
+        atd_ops_img::library(&mut library);
+        let mut registry = Registry::default();
+        atd_ops_img::register(&mut registry);
+        atd_ops_sig::register(&mut registry);
+        let config = atd_gpu::engine::EngineConfig {
+            width: 64,
+            height: 64,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+        };
+        let mut engine = Engine::new(device, queue, registry, library, config);
+
+        // 40 rows of 50: noise → level → level … wired in a chain.
+        let mut edits = Vec::new();
+        for row in 0..40 {
+            let mut prev = None;
+            for col in 0..50 {
+                let id = engine.alloc_id();
+                let ty = if col == 0 { "img.noise" } else { "img.level" };
+                let mut node = Node::new(id, ty, format!("n{row}_{col}"));
+                node.pos = [col as f32 * 200.0, row as f32 * 90.0];
+                edits.push(Edit::AddNode { node });
+                if let Some(p) = prev {
+                    edits.push(Edit::Connect {
+                        wire: Wire::new(Endpoint::new(p, "out"), Endpoint::new(id, "in")),
+                    });
+                }
+                prev = Some(id);
+            }
+        }
+        engine.edit("build", edits).unwrap();
+        assert_eq!(engine.network().len(), 2000);
+
+        let mut editor = PatchEditor::default();
+        let ctx = egui::Context::default();
+        let input = || egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1600.0, 1000.0))),
+            ..Default::default()
+        };
+        for (label, zoom) in [("100%", 1.0), ("10%", 0.1)] {
+            editor.view.zoom = zoom;
+            let mut frame = || {
+                let mut out = ctx.run_ui(input(), |ui| editor.ui(ui, &mut engine));
+                out.textures_delta.clear();
+                ctx.tessellate(out.shapes, out.pixels_per_point).len()
+            };
+            for _ in 0..3 {
+                frame();
+            }
+            let frames = 10;
+            let start = Instant::now();
+            let mut prims = 0;
+            for _ in 0..frames {
+                prims = frame();
+            }
+            let ms = start.elapsed().as_secs_f64() * 1000.0 / f64::from(frames);
+            eprintln!("2,000 nodes at {label}: {ms:.2} ms/frame ({prims} primitives)");
+            // Timing is only meaningful in optimised builds.
+            if !cfg!(debug_assertions) {
+                assert!(ms < 16.0, "{label}: {ms:.2} ms per frame");
+            }
+        }
     }
 }
