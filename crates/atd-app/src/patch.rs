@@ -7,6 +7,9 @@
 //! - Drag from an output socket (right side) to an input socket to wire.
 //!   Right-click an input socket to disconnect it.
 //! - Tab or double-click the background to search for an operator to add.
+//! - C wraps the selection in a comment box (or adds one at the pointer).
+//!   Drag a comment's title bar to move it with the nodes inside, drag its
+//!   corner to resize, double-click the title bar to edit the text.
 //! - Delete/Backspace removes the selection; Ctrl+C/X/V copy, cut and paste
 //!   it through the system clipboard (as a JSON fragment); Ctrl+D
 //!   duplicates it. Each of these is one undo step.
@@ -18,7 +21,7 @@ use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
 use atd_core::fragment::Fragment;
-use atd_core::graph::{Edit, Endpoint, Node, NodeId, Wire};
+use atd_core::graph::{Comment, CommentId, Edit, Endpoint, Node, NodeId, Wire};
 use atd_core::registry::{OpFamily, OperatorSchema, Registry, WireType};
 use atd_gpu::engine::Engine;
 use egui::epaint::CubicBezierShape;
@@ -121,7 +124,29 @@ enum Drag {
     Select {
         start: Pos2,
     },
+    /// Moving (with the nodes inside it) or resizing a comment box.
+    Comment {
+        id: CommentId,
+        offset: Vec2,
+        resize: bool,
+        contained: BTreeSet<NodeId>,
+    },
 }
+
+/// Text being edited in a comment box.
+#[derive(Debug)]
+struct CommentEdit {
+    id: CommentId,
+    text: String,
+    /// Screen position of the editor.
+    at: Pos2,
+    focus: bool,
+}
+
+/// Height of a comment's title bar, in canvas units.
+const COMMENT_HEADER: f32 = 26.0;
+const MIN_COMMENT: Vec2 = Vec2::new(80.0, 40.0);
+const COMMENT_FILL: Color32 = Color32::from_rgba_premultiplied(30, 36, 46, 70);
 
 /// Canvas offset of pasted and duplicated nodes.
 const PASTE_OFFSET: [f32; 2] = [30.0, 30.0];
@@ -146,6 +171,8 @@ pub struct PatchEditor {
     drag: Option<Drag>,
     search: Option<Search>,
     status: Option<(String, Instant)>,
+    selected_comment: Option<CommentId>,
+    editing: Option<CommentEdit>,
 }
 
 impl PatchEditor {
@@ -161,6 +188,7 @@ impl PatchEditor {
     pub fn select_only(&mut self, id: Option<NodeId>) {
         self.selected = id;
         self.selection = id.into_iter().collect();
+        self.selected_comment = None;
     }
 
     /// Adds `id` to the selection or removes it.
@@ -253,6 +281,12 @@ impl PatchEditor {
                 (self.selection.clone(), *offset)
             }
             Some(Drag::Node { id, offset }) => (BTreeSet::from([*id]), *offset),
+            Some(Drag::Comment {
+                offset,
+                resize: false,
+                contained,
+                ..
+            }) => (contained.clone(), *offset),
             _ => (BTreeSet::new(), Vec2::ZERO),
         };
         let node_pos = |id: NodeId| -> Option<Pos2> {
@@ -265,6 +299,177 @@ impl PatchEditor {
             })
         };
         let modifier = ui.input(|i| i.modifiers.shift || i.modifiers.command);
+
+        // Comment boxes, under everything else.
+        let comment_drag = match &self.drag {
+            Some(Drag::Comment {
+                id, offset, resize, ..
+            }) => Some((*id, *offset, *resize)),
+            _ => None,
+        };
+        for c in net.comments() {
+            let mut pos = Pos2::new(c.pos[0], c.pos[1]);
+            let mut size = Vec2::new(c.size[0], c.size[1]);
+            if let Some((id, off, resize)) = comment_drag
+                && id == c.id
+            {
+                if resize {
+                    size = (size + off).max(MIN_COMMENT);
+                } else {
+                    pos += off;
+                }
+            }
+            let screen = Rect::from_min_size(to_screen(pos), size * zoom);
+            if !rect.intersects(screen) {
+                continue;
+            }
+            let selected = self.selected_comment == Some(c.id);
+            let stroke = if selected {
+                Stroke::new(2.0, ui.visuals().selection.stroke.color)
+            } else {
+                Stroke::new(1.0, Color32::from_white_alpha(40))
+            };
+            let r = (6.0 * zoom).clamp(1.0, 10.0);
+            painter.rect(screen, r, COMMENT_FILL, stroke, StrokeKind::Inside);
+            let header = Rect::from_min_size(
+                screen.min,
+                Vec2::new(screen.width(), (COMMENT_HEADER * zoom).min(screen.height())),
+            );
+            painter.rect_filled(
+                header,
+                CornerRadius {
+                    nw: r as u8,
+                    ne: r as u8,
+                    sw: 0,
+                    se: 0,
+                },
+                Color32::from_white_alpha(14),
+            );
+            if zoom > 0.2 {
+                let clip = painter.with_clip_rect(screen.shrink(2.0));
+                let mut lines = c.text.lines();
+                clip.text(
+                    header.left_center() + Vec2::new(8.0 * zoom, 0.0),
+                    Align2::LEFT_CENTER,
+                    lines.next().unwrap_or(""),
+                    FontId::proportional(14.0 * zoom),
+                    Color32::from_gray(220),
+                );
+                let body: Vec<&str> = lines.collect();
+                if !body.is_empty() && zoom > LOD_ZOOM {
+                    clip.text(
+                        header.left_bottom() + Vec2::new(8.0 * zoom, 6.0 * zoom),
+                        Align2::LEFT_TOP,
+                        body.join("\n"),
+                        FontId::proportional(11.0 * zoom),
+                        ui.visuals().weak_text_color(),
+                    );
+                }
+            }
+            let hr = ui.interact(
+                header,
+                Id::unique(("atd-comment", c.id.0)),
+                Sense::click_and_drag(),
+            );
+            let grip = Rect::from_min_size(screen.max - Vec2::splat(14.0), Vec2::splat(14.0));
+            let gr = ui.interact(
+                grip,
+                Id::unique(("atd-comment-size", c.id.0)),
+                Sense::drag(),
+            );
+            for k in [4.0, 8.0] {
+                painter.line_segment(
+                    [
+                        Pos2::new(screen.max.x - k, screen.max.y - 2.0),
+                        Pos2::new(screen.max.x - 2.0, screen.max.y - k),
+                    ],
+                    Stroke::new(1.0, Color32::from_white_alpha(80)),
+                );
+            }
+            if hr.clicked() || hr.drag_started() {
+                self.selected_comment = Some(c.id);
+                if !modifier {
+                    self.selected = None;
+                    self.selection.clear();
+                }
+            }
+            if hr.double_clicked() {
+                self.editing = Some(CommentEdit {
+                    id: c.id,
+                    text: c.text.clone(),
+                    at: header.left_bottom(),
+                    focus: true,
+                });
+            }
+            if hr.drag_started() {
+                // Nodes wholly inside the box move with it.
+                let area = Rect::from_min_size(pos, size);
+                let contained = net
+                    .nodes()
+                    .filter(|n| {
+                        reg.get(&n.type_id).is_some_and(|s| {
+                            area.contains_rect(Rect::from_min_size(
+                                Pos2::new(n.pos[0], n.pos[1]),
+                                node_size(s),
+                            ))
+                        })
+                    })
+                    .map(|n| n.id)
+                    .collect();
+                self.drag = Some(Drag::Comment {
+                    id: c.id,
+                    offset: Vec2::ZERO,
+                    resize: false,
+                    contained,
+                });
+            }
+            if gr.drag_started() {
+                self.drag = Some(Drag::Comment {
+                    id: c.id,
+                    offset: Vec2::ZERO,
+                    resize: true,
+                    contained: BTreeSet::new(),
+                });
+            }
+            if (hr.dragged() || gr.dragged())
+                && let Some(Drag::Comment { id, offset, .. }) = &mut self.drag
+                && *id == c.id
+            {
+                *offset += (hr.drag_delta() + gr.drag_delta()) / zoom;
+            }
+            if (hr.drag_stopped() || gr.drag_stopped())
+                && let Some(Drag::Comment {
+                    id,
+                    offset,
+                    resize,
+                    contained,
+                }) = self.drag.take()
+                && id == c.id
+                && offset != Vec2::ZERO
+            {
+                let mut comment = c.clone();
+                let mut edits = Vec::new();
+                if resize {
+                    let s = (Vec2::new(c.size[0], c.size[1]) + offset).max(MIN_COMMENT);
+                    comment.size = [s.x.round(), s.y.round()];
+                } else {
+                    comment.pos = [(c.pos[0] + offset.x).round(), (c.pos[1] + offset.y).round()];
+                    for n in contained.iter().filter_map(|id| net.node(*id)) {
+                        edits.push(Edit::Move {
+                            node: n.id,
+                            pos: [(n.pos[0] + offset.x).round(), (n.pos[1] + offset.y).round()],
+                        });
+                    }
+                }
+                edits.push(Edit::UpdateComment { comment });
+                let label = if resize {
+                    "resize comment"
+                } else {
+                    "move comment"
+                };
+                pending.push((label.into(), edits));
+            }
+        }
 
         // Wires, under the nodes.
         for wire in net.wires() {
@@ -325,6 +530,9 @@ impl PatchEditor {
                 Id::unique(("atd-node", node.id.0)),
                 Sense::click_and_drag(),
             );
+            if resp.clicked() || resp.drag_started() {
+                self.selected_comment = None;
+            }
             if resp.clicked() {
                 if modifier {
                     self.toggle(node.id);
@@ -625,15 +833,21 @@ impl PatchEditor {
         let mut clipboard: Option<Fragment> = None;
         let mut paste: Option<(Fragment, [f32; 2])> = None;
         let mut delete = false;
+        let mut new_comment: Option<Rect> = None;
         if keys {
-            let (select_all, duplicate, del, events) = ui.input(|i| {
+            let (select_all, duplicate, del, events, comment) = ui.input(|i| {
                 (
                     i.modifiers.command && i.key_pressed(Key::A),
                     i.modifiers.command && i.key_pressed(Key::D),
                     i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace),
                     i.events.clone(),
+                    !i.modifiers.command && i.key_pressed(Key::C),
                 )
             });
+            if comment {
+                new_comment =
+                    Some(self.comment_area(net, reg, pointer.map(|p| view.to_canvas(origin, p))));
+            }
             if select_all {
                 self.selection = net.nodes().map(|n| n.id).collect();
                 self.selected = self.selection.iter().next_back().copied();
@@ -670,6 +884,9 @@ impl PatchEditor {
                 paste = Some((Fragment::copy(net, &self.selection), PASTE_OFFSET));
             }
         }
+        if delete && let Some(id) = self.selected_comment.take() {
+            pending.push(("delete comment".into(), vec![Edit::RemoveComment { id }]));
+        }
         if delete && !self.selection.is_empty() {
             let removes: Vec<Edit> = self
                 .selection
@@ -702,6 +919,28 @@ impl PatchEditor {
         if let Some((type_id, at)) = chosen {
             self.add_node(engine, &type_id, at);
         }
+        if let Some(area) = new_comment {
+            let id = engine.alloc_comment_id();
+            let comment = Comment {
+                id,
+                text: "Comment".into(),
+                pos: [area.min.x.round(), area.min.y.round()],
+                size: [area.width().round(), area.height().round()],
+            };
+            match engine.edit("add comment", [Edit::AddComment { comment }]) {
+                Ok(()) => {
+                    self.selected_comment = Some(id);
+                    self.editing = Some(CommentEdit {
+                        id,
+                        text: "Comment".into(),
+                        at: to_screen(area.min) + Vec2::new(0.0, COMMENT_HEADER * zoom),
+                        focus: true,
+                    });
+                }
+                Err(e) => self.status(e.to_string()),
+            }
+        }
+        self.comment_editor(ui, engine);
         if let Some((fragment, offset)) = paste {
             let n = fragment.nodes.len();
             let edits = self.paste_edits(engine, &fragment, offset);
@@ -709,6 +948,89 @@ impl PatchEditor {
                 self.select_only(None);
                 self.status(e.to_string());
             }
+        }
+    }
+
+    /// Canvas area for a new comment: around the selection, or at `at`.
+    fn comment_area(
+        &self,
+        net: &atd_core::graph::Network,
+        reg: &Registry,
+        at: Option<Pos2>,
+    ) -> Rect {
+        let around = self
+            .selection
+            .iter()
+            .filter_map(|id| net.node(*id))
+            .filter_map(|n| {
+                let s = reg.get(&n.type_id)?;
+                Some(Rect::from_min_size(
+                    Pos2::new(n.pos[0], n.pos[1]),
+                    node_size(s),
+                ))
+            })
+            .reduce(|a, b| a.union(b));
+        match around {
+            Some(r) => Rect::from_min_max(
+                r.min - Vec2::new(24.0, 24.0 + COMMENT_HEADER),
+                r.max + Vec2::splat(24.0),
+            ),
+            None => Rect::from_min_size(at.unwrap_or_default(), Vec2::new(320.0, 200.0)),
+        }
+    }
+
+    /// The comment text editor popup; commits on Ctrl/Cmd+Enter or OK.
+    fn comment_editor(&mut self, ui: &mut Ui, engine: &mut Engine) {
+        let Some(edit) = &mut self.editing else {
+            return;
+        };
+        let mut done: Option<bool> = None;
+        egui::Area::new(Id::unique("atd-comment-editor"))
+            .fixed_pos(edit.at)
+            .order(egui::Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.set_width(280.0);
+                    let r = ui.add(
+                        egui::TextEdit::multiline(&mut edit.text)
+                            .desired_rows(4)
+                            .hint_text("First line is the title"),
+                    );
+                    if edit.focus {
+                        r.request_focus();
+                        edit.focus = false;
+                    }
+                    ui.horizontal(|ui| {
+                        if ui.button("OK").clicked()
+                            || ui.input(|i| i.modifiers.command && i.key_pressed(Key::Enter))
+                        {
+                            done = Some(true);
+                        }
+                        if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(Key::Escape))
+                        {
+                            done = Some(false);
+                        }
+                        ui.weak("Ctrl+Enter");
+                    });
+                });
+            });
+        match done {
+            Some(true) => {
+                let edit = self.editing.take().expect("editing");
+                if let Some(old) = engine.network().comment(edit.id)
+                    && old.text != edit.text
+                {
+                    let comment = Comment {
+                        text: edit.text,
+                        ..old.clone()
+                    };
+                    if let Err(e) = engine.edit("edit comment", [Edit::UpdateComment { comment }]) {
+                        self.status(e.to_string());
+                    }
+                }
+            }
+            Some(false) => self.editing = None,
+            None => {}
         }
     }
 
@@ -737,6 +1059,13 @@ impl PatchEditor {
             let p = Pos2::new(node.pos[0], node.pos[1]);
             bounds = bounds.union(Rect::from_min_size(p, size));
         }
+        for c in net.comments() {
+            let r = Rect::from_min_size(
+                Pos2::new(c.pos[0], c.pos[1]),
+                Vec2::new(c.size[0], c.size[1]),
+            );
+            bounds = bounds.union(r);
+        }
         let bounds = bounds.expand(40.0);
         let map = Rect::from_min_size(
             rect.right_bottom() - Vec2::new(MINIMAP.x + 10.0, MINIMAP.y + 10.0),
@@ -753,6 +1082,19 @@ impl PatchEditor {
             Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
             StrokeKind::Inside,
         );
+        for c in net.comments() {
+            let r = Rect::from_two_pos(
+                to_map(Pos2::new(c.pos[0], c.pos[1])),
+                to_map(Pos2::new(c.pos[0] + c.size[0], c.pos[1] + c.size[1])),
+            );
+            painter.rect(
+                r,
+                1.0,
+                COMMENT_FILL,
+                Stroke::new(1.0, Color32::from_white_alpha(50)),
+                StrokeKind::Inside,
+            );
+        }
         for node in net.nodes() {
             let Some(schema) = reg.get(&node.type_id) else {
                 continue;

@@ -31,6 +31,29 @@ impl fmt::Display for NodeId {
     }
 }
 
+/// Stable comment-box identifier. Comments draw from the same counter as
+/// nodes, so every ID in a network is unique.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct CommentId(pub u64);
+
+impl fmt::Display for CommentId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "c{}", self.0)
+    }
+}
+
+/// A comment box on the Patch canvas (FR-P1): a note with an area.
+/// Moving it in the editor also moves the nodes inside it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Comment {
+    pub id: CommentId,
+    pub text: String,
+    /// Top-left corner and size in canvas units.
+    pub pos: [f32; 2],
+    pub size: [f32; 2],
+}
+
 /// A parameter override: a constant value, optionally driven by an expression.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Param {
@@ -142,6 +165,10 @@ pub enum GraphError {
     NoNode(NodeId),
     #[error("node {0} already exists")]
     DuplicateId(NodeId),
+    #[error("no comment {0}")]
+    NoComment(CommentId),
+    #[error("ID {0} is already in use")]
+    CommentIdInUse(CommentId),
     #[error("a node named `{0}` already exists")]
     DuplicateName(String),
     #[error("invalid node name `{0}`: use letters, digits and `_`, starting with a letter or `_`")]
@@ -205,6 +232,17 @@ pub enum Edit {
         node: NodeId,
         pos: [f32; 2],
     },
+    /// Adds a comment box. Its ID must not be in use.
+    AddComment {
+        comment: Comment,
+    },
+    RemoveComment {
+        id: CommentId,
+    },
+    /// Replaces a comment's text, position and size.
+    UpdateComment {
+        comment: Comment,
+    },
 }
 
 /// Result of applying one edit.
@@ -233,16 +271,20 @@ pub struct Network {
     /// Wires keyed by their input (each input has at most one wire), ordered
     /// by input node so a node's inputs are one range lookup.
     inputs: BTreeMap<Endpoint, Endpoint>,
+    comments: BTreeMap<CommentId, Comment>,
     next_id: u64,
 }
 
-/// Serialised form: nodes and wires as sorted lists, which read and diff
-/// well in text files.
+/// Serialised form: nodes, wires and comments as sorted lists, which read
+/// and diff well in text files. `comments` is omitted when empty, so files
+/// without comments are unchanged.
 #[derive(Serialize, Deserialize)]
 struct NetworkRepr {
     next_id: u64,
     nodes: Vec<Node>,
     wires: Vec<Wire>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    comments: Vec<Comment>,
 }
 
 impl From<Network> for NetworkRepr {
@@ -252,6 +294,7 @@ impl From<Network> for NetworkRepr {
             next_id: net.next_id,
             nodes: net.nodes.into_values().collect(),
             wires,
+            comments: net.comments.into_values().collect(),
         }
     }
 }
@@ -289,11 +332,34 @@ impl TryFrom<NetworkRepr> for Network {
                 ));
             }
         }
+        for comment in repr.comments {
+            let id = comment.id;
+            if id.0 >= net.next_id || net.nodes.contains_key(&NodeId(id.0)) {
+                return Err(format!("comment {id} is not a fresh ID below next_id"));
+            }
+            if net.comments.insert(id, comment).is_some() {
+                return Err(format!("duplicate comment {id}"));
+            }
+        }
         Ok(net)
     }
 }
 
 impl Network {
+    /// Reserves a fresh comment ID (from the node ID counter).
+    pub fn alloc_comment_id(&mut self) -> CommentId {
+        CommentId(self.alloc_id().0)
+    }
+
+    pub fn comment(&self, id: CommentId) -> Option<&Comment> {
+        self.comments.get(&id)
+    }
+
+    /// Comments in ID order.
+    pub fn comments(&self) -> impl Iterator<Item = &Comment> {
+        self.comments.values()
+    }
+
     /// Reserves a fresh node ID. IDs are never reused, even after removal.
     pub fn alloc_id(&mut self) -> NodeId {
         let id = NodeId(self.next_id);
@@ -554,7 +620,9 @@ impl Network {
     pub fn apply(&mut self, registry: &Registry, edit: Edit) -> Result<Applied, GraphError> {
         match edit {
             Edit::AddNode { node } => {
-                if self.nodes.contains_key(&node.id) {
+                if self.nodes.contains_key(&node.id)
+                    || self.comments.contains_key(&CommentId(node.id.0))
+                {
                     return Err(GraphError::DuplicateId(node.id));
                 }
                 self.validate_node(registry, &node)?;
@@ -706,6 +774,36 @@ impl Network {
                 let old = std::mem::replace(&mut n.pos, pos);
                 Ok(Applied {
                     inverse: vec![Edit::Move { node, pos: old }],
+                    dirty: vec![],
+                })
+            }
+            Edit::AddComment { comment } => {
+                let id = comment.id;
+                if self.comments.contains_key(&id) || self.nodes.contains_key(&NodeId(id.0)) {
+                    return Err(GraphError::CommentIdInUse(id));
+                }
+                self.next_id = self.next_id.max(id.0 + 1);
+                self.comments.insert(id, comment);
+                Ok(Applied {
+                    inverse: vec![Edit::RemoveComment { id }],
+                    dirty: vec![],
+                })
+            }
+            Edit::RemoveComment { id } => {
+                let comment = self.comments.remove(&id).ok_or(GraphError::NoComment(id))?;
+                Ok(Applied {
+                    inverse: vec![Edit::AddComment { comment }],
+                    dirty: vec![],
+                })
+            }
+            Edit::UpdateComment { comment } => {
+                let slot = self
+                    .comments
+                    .get_mut(&comment.id)
+                    .ok_or(GraphError::NoComment(comment.id))?;
+                let old = std::mem::replace(slot, comment);
+                Ok(Applied {
+                    inverse: vec![Edit::UpdateComment { comment: old }],
                     dirty: vec![],
                 })
             }
@@ -1007,6 +1105,21 @@ pub(crate) mod tests {
         connect(&mut net, &reg, fb, mix, "a");
         connect(&mut net, &reg, g, mix, "b");
         connect(&mut net, &reg, mix, fb, "prev");
+        let note = net.alloc_comment_id();
+        net.apply(
+            &reg,
+            Edit::AddComment {
+                comment: Comment {
+                    id: note,
+                    text: "feedback loop".into(),
+                    pos: [-20.0, -20.0],
+                    size: [400.0, 200.0],
+                },
+            },
+        )
+        .unwrap();
+        // IDs are allocated before use (and never reused, even on undo).
+        let fresh = net.alloc_comment_id();
 
         let edits = vec![
             Edit::RemoveNode { id: fb },
@@ -1028,6 +1141,23 @@ pub(crate) mod tests {
             Edit::Move {
                 node: g,
                 pos: [10.0, -4.0],
+            },
+            Edit::AddComment {
+                comment: Comment {
+                    id: fresh,
+                    text: "new".into(),
+                    pos: [0.0, 0.0],
+                    size: [100.0, 50.0],
+                },
+            },
+            Edit::RemoveComment { id: note },
+            Edit::UpdateComment {
+                comment: Comment {
+                    id: note,
+                    text: "edited".into(),
+                    pos: [5.0, 6.0],
+                    size: [300.0, 200.0],
+                },
             },
         ];
         for edit in edits {
@@ -1139,11 +1269,69 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn comments_round_trip_and_old_files_still_load() {
+        let reg = test_registry();
+        let mut net = Network::default();
+        let g = add(&mut net, &reg, "img.gen");
+        let c = net.alloc_comment_id();
+        assert_ne!(c.0, g.0, "comments and nodes share one ID space");
+        let comment = Comment {
+            id: c,
+            text: "Sources\nlive inputs".into(),
+            pos: [-10.0, -10.0],
+            size: [200.0, 120.0],
+        };
+        net.apply(
+            &reg,
+            Edit::AddComment {
+                comment: comment.clone(),
+            },
+        )
+        .unwrap();
+        let text = serde_json::to_string(&net).unwrap();
+        assert!(text.contains("\"comments\":[{\"id\":"), "{text}");
+        let back: Network = serde_json::from_str(&text).unwrap();
+        assert_eq!(back, net);
+        assert_eq!(back.comment(c), Some(&comment));
+        assert_eq!(serde_json::to_string(&back).unwrap(), text);
+
+        // A comment cannot take a node's ID and vice versa.
+        let clash = Comment {
+            id: CommentId(g.0),
+            ..comment
+        };
+        assert_eq!(
+            net.apply(&reg, Edit::AddComment { comment: clash }),
+            Err(GraphError::CommentIdInUse(CommentId(g.0)))
+        );
+        assert!(
+            net.apply(
+                &reg,
+                Edit::AddNode {
+                    node: Node::new(NodeId(c.0), "img.gen", "x")
+                }
+            )
+            .is_err()
+        );
+
+        // Files without comments (written before they existed) load, and
+        // empty comment lists are not written.
+        let old = r#"{"next_id":1,"nodes":[{"id":0,"type_id":"img.gen","name":"a","pos":[0,0]}],"wires":[]}"#;
+        let net: Network = serde_json::from_str(old).unwrap();
+        assert_eq!(
+            serde_json::to_string(&net).unwrap(),
+            old.replace("[0,0]", "[0.0,0.0]")
+        );
+    }
+
+    #[test]
     fn deserialisation_rejects_broken_structure() {
         let bad = [
             r#"{"next_id":1,"nodes":[{"id":0,"type_id":"img.gen","name":"a","pos":[0,0]},{"id":0,"type_id":"img.gen","name":"b","pos":[0,0]}],"wires":[]}"#,
             r#"{"next_id":0,"nodes":[{"id":0,"type_id":"img.gen","name":"a","pos":[0,0]}],"wires":[]}"#,
             r#"{"next_id":1,"nodes":[],"wires":[{"from":{"node":0,"socket":"out"},"to":{"node":1,"socket":"a"}}]}"#,
+            r#"{"next_id":1,"nodes":[{"id":0,"type_id":"img.gen","name":"a","pos":[0,0]}],"wires":[],"comments":[{"id":0,"text":"","pos":[0,0],"size":[1,1]}]}"#,
+            r#"{"next_id":1,"nodes":[],"wires":[],"comments":[{"id":5,"text":"","pos":[0,0],"size":[1,1]}]}"#,
         ];
         for json in bad {
             assert!(serde_json::from_str::<Network>(json).is_err(), "{json}");

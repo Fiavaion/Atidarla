@@ -574,6 +574,11 @@ impl Engine {
         self.net.alloc_id()
     }
 
+    /// Reserves an ID for a new comment box.
+    pub fn alloc_comment_id(&mut self) -> atd_core::graph::CommentId {
+        self.net.alloc_comment_id()
+    }
+
     /// Applies `edits` as one undo step.
     pub fn edit(
         &mut self,
