@@ -19,8 +19,31 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    // The default egui device plus the optional features the engine uses.
+    let mut setup = eframe::egui_wgpu::WgpuSetupCreateNew::without_display_handle();
+    setup.device_descriptor = std::sync::Arc::new(|adapter| {
+        let base = if adapter.get_info().backend == wgpu::Backend::Gl {
+            wgpu::Limits::downlevel_webgl2_defaults()
+        } else {
+            wgpu::Limits::default()
+        };
+        wgpu::DeviceDescriptor {
+            label: Some("atidarla device"),
+            required_features: atd_gpu::optional_features(adapter),
+            required_limits: wgpu::Limits {
+                max_texture_dimension_2d: 8192,
+                ..base
+            },
+            ..Default::default()
+        }
+    });
+    let wgpu_options = eframe::egui_wgpu::WgpuConfiguration {
+        wgpu_setup: eframe::egui_wgpu::WgpuSetup::CreateNew(setup),
+        ..Default::default()
+    };
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
+        wgpu_options,
         viewport: egui::ViewportBuilder::default()
             .with_title("Atidarla")
             .with_inner_size([1440.0, 900.0])

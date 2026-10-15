@@ -283,9 +283,24 @@ fn widget(ui: &mut Ui, p: &ParamSchema, v: &Value) -> (Option<Value>, bool) {
             (changed.then(|| json!(xs)), active)
         }
         ParamKind::String | ParamKind::Path => {
-            let mut s = v.as_str().unwrap_or_default().to_owned();
-            let r = ui.text_edit_singleline(&mut s);
-            (r.changed().then(|| json!(s)), busy(&r))
+            // Text commits on Enter or focus loss, not per keystroke (a file
+            // path would otherwise be opened once per character); Escape
+            // reverts. The draft lives in egui's memory while editing.
+            let id = ui.scope_id().with(("atd-text-draft", &p.name));
+            let stored = v.as_str().unwrap_or_default();
+            let mut s = ui
+                .data(|d| d.get_temp::<String>(id))
+                .unwrap_or_else(|| stored.to_owned());
+            let r = ui.add_sized([180.0, 18.0], egui::TextEdit::singleline(&mut s));
+            if r.has_focus() {
+                ui.data_mut(|d| d.insert_temp(id, s));
+                (None, true)
+            } else {
+                ui.data_mut(|d| d.remove::<String>(id));
+                let cancelled = ui.input(|i| i.key_pressed(egui::Key::Escape));
+                let commit = r.lost_focus() && !cancelled && s != stored;
+                (commit.then(|| json!(s)), false)
+            }
         }
     }
 }

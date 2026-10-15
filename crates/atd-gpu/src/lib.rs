@@ -99,6 +99,7 @@ impl GpuContext {
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("atd-headless"),
+                required_features: optional_features(&adapter),
                 ..Default::default()
             })
             .await?;
@@ -117,6 +118,13 @@ impl GpuContext {
     pub fn platform_info(&self) -> PlatformInfo {
         platform_info(&self.adapter.get_info())
     }
+}
+
+/// Device features Atidarla uses when the adapter has them, each with a
+/// fallback when it does not (rule 6): BC texture compression (HAP movies
+/// upload without CPU decoding).
+pub fn optional_features(adapter: &wgpu::Adapter) -> wgpu::Features {
+    adapter.features() & wgpu::Features::TEXTURE_COMPRESSION_BC
 }
 
 #[cfg(test)]

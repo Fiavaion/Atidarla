@@ -10,6 +10,7 @@
 
 mod channel_image;
 pub mod isf;
+mod movie;
 mod ops;
 mod ops2;
 mod stateful;
@@ -85,7 +86,7 @@ pub fn register(registry: &mut Registry) {
     let schemas = defs()
         .map(|d| (d.schema)())
         .chain(STATEFUL.iter().map(|s| (s.0)()))
-        .chain([channel_image::schema()]);
+        .chain([channel_image::schema(), movie::schema()]);
     for schema in schemas {
         registry
             .register(schema)
@@ -96,6 +97,7 @@ pub fn register(registry: &mut Registry) {
 /// Registers this family's GPU implementations.
 pub fn library(library: &mut OpLibrary) {
     library.add(channel_image::schema().type_id, channel_image::create);
+    library.add(movie::schema().type_id, movie::create);
     for (schema, factory) in STATEFUL {
         library.add(schema().type_id, factory);
     }
@@ -123,7 +125,7 @@ mod tests {
         register(&mut registry);
         assert_eq!(
             registry.len(),
-            DEFS.len() + DEFS2.len() + STATEFUL.len() + 1
+            DEFS.len() + DEFS2.len() + STATEFUL.len() + 2
         );
         for op in registry.iter() {
             assert!(op.cook_budget_us > 0, "{} has a cook budget", op.type_id);
@@ -157,5 +159,6 @@ mod tests {
             assert!(lib.contains(&schema().type_id));
         }
         assert!(lib.contains(&channel_image::schema().type_id));
+        assert!(lib.contains(&movie::schema().type_id));
     }
 }

@@ -178,7 +178,20 @@ impl IsfDef {
         let spawned = std::thread::Builder::new()
             .name("atd-isf-compile".into())
             .spawn(move || {
-                let _ = tx.send(IsfOp::new(&device, format, &label, &shader));
+                // A panic inside the driver's compiler must not take the
+                // reason with it: report it as the node's error.
+                let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    IsfOp::new(&device, format, &label, &shader)
+                }))
+                .unwrap_or_else(|panic| {
+                    let msg = panic
+                        .downcast_ref::<String>()
+                        .map(String::as_str)
+                        .or_else(|| panic.downcast_ref::<&str>().copied())
+                        .unwrap_or("unknown panic");
+                    Err(format!("shader compilation panicked: {msg}"))
+                });
+                let _ = tx.send(built);
             });
         match spawned {
             Ok(_) => Box::new(Compiling::Pending(rx)),

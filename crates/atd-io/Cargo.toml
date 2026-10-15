@@ -12,6 +12,8 @@ publish.workspace = true
 [dependencies]
 rosc.workspace = true
 cpal.workspace = true
+snap.workspace = true
+thiserror.workspace = true
 log.workspace = true
 
 [lints]
