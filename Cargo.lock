@@ -229,6 +229,7 @@ version = "0.0.1"
 dependencies = [
  "atd-core",
  "atd-gpu",
+ "atd-io",
  "atd-ops-ai",
  "atd-ops-cmp",
  "atd-ops-dat",

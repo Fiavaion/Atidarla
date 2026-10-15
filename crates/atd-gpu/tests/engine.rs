@@ -123,6 +123,7 @@ fn engine() -> Option<Engine> {
         kind: ParamKind::Colour,
         default: json!([0.0, 0.0, 0.0, 1.0]),
         help: String::new(),
+        suggest: None,
     };
     reg.register(schema("img.fill", vec![], vec![colour], false))
         .unwrap();

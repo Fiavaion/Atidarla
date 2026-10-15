@@ -313,7 +313,38 @@ fn widget(ui: &mut Ui, p: &ParamSchema, v: &Value) -> (Option<Value>, bool) {
             let mut s = ui
                 .data(|d| d.get_temp::<String>(id))
                 .unwrap_or_else(|| stored.to_owned());
-            let r = ui.add_sized([180.0, 18.0], egui::TextEdit::singleline(&mut s));
+            let (r, picked) = ui
+                .horizontal(|ui| {
+                    let r = ui.add_sized([180.0, 18.0], egui::TextEdit::singleline(&mut s));
+                    // Offered values (device names), listed in the background.
+                    let mut picked = None;
+                    if let Some(key) = &p.suggest {
+                        ui.menu_button("…", |ui| {
+                            ui.set_min_width(260.0);
+                            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                            let options = crate::suggest::list(key);
+                            if options.is_empty() {
+                                ui.weak("Looking…");
+                            }
+                            for o in options {
+                                let r = ui.selectable_label(o == stored, &o);
+                                if r.clicked() {
+                                    picked = Some(o.clone());
+                                    ui.close();
+                                }
+                                r.on_hover_text(o);
+                            }
+                        })
+                        .response
+                        .on_hover_text("Choose from the available devices");
+                    }
+                    (r, picked)
+                })
+                .inner;
+            if let Some(o) = picked {
+                ui.data_mut(|d| d.remove::<String>(id));
+                return (Some(json!(o)), false);
+            }
             if r.has_focus() {
                 ui.data_mut(|d| d.insert_temp(id, s));
                 (None, true)

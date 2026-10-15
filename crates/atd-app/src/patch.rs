@@ -96,11 +96,17 @@ pub fn search<'a>(registry: &'a Registry, query: &str) -> Vec<&'a OperatorSchema
             if !words.iter().all(|w| hay.contains(w)) {
                 return None;
             }
+            // Exact label, then the whole query as typed at the start of the
+            // label, inside it, then word matches.
+            let q = q.trim();
             let rank = match words.first() {
-                None => 1,
-                Some(w) if label.starts_with(w) => 0,
-                Some(w) if label.contains(w) => 1,
-                _ => 2,
+                None => 2,
+                _ if label == q => 0,
+                _ if label.starts_with(q) => 1,
+                _ if label.contains(q) => 2,
+                Some(w) if label.starts_with(w) => 3,
+                Some(w) if label.contains(w) => 4,
+                _ => 5,
             };
             Some((rank, op))
         })
@@ -1251,6 +1257,9 @@ mod tests {
             "matches summaries"
         );
         assert!(search(&reg, "zzzz").is_empty());
+        // The whole query beats word-by-word matches.
+        atd_ops_sig::register(&mut reg);
+        assert_eq!(search(&reg, "audio in")[0].type_id, "sig.audio_in");
         assert_eq!(search(&reg, "").len(), reg.len());
     }
 

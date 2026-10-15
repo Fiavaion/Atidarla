@@ -125,6 +125,10 @@ pub struct ParamSchema {
     /// One or two sentences for the docs page, tooltips and the assistant.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub help: String,
+    /// For string parameters: a list of values the UI can offer, by key
+    /// (e.g. `audio.inputs`, `midi.inputs`). The value is still free text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggest: Option<String>,
 }
 
 impl ParamSchema {
@@ -135,6 +139,7 @@ impl ParamSchema {
             kind,
             default,
             help: String::new(),
+            suggest: None,
         }
     }
 
@@ -203,6 +208,12 @@ impl ParamSchema {
     /// Adds help text.
     pub fn help(mut self, help: &str) -> Self {
         self.help = help.into();
+        self
+    }
+
+    /// Offers the values listed under `key` in the UI (see [`Self::suggest`]).
+    pub fn suggest(mut self, key: &str) -> Self {
+        self.suggest = Some(key.into());
         self
     }
 
@@ -466,6 +477,7 @@ mod tests {
                     kind: ParamKind::String,
                     default: json!(""),
                     help: String::new(),
+                    suggest: None,
                 },
                 ParamSchema {
                     name: "strength".into(),
@@ -476,6 +488,7 @@ mod tests {
                     },
                     default: json!(0.5),
                     help: String::new(),
+                    suggest: None,
                 },
             ],
             inputs: vec![SocketSchema {
@@ -622,6 +635,7 @@ mod tests {
             },
             default: json!("over"),
             help: String::new(),
+            suggest: None,
         };
         assert!(menu.validate(&json!("add")).is_ok());
         assert!(menu.validate(&json!("mul")).is_err());
@@ -631,6 +645,7 @@ mod tests {
             kind: ParamKind::Vec { n: 3 },
             default: json!([0, 0, 0]),
             help: String::new(),
+            suggest: None,
         };
         assert!(v3.validate(&json!([1, 2.5, 3])).is_ok());
         assert!(v3.validate(&json!([1, 2])).is_err());
@@ -643,6 +658,7 @@ mod tests {
             },
             default: json!(1),
             help: String::new(),
+            suggest: None,
         };
         assert!(i.validate(&json!(4)).is_ok());
         assert!(i.validate(&json!(0)).is_err());

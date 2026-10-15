@@ -16,6 +16,7 @@ path = "src/main.rs"
 [dependencies]
 atd-core.workspace = true
 atd-gpu.workspace = true
+atd-io.workspace = true
 atd-ops-img.workspace = true
 atd-ops-sig.workspace = true
 atd-ops-pnt.workspace = true

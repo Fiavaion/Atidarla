@@ -183,7 +183,8 @@ pub static DEFS3: &[Def] = &[
                 &[],
                 vec![
                     ParamSchema::string("device", "Device", "")
-                        .help("Part of the input port's name; empty for the first port; `virtual` for no device."),
+                        .help("Part of the input port's name; empty for the first port; `virtual` for no device.")
+                        .suggest("midi.inputs"),
                     ParamSchema::int("channel", "Channel", 0, Some(0), Some(16))
                         .help("MIDI channel to listen to (1–16), or 0 for all; channel names drop the `chN_` prefix when one is chosen."),
                     ParamSchema::toggle("normalise", "Normalise", true)
@@ -203,7 +204,8 @@ pub static DEFS3: &[Def] = &[
                 &["in"],
                 vec![
                     ParamSchema::string("device", "Device", "")
-                        .help("Part of the output port's name; empty for the first port; `virtual` for no device."),
+                        .help("Part of the output port's name; empty for the first port; `virtual` for no device.")
+                        .suggest("midi.outputs"),
                     ParamSchema::int("channel", "Channel", 1, Some(1), Some(16))
                         .help("MIDI channel to send on."),
                     ParamSchema::int("first_cc", "First CC", 1, Some(0), Some(127))

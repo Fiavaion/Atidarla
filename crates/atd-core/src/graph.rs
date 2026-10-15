@@ -890,6 +890,7 @@ pub(crate) mod tests {
                 },
                 default: json!(1.0),
                 help: String::new(),
+                suggest: None,
             }],
             inputs,
             outputs,
