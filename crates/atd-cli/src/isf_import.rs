@@ -277,7 +277,7 @@ fn gpu_check(
             sheet.push(pixels.as_deref(), config.width, config.height);
         }
         entry.gpu_ok = Some(error.is_none());
-        entry.error = error.map(|e| format!("gpu: {}", first_line(&e)));
+        entry.error = error.map(|e| format!("gpu: {}", condense(&e)));
         engine.edit("isf-import", [Edit::RemoveNode { id: node }])?;
     }
     if let (Some(sheet), Some(path)) = (sheet, thumbs) {
@@ -367,8 +367,20 @@ impl Sheet {
     }
 }
 
-fn first_line(s: &str) -> &str {
-    s.lines().find(|l| !l.trim().is_empty()).unwrap_or(s)
+/// One line with the whole cause chain (wgpu errors span several lines),
+/// capped for the report.
+fn condense(s: &str) -> String {
+    let joined = s
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join(" / ");
+    let mut out: String = joined.chars().take(600).collect();
+    if out.len() < joined.len() {
+        out.push('…');
+    }
+    out
 }
 
 /// The error message without identifiers and numbers, for grouping.
