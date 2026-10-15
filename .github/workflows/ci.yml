@@ -44,6 +44,9 @@ jobs:
           toolchain: "1.97.0"
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Linux audio headers (cpal → ALSA)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy
@@ -96,7 +99,7 @@ jobs:
           key: app-smoke
       - name: Linux display and Vulkan driver
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb libxkbcommon-x11-0 mesa-vulkan-drivers
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb libxkbcommon-x11-0 mesa-vulkan-drivers libasound2-dev
       - name: Build
         run: cargo build -p atd-app --release
       - name: Smoke run

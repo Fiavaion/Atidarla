@@ -1,4 +1,4 @@
-//! Audio operators: file playback and spectrum analysis.
+//! Audio operators: live input, file playback and spectrum analysis.
 //!
 //! Audio arrives as audio-rate [`Channels`] blocks: each engine frame carries
 //! the samples played since the previous frame. Decoding happens on a worker
@@ -147,6 +147,77 @@ impl SigOp for AudioFileIn {
             self.pos %= frames as f64;
         } else {
             self.pos = self.pos.min(frames as f64);
+        }
+        Ok(())
+    }
+}
+
+/// Live audio input (device capture on an `atd-io` thread).
+#[derive(Debug, Default)]
+pub struct AudioIn {
+    /// Device and active state the open capture was started with.
+    opened: Option<(String, bool)>,
+    input: Option<atd_io::audio_in::AudioIn>,
+    /// Interleaved samples drained from the ring, reused.
+    scratch: Vec<f32>,
+}
+
+const MULTI_NAMES: [&str; 8] = [
+    "chan1", "chan2", "chan3", "chan4", "chan5", "chan6", "chan7", "chan8",
+];
+
+impl SigOp for AudioIn {
+    fn cook(&mut self, ctx: &mut SigCtx<'_>) -> Result<(), String> {
+        let p = ctx.params;
+        let device = p.str("device");
+        let active = p.bool("active");
+        let changed = self
+            .opened
+            .as_ref()
+            .is_none_or(|(d, a)| d != device || *a != active);
+        if changed {
+            // Opening never blocks: the device opens on its own thread.
+            self.input = active.then(|| atd_io::audio_in::AudioIn::open(device));
+            self.opened = Some((device.to_owned(), active));
+        }
+        let Some(input) = &self.input else {
+            ctx.output.set_block(&[], 0.0, 0);
+            return Ok(());
+        };
+        if let Some(e) = input.error() {
+            ctx.output.set_block(&[], 0.0, 0);
+            return Err(e.to_owned());
+        }
+        let (Some(format), Some(ring)) = (input.format(), input.ring()) else {
+            ctx.output.set_block(&[], 0.0, 0);
+            return Ok(());
+        };
+        let stride = usize::from(format.channels.max(1));
+        let names: &[&str] = match stride {
+            1 => &["mono"],
+            2 => &["left", "right"],
+            n => &MULTI_NAMES[..n.min(MULTI_NAMES.len())],
+        };
+        // Keep the newest MAX_BLOCK frames if the cook fell behind.
+        let mut frames = ring.available() / stride;
+        if frames > MAX_BLOCK {
+            ring.skip((frames - MAX_BLOCK) * stride);
+            frames = MAX_BLOCK;
+        }
+        if self.scratch.capacity() < MAX_BLOCK * stride {
+            self.scratch
+                .reserve(MAX_BLOCK * stride - self.scratch.len());
+        }
+        self.scratch.clear();
+        self.scratch.resize(frames * stride, 0.0);
+        let got = ring.pop(&mut self.scratch) / stride;
+        ctx.output.reserve(MAX_BLOCK * names.len());
+        ctx.output.set_block(names, format.rate as f32, got);
+        let gain = p.f32("gain");
+        for c in 0..names.len() {
+            for (i, out) in ctx.output.channel_mut(c).iter_mut().enumerate() {
+                *out = self.scratch[i * stride + c] * gain;
+            }
         }
         Ok(())
     }
@@ -470,5 +541,103 @@ mod tests {
             (level - std::f32::consts::FRAC_1_SQRT_2).abs() < 0.02,
             "sine RMS: {level}"
         );
+    }
+
+    fn cook_audio_in(
+        op: &mut AudioIn,
+        out: &mut Channels,
+        reg: &Registry,
+        net: &Network,
+        id: NodeId,
+    ) -> Result<(), String> {
+        let sig = HashMap::new();
+        let mut ctx = SigCtx {
+            inputs: SigInputs::new(&[], &sig),
+            output: out,
+            params: Params::new(net, reg, &sig, id),
+            time: 0.0,
+            dt: 0.016,
+            frame: 0,
+        };
+        op.cook(&mut ctx)
+    }
+
+    #[test]
+    fn audio_in_streams_the_test_tone_and_releases_it() {
+        let (reg, mut net, id) = net_with(
+            "sig.audio_in",
+            &[
+                ("device", json!(atd_io::audio_in::TEST_TONE)),
+                ("gain", json!(2.0)),
+            ],
+        );
+        let mut op = AudioIn::default();
+        let mut out = Channels::default();
+        let start = std::time::Instant::now();
+        cook_audio_in(&mut op, &mut out, &reg, &net, id).unwrap();
+        assert!(
+            start.elapsed() < std::time::Duration::from_millis(50),
+            "never blocks"
+        );
+        // Collect about 0.1 s of audio.
+        let mut left = Vec::new();
+        while left.len() < 4800 {
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(5),
+                "audio arrived"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            cook_audio_in(&mut op, &mut out, &reg, &net, id).unwrap();
+            if !out.is_empty() {
+                assert_eq!(out.names().collect::<Vec<_>>(), ["left", "right"]);
+                assert_eq!(out.rate(), 48_000.0);
+                left.extend_from_slice(out.channel(0));
+            }
+        }
+        // Gain 2 on a 0.5 sine: peak ≈ 1; 440 Hz → about 88 zero crossings in 0.1 s.
+        let peak = left.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+        assert!((0.9..=1.0).contains(&peak), "peak {peak}");
+        let crossings = left[..4800]
+            .windows(2)
+            .filter(|w| (w[0] < 0.0) != (w[1] < 0.0))
+            .count();
+        assert!((84..=92).contains(&crossings), "{crossings} crossings");
+
+        net.apply(
+            &reg,
+            Edit::SetParam {
+                node: id,
+                param: "active".into(),
+                value: Some(Param::constant(json!(false))),
+            },
+        )
+        .unwrap();
+        cook_audio_in(&mut op, &mut out, &reg, &net, id).unwrap();
+        assert!(
+            out.is_empty() && op.input.is_none(),
+            "inactive releases the device"
+        );
+    }
+
+    #[test]
+    fn audio_in_reports_unknown_devices() {
+        let (reg, net, id) = net_with("sig.audio_in", &[("device", json!("no such input"))]);
+        let mut op = AudioIn::default();
+        let mut out = Channels::default();
+        let start = std::time::Instant::now();
+        loop {
+            match cook_audio_in(&mut op, &mut out, &reg, &net, id) {
+                Ok(()) => assert!(out.is_empty()),
+                Err(e) => {
+                    assert!(e.contains("no such input") || e.contains("audio"), "{e}");
+                    break;
+                }
+            }
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(10),
+                "error reported"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
     }
 }

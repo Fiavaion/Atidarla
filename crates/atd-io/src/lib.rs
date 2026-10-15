@@ -6,7 +6,8 @@
 //! cook path through short, non-blocking hand-offs, so the render thread
 //! never waits on a device or the network (CLAUDE.md rule 1).
 //!
-//! **Status (M1 pre-work):** OSC in and out ([`osc`]). Other protocols land
+//! **Status (M1 pre-work):** OSC in and out ([`osc`]); live audio capture ([`audio_in`]). Other protocols land
 //! with their operators.
 
+pub mod audio_in;
 pub mod osc;

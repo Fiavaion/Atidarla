@@ -11,6 +11,7 @@ publish.workspace = true
 
 [dependencies]
 rosc.workspace = true
+cpal.workspace = true
 log.workspace = true
 
 [lints]

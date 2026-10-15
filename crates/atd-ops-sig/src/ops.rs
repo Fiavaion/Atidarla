@@ -4,7 +4,7 @@ use atd_core::registry::{OpFamily, OperatorSchema, ParamSchema, SocketSchema, Wi
 use atd_gpu::engine::{SigCtx, SigOp};
 
 use crate::Def;
-use crate::audio::{AudioFileIn, FFT_SIZES, Spectrum};
+use crate::audio::{AudioFileIn, AudioIn, FFT_SIZES, Spectrum};
 
 pub(crate) fn sig(
     id: &str,
@@ -591,6 +591,27 @@ pub static DEFS: &[Def] = &[
             )
         },
         create: || Box::<AudioFileIn>::default(),
+    },
+    Def {
+        schema: || {
+            sig(
+                "audio_in",
+                "Audio In",
+                "Live audio from an input device as audio-rate channels (`left`/`right`, `mono`, or `chan1`…). The device opens and runs on its own thread.",
+                &[],
+                vec![
+                    ParamSchema::string("device", "Device", "").help(
+                        "Input device name; empty for the system default. `test-tone` is a built-in 440/660 Hz stereo source.",
+                    ),
+                    ParamSchema::toggle("active", "Active", true)
+                        .help("Capture from the device; off releases it."),
+                    ParamSchema::float("gain", "Gain", 1.0, Some(0.0), None)
+                        .help("Scales the samples."),
+                ],
+                true,
+            )
+        },
+        create: || Box::<AudioIn>::default(),
     },
     Def {
         schema: || {

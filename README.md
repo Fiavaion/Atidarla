@@ -31,7 +31,7 @@ To use ISF shaders in the app, set `ATIDARLA_ISF_PATH` to one or more directorie
 
 Set `ATD_PYTHON` to choose the interpreter the AI Host tests spawn (default: `python` on Windows, `python3` elsewhere).
 
-**Linux (best-effort):** the app loads `libxkbcommon-x11` (X11) or the Wayland client libraries at runtime and needs a Vulkan driver. On Debian/Ubuntu: `apt install libxkbcommon-x11-0 mesa-vulkan-drivers`.
+**Linux (best-effort):** the app loads `libxkbcommon-x11` (X11) or the Wayland client libraries at runtime and needs a Vulkan driver. Building needs the ALSA headers for audio input. On Debian/Ubuntu: `apt install libxkbcommon-x11-0 mesa-vulkan-drivers libasound2-dev`.
 
 ## Layout
 

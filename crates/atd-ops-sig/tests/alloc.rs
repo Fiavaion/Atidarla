@@ -122,6 +122,17 @@ fn every_sig_operator_cooks_without_allocating() {
             )
             .unwrap();
         }
+        if schema.type_id == "sig.audio_in" {
+            net.apply(
+                &reg,
+                Edit::SetParam {
+                    node: id,
+                    param: "device".into(),
+                    value: Some(Param::constant(json!(atd_io::audio_in::TEST_TONE))),
+                },
+            )
+            .unwrap();
+        }
         if schema.type_id == "sig.osc_in" {
             net.apply(
                 &reg,
@@ -173,17 +184,22 @@ fn every_sig_operator_cooks_without_allocating() {
     };
     COUNTING.with(|c| c.set(true));
     let at_start = ALLOCS.load(Ordering::Relaxed);
-    // Warm up until the audio file has decoded on its worker thread.
+    // Warm up until the audio file has decoded and the test tone streams.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         run(&mut cases, 3, 0.0);
-        let loaded = cases
-            .iter()
-            .any(|(ty, _, _, _, out)| ty == "sig.audio_file_in" && !out.is_empty());
+        let loaded = ["sig.audio_file_in", "sig.audio_in"].iter().all(|want| {
+            cases
+                .iter()
+                .any(|(ty, _, _, _, out)| ty == want && !out.is_empty())
+        });
         if loaded {
             break;
         }
-        assert!(std::time::Instant::now() < deadline, "audio file decoded");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "audio file decoded and test tone streaming"
+        );
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
     run(&mut cases, 3, 0.0);
