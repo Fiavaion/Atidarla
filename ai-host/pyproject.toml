@@ -1,0 +1,26 @@
+[project]
+name = "atd-ai-host"
+version = "0.0.1"
+description = "Atidarla local AI Host: runs model work out of process for the Atidarla engine"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+requires-python = ">=3.11"
+# The M0 prototype uses the standard library only. Model runtimes (torch,
+# TensorRT, ONNX Runtime, Core ML) arrive as optional extras in M4.
+dependencies = []
+
+[project.scripts]
+atd-ai-host = "atd_ai_host.__main__:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/atd_ai_host"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

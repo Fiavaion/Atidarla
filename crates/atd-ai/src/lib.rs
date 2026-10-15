@@ -1,0 +1,19 @@
+//! AI Host protocol, supervisor, compute router, provider adapters, model
+//! manager and Output Governor (PRD §5.1, §5.2 `atd-ai`, §7.5).
+//!
+//! **Status (M0):** spike (d), a prototype of AI Host Protocol v1 (FR-A1):
+//! JSON-RPC control over a local stream socket, and frames passed through a
+//! shared-memory ring. See `docs/spikes/d-ai-host-protocol.md`. The final
+//! protocol, supervisor and governor land in M4.
+//!
+//! Nothing here may be called from the render thread: AI is asynchronous
+//! and reaches the frame loop only through the Output Governor
+//! (CLAUDE.md rule 1).
+
+pub mod client;
+pub mod protocol;
+pub mod ring;
+
+pub use client::{HostClient, HostCommand};
+pub use protocol::PROTOCOL_VERSION;
+pub use ring::{FrameRing, RingLayout};
