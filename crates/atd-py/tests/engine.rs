@@ -96,7 +96,8 @@ fn python_expressions_arrive_a_frame_late_without_blocking() {
     let mut t = 0.0;
     loop {
         t += 1.0 / 60.0;
-        if red(&mut e, level, t) == 128 {
+        // 0.5 is 127.5 in 8 bits: NVIDIA rounds it down, Metal and WARP up.
+        if matches!(red(&mut e, level, t), 127 | 128) {
             break;
         }
         assert!(

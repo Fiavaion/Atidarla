@@ -125,6 +125,9 @@ fn check(bc: bool) {
         let got = frame(&mut e, node, 0.0);
         let want = std::fs::read(data(&format!("{name}.f2.rgba"))).unwrap();
         let d = worst(&got, &want);
+        // GPUs decode BC1/BC3 with their own interpolation: NVIDIA is up to 3
+        // levels from FFmpeg where the CPU path is within 2.
+        let tolerance = tolerance + if bc { 2 } else { 0 };
         assert!(d <= tolerance, "{name} (bc: {bc}): max difference {d}");
         e.edit("remove", [Edit::RemoveNode { id: node }]).unwrap();
     }

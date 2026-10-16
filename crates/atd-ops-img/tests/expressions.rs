@@ -118,6 +118,15 @@ fn red(e: &mut Engine, node: NodeId, time: f64) -> u8 {
     read_rgba8(e.device(), e.queue(), e.result(node).unwrap()).unwrap()[0]
 }
 
+/// Levels that fall exactly between two 8-bit values (0.5 is 127.5) round up
+/// on Metal and WARP and down on NVIDIA: accept either.
+fn assert_near(got: u8, want: u8) {
+    assert!(
+        got.abs_diff(want) <= 1,
+        "level {got}, expected {want} +/- 1"
+    );
+}
+
 /// White → Level; returns (constant, level).
 fn white_level(e: &mut Engine, name: &str) -> (NodeId, NodeId) {
     let white = add(
@@ -140,7 +149,7 @@ fn time_frame_and_me_digits() {
     // `time` makes the node cook every frame without any edit.
     assert_eq!(red(&mut e, level, 1.5), 191);
     expr(&mut e, level, "brightness", "me.digits / 8");
-    assert_eq!(red(&mut e, level, 2.0), 128);
+    assert_near(red(&mut e, level, 2.0), 128);
     // A toggle: invert on even frames.
     expr(&mut e, level, "brightness", "1");
     expr_with(&mut e, level, "invert", "frame % 2 == 0", json!(false));
@@ -174,7 +183,7 @@ fn channels_and_parameters_of_other_nodes() {
         "brightness",
         "op('a').par.brightness + op('ramp1').par.colour_b[0]",
     );
-    assert_eq!(red(&mut e, a, 0.0), 128);
+    assert_near(red(&mut e, a, 0.0), 128);
     assert_eq!(red(&mut e, b, 0.0), 255);
     // Changing the source recooks the readers, though nothing is wired.
     e.edit(
@@ -187,7 +196,7 @@ fn channels_and_parameters_of_other_nodes() {
     )
     .unwrap();
     assert_eq!(red(&mut e, a, 1.0), 51);
-    assert_eq!(red(&mut e, b, 1.0), 179);
+    assert_near(red(&mut e, b, 1.0), 179);
     // Renaming the source breaks the reference: an error, the stored value.
     e.edit(
         "rename",
@@ -219,7 +228,7 @@ fn errors_show_on_the_node_and_keep_the_value() {
         Some("expression for `brightness`: division by zero")
     );
     expr(&mut e, level, "brightness", "0.5");
-    assert_eq!(red(&mut e, level, 1.0), 128);
+    assert_near(red(&mut e, level, 1.0), 128);
     assert_eq!(e.error(level), None);
     // Two parameters referring to each other.
     let (_, other) = white_level(&mut e, "level2");

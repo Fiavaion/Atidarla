@@ -456,11 +456,12 @@ mod tests {
         let edits = absolute_paths(&e);
         assert_eq!(edits.len(), 1);
         e.edit("absolute", edits).unwrap();
-        assert_eq!(file_param(&e, "inside"), inside.to_string_lossy());
+        // (Joining may leave mixed separators on Windows: compare as paths.)
+        assert_eq!(Path::new(&file_param(&e, "inside")), inside);
         let second = root.join("second.atidarla");
         e.set_project_dir(Some(second.clone()));
         save(&e, &meta, &second).unwrap();
-        assert_eq!(saved_file(&second, "inside"), inside.to_string_lossy());
+        assert_eq!(Path::new(&saved_file(&second, "inside")), inside);
         std::fs::remove_dir_all(&root).ok();
     }
 
