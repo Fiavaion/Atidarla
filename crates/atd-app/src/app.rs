@@ -41,6 +41,8 @@ pub struct AtidarlaApp {
     panels: Panels,
     smoke: Option<Smoke>,
     start: Instant,
+    /// The latest uncaptured GPU error, shown until dismissed.
+    gpu_error: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 }
 
 /// Everything the tabs render, split from the dock so both can be borrowed.
@@ -76,6 +78,20 @@ impl AtidarlaApp {
             );
         }
 
+        // A GPU error (out of memory, a driver fault) must not end a show:
+        // log it and show it, instead of wgpu's default panic.
+        let gpu_error: std::sync::Arc<std::sync::Mutex<Option<String>>> = Default::default();
+        if let Some(rs) = rs {
+            let slot = gpu_error.clone();
+            rs.device
+                .on_uncaptured_error(std::sync::Arc::new(move |e: wgpu::Error| {
+                    log::error!("GPU error: {e}");
+                    if let Ok(mut s) = slot.lock() {
+                        *s = Some(e.to_string());
+                    }
+                }));
+        }
+
         // The engine shares eframe's device, so the viewer shows engine
         // textures directly.
         let mut engine = rs.map(|rs| {
@@ -106,6 +122,7 @@ impl AtidarlaApp {
         );
         Self {
             dock,
+            gpu_error,
             panels: Panels {
                 platform,
                 adapter,
@@ -242,6 +259,23 @@ impl eframe::App for AtidarlaApp {
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.weak(format!("Atidarla {}", atd_core::VERSION));
+                    let last = self.gpu_error.lock().ok().and_then(|g| g.clone());
+                    if let Some(e) = last {
+                        let short: String =
+                            e.lines().next().unwrap_or("").chars().take(60).collect();
+                        ui.separator();
+                        if ui
+                            .colored_label(
+                                egui::Color32::from_rgb(230, 80, 80),
+                                format!("GPU error: {short}"),
+                            )
+                            .on_hover_text(format!("{e}\n\nClick to dismiss."))
+                            .clicked()
+                            && let Ok(mut g) = self.gpu_error.lock()
+                        {
+                            *g = None;
+                        }
+                    }
                     ui.separator();
                     ui.weak(platform_summary(&self.panels.platform));
                 });

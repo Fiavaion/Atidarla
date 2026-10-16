@@ -168,10 +168,7 @@ mod tests {
         let mut sig = HashMap::new();
         sig.insert(src, block);
         let start = Instant::now();
-        let mut f = 0u64;
-        // Cook 20 frames' worth once the device is up.
-        let mut cooked = 0;
-        while cooked < 20 {
+        let mut cook = |op: &mut AudioOut, f: u64| {
             let mut ctx = SigCtx {
                 inputs: SigInputs::new(&sources, &sig),
                 output: &mut out,
@@ -181,20 +178,37 @@ mod tests {
                 frame: f,
             };
             op.cook(&mut ctx).unwrap();
-            if op.output.as_ref().unwrap().ring().is_some() {
-                cooked += 1;
-            }
-            f += 1;
-            assert!(start.elapsed() < Duration::from_secs(5));
-            std::thread::sleep(Duration::from_millis(10));
+            out.value("mono")
+        };
+        // Open the device before pushing anything.
+        cook(&mut op, 0);
+        while op.output.as_ref().unwrap().ring().is_none() {
+            assert!(start.elapsed() < Duration::from_secs(5), "device opened");
+            std::thread::sleep(Duration::from_millis(2));
         }
-        assert_eq!(out.value("mono"), Some(0.8), "passes the input through");
-        std::thread::sleep(Duration::from_millis(250));
+        // Push each 10 ms block only once the device has played the last,
+        // so the latency cap never drops audio however slow the machine.
+        for f in 1..=20 {
+            while op.output.as_ref().unwrap().ring().unwrap().available() > 0 {
+                assert!(
+                    start.elapsed() < Duration::from_secs(10),
+                    "device keeps playing"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            assert_eq!(cook(&mut op, f), Some(0.8), "passes the input through");
+        }
+        while op.output.as_ref().unwrap().ring().unwrap().available() > 0 {
+            assert!(start.elapsed() < Duration::from_secs(10));
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        std::thread::sleep(Duration::from_millis(50));
         let played = op.output.as_ref().unwrap().captured();
         let loud: Vec<&[f32]> = played.chunks(2).filter(|fr| fr[0] != 0.0).collect();
-        // 20 × 10 ms at 48 kHz = 9600 frames (± resampler edge).
+        // 20 × 10 ms at 48 kHz = 9600 frames, less the resampler's one-frame
+        // carry at the very end.
         assert!(
-            (loud.len() as i64 - 9600).abs() <= 960,
+            (loud.len() as i64 - 9600).abs() <= 2,
             "{} frames played",
             loud.len()
         );

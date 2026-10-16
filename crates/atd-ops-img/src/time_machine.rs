@@ -179,6 +179,11 @@ impl GpuOp for TimeMachine {
         let p = ctx.params;
         let out = ctx.output;
         let layers = p.i64("frames").clamp(2, 120) as u32;
+        if let Err(e) = crate::stateful::history_fits(out, u64::from(layers)) {
+            crate::stateful::clear(ctx.encoder, out);
+            self.history = None;
+            return Err(e);
+        }
         let fits = self.history.as_ref().is_some_and(|h| {
             h.texture.width() == out.width()
                 && h.texture.height() == out.height()

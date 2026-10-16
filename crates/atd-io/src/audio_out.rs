@@ -7,7 +7,7 @@
 //! when the ring runs dry. [`Resampler`] converts from the source rate.
 //!
 //! The device name [`NULL_OUTPUT`] plays nowhere: a thread consumes 48 kHz
-//! stereo in real time and keeps the most recent second, for tests and
+//! stereo in real time and keeps the last few seconds, for tests and
 //! machines without audio output.
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -19,6 +19,9 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample};
 
 pub use crate::audio_in::Ring;
+
+/// Seconds of audio the null output keeps for inspection.
+pub const CAPTURE_SECONDS: usize = 5;
 
 /// Device name of the silent test output.
 pub const NULL_OUTPUT: &str = "null";
@@ -43,7 +46,7 @@ struct Shared {
     error: OnceLock<String>,
     /// Frames the device wanted but the ring did not have.
     underruns: AtomicU64,
-    /// Null output only: the most recent second, interleaved.
+    /// Null output only: the last [`CAPTURE_SECONDS`], interleaved.
     captured: Mutex<Vec<f32>>,
 }
 
@@ -101,7 +104,7 @@ impl AudioOut {
         self.shared.underruns.load(Ordering::Relaxed)
     }
 
-    /// Null output only: a copy of the most recent second played.
+    /// Null output only: a copy of the last [`CAPTURE_SECONDS`] played.
     pub fn captured(&self) -> Vec<f32> {
         self.shared
             .captured
@@ -147,7 +150,7 @@ fn run_null(shared: &Shared, stop: &Receiver<()>) -> Result<(), String> {
             }
             if let Ok(mut c) = shared.captured.lock() {
                 c.extend_from_slice(&buf[..frames * 2]);
-                let keep = RATE as usize * 2;
+                let keep = RATE as usize * 2 * CAPTURE_SECONDS;
                 if c.len() > keep {
                     let drop = c.len() - keep;
                     c.drain(..drop);

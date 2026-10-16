@@ -7,6 +7,28 @@ use atd_gpu::fullscreen::FullscreenPass;
 
 use crate::ops::img;
 
+/// Most GPU memory one frame-history operator (Cache, Time Machine) may
+/// hold; beyond it the node reports an error instead of allocating.
+pub(crate) const HISTORY_BUDGET: u64 = 2 << 30;
+
+/// Checks a history of `frames` images like `out` against the budget.
+pub(crate) fn history_fits(out: &wgpu::Texture, frames: u64) -> Result<(), String> {
+    let bytes = u64::from(out.width())
+        * u64::from(out.height())
+        * u64::from(out.format().block_copy_size(None).unwrap_or(4))
+        * frames;
+    if bytes > HISTORY_BUDGET {
+        return Err(format!(
+            "{frames} frames of {}×{} need {} MB, over the {} MB limit; use fewer frames or a lower resolution",
+            out.width(),
+            out.height(),
+            bytes >> 20,
+            HISTORY_BUDGET >> 20
+        ));
+    }
+    Ok(())
+}
+
 /// Internal simulation state format: half floats, filterable, renderable.
 pub(crate) const STATE: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
@@ -120,6 +142,10 @@ impl GpuOp for Cache {
     fn cook(&mut self, ctx: &mut CookCtx<'_>) -> Result<(), String> {
         let delay = ctx.params.i64("delay").clamp(0, 120) as usize;
         let out = ctx.output;
+        if let Err(e) = history_fits(out, delay as u64 + 1) {
+            clear(ctx.encoder, out);
+            return Err(e);
+        }
         if self
             .ring
             .first()
