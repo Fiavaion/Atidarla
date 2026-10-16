@@ -10,6 +10,7 @@
 
 mod analyze;
 mod channel_image;
+mod fluid;
 pub mod isf;
 mod movie;
 mod ops;

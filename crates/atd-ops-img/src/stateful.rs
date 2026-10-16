@@ -387,4 +387,5 @@ pub static STATEFUL: &[Stateful] = &[
     (reaction_diffusion_schema, |d, f| {
         Box::new(ReactionDiffusion::new(d, f))
     }),
+    (crate::fluid::schema, crate::fluid::create),
 ];

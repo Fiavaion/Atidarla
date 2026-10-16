@@ -907,3 +907,55 @@ fn projection_maps_directions() {
         assert!(a.abs_diff(b) <= 24, "x {x}: {a} vs {b}");
     }
 }
+
+#[test]
+fn fluid_carries_dye_upward_and_resets() {
+    let mut e = engine_or_skip!();
+    // A radius that covers several cells of the 32×16 grid.
+    let f = add(
+        &mut e,
+        "fluid",
+        &[("detail", json!(1.0)), ("emitter_radius", json!(0.2))],
+    );
+    // Two seconds of 60 fps.
+    let mut img = None;
+    for frame in 0..120 {
+        e.cook(&[f], frame as f64 / 60.0).unwrap();
+        assert_eq!(e.error(f), None);
+        if frame == 119 {
+            img = Some(Image(
+                read_rgba8(e.device(), e.queue(), e.result(f).unwrap()).unwrap(),
+            ));
+        }
+    }
+    let img = img.unwrap();
+    // Dye-weighted mean row (0 = top); the emitter sits at 20% from the bottom.
+    let (mut sum, mut weighted) = (0.0f64, 0.0f64);
+    for y in 0..H {
+        for x in 0..W {
+            let r = f64::from(img.px(x, y)[0]);
+            sum += r;
+            weighted += r * f64::from(y);
+        }
+    }
+    assert!(sum > 1000.0, "dye present: {sum}");
+    let mean_row = weighted / sum / f64::from(H - 1);
+    assert!(
+        mean_row < 0.75,
+        "dye rose above the emitter (row {mean_row:.2})"
+    );
+
+    // Reset clears; without the emitter nothing appears.
+    set(&mut e, f, "reset", json!(true));
+    set(&mut e, f, "emitter", json!(false));
+    e.cook(&[f], 2.1).unwrap();
+    set(&mut e, f, "reset", json!(false));
+    for frame in 0..10 {
+        e.cook(&[f], 2.2 + frame as f64 / 60.0).unwrap();
+    }
+    let img = cook(&mut e, f);
+    assert!(
+        (0..W * H).all(|i| img.px(i % W, i / W)[0] == 0),
+        "empty fluid stays black"
+    );
+}
