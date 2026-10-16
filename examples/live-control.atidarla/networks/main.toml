@@ -111,3 +111,4 @@ type = "img.level"
 pos = [880.0, 0.0]
 inputs.in = { node = 12, output = "out" }
 params.brightness = { value = 1.0, bind = { node = 3, channel = "y" } }
+params.contrast = { value = 1.0, expr = "[1.0, 1.25, 1.5][int(time) % 3]" }

@@ -99,6 +99,7 @@ fn check_one(dir: &Path, gpu: Option<&atd_gpu::GpuContext>, opts: CheckOptions) 
         },
     );
     engine.set_project_dir(Some(dir.to_owned()));
+    engine.set_python(Box::new(atd_py::expr::PyExprHost::start()?));
     engine.load(main)?;
     let ids: Vec<NodeId> = engine.network().nodes().map(|n| n.id).collect();
     // Cook in real time, as the app would: movies, audio and shaders load

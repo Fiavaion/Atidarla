@@ -11,6 +11,8 @@
 
 use pyo3::prelude::*;
 
+pub mod expr;
+
 /// The embedded `atidarla` module.
 #[pymodule]
 pub mod atidarla {
@@ -35,10 +37,19 @@ pub mod atidarla {
 }
 
 /// Registers the `atidarla` module and starts the embedded interpreter.
-/// Must be called once, before any other Python use in the process.
+/// Must be called before any other Python use in the process; later calls
+/// do nothing.
 pub fn init_embedded() {
-    pyo3::append_to_inittab!(atidarla);
-    Python::initialize();
+    ensure_initialized();
+}
+
+/// Starts the embedded interpreter once per process.
+pub(crate) fn ensure_initialized() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        pyo3::append_to_inittab!(atidarla);
+        Python::initialize();
+    });
 }
 
 #[cfg(test)]

@@ -6,6 +6,7 @@
 
 pub mod capability;
 pub mod cook;
+pub mod expr;
 pub mod fragment;
 pub mod graph;
 pub mod history;

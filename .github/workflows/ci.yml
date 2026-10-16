@@ -100,6 +100,10 @@ jobs:
           - { name: linux, os: ubuntu-latest, optional: true }
     steps:
       - uses: actions/checkout@v4
+      # The app embeds Python for expressions (PRD A22): it links libpython.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.97.0"

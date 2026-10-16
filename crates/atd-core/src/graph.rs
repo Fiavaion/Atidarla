@@ -18,7 +18,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::registry::{OperatorSchema, Registry, SocketSchema, WireType};
+use crate::registry::{OperatorSchema, ParamKind, Registry, SocketSchema, WireType};
 
 /// Stable node identifier, unique within a network and never reused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -798,10 +798,32 @@ impl Network {
                         type_id: schema.type_id.clone(),
                         param: param.clone(),
                     })?;
+                // An empty expression is no expression.
+                let value = value.map(|mut v| {
+                    if v.expr.as_deref().is_some_and(|e| e.trim().is_empty()) {
+                        v.expr = None;
+                    }
+                    v
+                });
                 if let Some(v) = &value {
                     ps.validate(&v.value).map_err(GraphError::InvalidValue)?;
                     if let Some(bind) = &v.bind {
                         self.validate_binding(registry, node, ps, bind)?;
+                    }
+                    if v.expr.is_some() {
+                        if !matches!(
+                            ps.kind,
+                            ParamKind::Float { .. } | ParamKind::Int { .. } | ParamKind::Toggle
+                        ) {
+                            return Err(GraphError::InvalidValue(format!(
+                                "`{param}`: expressions drive number and toggle parameters"
+                            )));
+                        }
+                        if v.bind.is_some() {
+                            return Err(GraphError::InvalidValue(format!(
+                                "`{param}`: a parameter follows a channel or an expression, not both"
+                            )));
+                        }
                     }
                 }
                 // A constant equal to the default is stored as "no override".

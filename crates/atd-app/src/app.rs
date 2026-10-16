@@ -116,7 +116,7 @@ impl AtidarlaApp {
             atd_ops_sig::library(&mut library);
             let mut registry = builtin_registry();
             load_isf(&mut registry, &mut library);
-            Engine::new(
+            let mut engine = Engine::new(
                 rs.device.clone(),
                 rs.queue.clone(),
                 registry,
@@ -126,7 +126,13 @@ impl AtidarlaApp {
                     height: 720,
                     format: wgpu::TextureFormat::Rgba8Unorm,
                 },
-            )
+            );
+            // Expressions outside the native subset run here (PRD A22).
+            match atd_py::expr::PyExprHost::start() {
+                Ok(host) => engine.set_python(Box::new(host)),
+                Err(e) => log::warn!("Python expressions unavailable: {e}"),
+            }
+            engine
         });
         let mut viewed = engine.as_mut().and_then(demo_patch);
         let mut project = ProjectState::untitled(

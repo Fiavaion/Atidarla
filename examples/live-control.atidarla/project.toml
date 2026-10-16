@@ -10,6 +10,9 @@ The drum loop plays to Audio Out.
 So that the example runs on any machine, Audio Out uses the `null` device and MIDI In and
 Out use `virtual` (no device): choose your own output and MIDI ports in their Device menus.
 
+level1's contrast follows a Python expression, `[1.0, 1.25, 1.5][int(time) % 3]`: a list is
+outside the native subset, so it runs on the Python worker and arrives a frame late.
+
 Try: send OSC to port 9000 (e.g. /fader 0.5) and watch osc1's channels in the viewer.
 '''
 resolution = [1280, 720]

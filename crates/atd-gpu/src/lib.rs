@@ -6,6 +6,7 @@
 //! ([`fullscreen`]) and the cooking [`engine`].
 
 pub mod engine;
+pub mod expr;
 pub mod fullscreen;
 pub mod isf;
 pub mod pool;

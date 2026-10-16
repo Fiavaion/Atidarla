@@ -245,6 +245,7 @@ dependencies = [
  "atd-ops-msh",
  "atd-ops-pnt",
  "atd-ops-sig",
+ "atd-py",
  "eframe",
  "egui",
  "env_logger",
@@ -273,6 +274,7 @@ dependencies = [
  "atd-ops-msh",
  "atd-ops-pnt",
  "atd-ops-sig",
+ "atd-py",
  "clap",
  "env_logger",
  "log",
@@ -440,7 +442,15 @@ name = "atd-py"
 version = "0.0.1"
 dependencies = [
  "atd-core",
+ "atd-gpu",
+ "atd-interop",
+ "atd-ops-img",
+ "atd-ops-sig",
+ "log",
+ "pollster 0.4.0",
  "pyo3",
+ "serde_json",
+ "wgpu",
 ]
 
 [[package]]

@@ -5,8 +5,9 @@ description = '''
 Coloured noise drifting through a kaleidoscope, mirrored, tiled, hue-cycled and glowing.
 
 Speed integrates a Constant rate, so Noise's z drifts at a steady pace; the Timer turns the
-kaleidoscope; an LFO swings the hue.
+kaleidoscope; an LFO swings the hue. The kaleidoscope's segments follow an expression,
+`6 + 2 * floor(time / 4 % 3)`: 6, 8 and 10 segments in turn, four seconds each.
 
-Try: change the kaleidoscope's segments, or Tile's repeat.
+Try: edit that expression (the = button next to Segments), or Tile's repeat.
 '''
 resolution = [1280, 720]

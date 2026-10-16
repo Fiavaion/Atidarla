@@ -20,10 +20,13 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use atd_core::cook::{CookStat, PlanError, Scheduler};
+use atd_core::expr::{PyJob, PythonHost};
 use atd_core::graph::{Edit, GraphError, Network, NodeId};
 use atd_core::history::History;
 use atd_core::registry::{Registry, WireType};
 use serde_json::Value;
+
+use crate::expr::ExprTable;
 
 use crate::pool::{TexKey, TexturePool};
 
@@ -222,6 +225,8 @@ pub struct Params<'a> {
     node: NodeId,
     /// Project folder that relative paths are relative to.
     project_dir: Option<&'a Path>,
+    /// Expression values this frame (FR-P2).
+    exprs: Option<&'a ExprTable>,
 }
 
 impl<'a> Params<'a> {
@@ -239,6 +244,7 @@ impl<'a> Params<'a> {
             sig,
             node,
             project_dir: None,
+            exprs: None,
         }
     }
 
@@ -271,23 +277,43 @@ impl<'a> Params<'a> {
         self.sig.get(&bind.node)?.value(&bind.channel)
     }
 
+    /// The value the parameter's expression gave this frame, if it has
+    /// one that evaluated.
+    pub fn expr(&self, name: &str) -> Option<f64> {
+        self.exprs?.value(self.node, name)
+    }
+
+    /// A number parameter: its bound channel, else its expression, else
+    /// its value.
     pub fn f32(&self, name: &str) -> f32 {
-        self.bound(name)
-            .unwrap_or_else(|| self.value(name).and_then(Value::as_f64).unwrap_or(0.0) as f32)
+        if let Some(v) = self.bound(name) {
+            return v;
+        }
+        if let Some(v) = self.expr(name) {
+            return v as f32;
+        }
+        self.value(name).and_then(Value::as_f64).unwrap_or(0.0) as f32
     }
 
     pub fn i64(&self, name: &str) -> i64 {
-        match self.bound(name) {
-            Some(v) => v.round() as i64,
-            None => self.value(name).and_then(Value::as_i64).unwrap_or(0),
+        if let Some(v) = self.bound(name) {
+            return v.round() as i64;
         }
+        if let Some(v) = self.expr(name) {
+            return v.round() as i64;
+        }
+        self.value(name).and_then(Value::as_i64).unwrap_or(0)
     }
 
     pub fn bool(&self, name: &str) -> bool {
-        match self.bound(name) {
-            Some(v) => v > 0.5,
-            None => self.value(name).and_then(Value::as_bool).unwrap_or(false),
+        if let Some(v) = self.bound(name) {
+            return v > 0.5;
         }
+        // An expression is true when non-zero, as Python's `bool()`.
+        if let Some(v) = self.expr(name) {
+            return v != 0.0;
+        }
+        self.value(name).and_then(Value::as_bool).unwrap_or(false)
     }
 
     pub fn str(&self, name: &str) -> &'a str {
@@ -562,6 +588,12 @@ pub struct Engine {
     released: Vec<wgpu::Texture>,
     /// Folder of the open project: relative paths are relative to it.
     project_dir: Option<PathBuf>,
+    /// Compiled parameter expressions (FR-P2, A22).
+    exprs: ExprTable,
+    /// The Python worker for expressions outside the native subset.
+    python: Option<Box<dyn PythonHost>>,
+    py_jobs: Vec<PyJob>,
+    py_results: Vec<(u64, Result<f64, String>)>,
 }
 
 impl std::fmt::Debug for Engine {
@@ -623,7 +655,33 @@ impl Engine {
             again: Vec::new(),
             released: Vec::new(),
             project_dir: None,
+            exprs: ExprTable::default(),
+            python: None,
+            py_jobs: Vec::new(),
+            py_results: Vec::new(),
         }
+    }
+
+    /// The value `param`'s expression gave on `node`'s last cook (for
+    /// display; `None` without an expression or while it fails).
+    pub fn expression_value(&self, node: NodeId, param: &str) -> Option<f64> {
+        self.exprs.value(node, param)
+    }
+
+    /// Attaches the Python worker that evaluates expressions outside the
+    /// native subset (`atd-py`). Without one they report an error.
+    pub fn set_python(&mut self, host: Box<dyn PythonHost>) {
+        self.python = Some(host);
+    }
+
+    /// Recompiles expressions after the network changed; returns nodes whose
+    /// expressions now read different nodes.
+    fn rebuild_exprs(&mut self) -> Vec<NodeId> {
+        let (table, extra, changed) = ExprTable::build(&self.net, &mut self.exprs);
+        self.exprs = table;
+        self.scheduler.set_extra(extra);
+        self.exprs.python_jobs(&self.net, &mut self.py_jobs);
+        changed
     }
 
     /// Sets the folder relative paths in parameters are relative to (the
@@ -769,10 +827,11 @@ impl Engine {
                 self.released.push(t);
             }
         }
-        let dirty: Vec<NodeId> = dirty
+        let mut dirty: Vec<NodeId> = dirty
             .into_iter()
             .filter(|id| self.net.node(*id).is_some())
             .collect();
+        dirty.extend(self.rebuild_exprs());
         self.scheduler.mark_dirty(&self.net, dirty);
     }
 
@@ -813,8 +872,21 @@ impl Engine {
             released,
             again,
             project_dir,
+            exprs,
+            python,
+            py_jobs,
+            py_results,
             ..
         } = self;
+        // Python results computed from the last frame's values.
+        match python.as_mut() {
+            Some(py) => {
+                py.collect(py_results);
+                exprs.apply_python(py_results);
+            }
+            None if !py_jobs.is_empty() => exprs.no_python(),
+            None => {}
+        }
         scheduler.plan(net, registry, requested, plan)?;
         let dt = last_time.map_or(0.0, |t| (time - t).max(0.0));
         *last_time = Some(time);
@@ -834,6 +906,17 @@ impl Engine {
             let Some(schema) = registry.get(&node.type_id) else {
                 continue;
             };
+            if !exprs.is_empty() {
+                crate::expr::Ctx {
+                    net,
+                    registry,
+                    sig,
+                    table: exprs,
+                    time,
+                    frame: *frame as f64,
+                }
+                .eval_node(id);
+            }
             let is_sig = schema
                 .outputs
                 .first()
@@ -867,6 +950,7 @@ impl Engine {
                         sig,
                         node: id,
                         project_dir: project_dir.as_deref(),
+                        exprs: Some(exprs),
                     },
                     time,
                     frame: *frame,
@@ -877,9 +961,7 @@ impl Engine {
                     again.push(id);
                 }
                 match result {
-                    Ok(()) => {
-                        errors.remove(&id);
-                    }
+                    Ok(()) => settle(errors, exprs, id),
                     Err(e) => {
                         errors.insert(id, e);
                     }
@@ -924,6 +1006,7 @@ impl Engine {
                         sig,
                         node: id,
                         project_dir: project_dir.as_deref(),
+                        exprs: Some(exprs),
                     },
                     time,
                     dt,
@@ -931,9 +1014,7 @@ impl Engine {
                 };
                 let op = sig_ops.get_mut(&id).expect("instance created above");
                 match op.cook(&mut ctx) {
-                    Ok(()) => {
-                        errors.remove(&id);
-                    }
+                    Ok(()) => settle(errors, exprs, id),
                     Err(e) => {
                         errors.insert(id, e);
                     }
@@ -992,6 +1073,7 @@ impl Engine {
                             sig,
                             node: id,
                             project_dir: project_dir.as_deref(),
+                            exprs: Some(exprs),
                         },
                         input_size,
                         project,
@@ -1022,6 +1104,7 @@ impl Engine {
                     sig,
                     node: id,
                     project_dir: project_dir.as_deref(),
+                    exprs: Some(exprs),
                 },
                 time,
                 frame: *frame,
@@ -1034,7 +1117,7 @@ impl Engine {
             }
             match result {
                 Ok(()) => {
-                    errors.remove(&id);
+                    settle(errors, exprs, id);
                     if let Some(old) = results.insert(id, output) {
                         released.push(old);
                     }
@@ -1049,6 +1132,20 @@ impl Engine {
         inputs.clear();
 
         queue.submit([encoder.finish()]);
+        if let Some(py) = python.as_mut()
+            && !py_jobs.is_empty()
+        {
+            crate::expr::Ctx {
+                net,
+                registry,
+                sig,
+                table: exprs,
+                time,
+                frame: *frame as f64,
+            }
+            .update_python_jobs(py_jobs);
+            py.submit(py_jobs);
+        }
         for id in plan.iter() {
             if let Some(op) = analysis_ops.get_mut(id) {
                 op.after_submit();
@@ -1080,6 +1177,8 @@ impl Engine {
         // Textures may still be read by a submitted frame: release them
         // with the next frame's.
         self.released.extend(self.results.drain().map(|(_, t)| t));
+        self.exprs = ExprTable::default();
+        self.rebuild_exprs();
         Ok(())
     }
 
@@ -1127,6 +1226,22 @@ impl Engine {
 
     pub fn frame(&self) -> u64 {
         self.frame
+    }
+}
+
+/// Records a node's state after a successful cook: an expression error if
+/// it has one (updated only when the message changes, so nothing
+/// allocates per frame), otherwise none.
+fn settle(errors: &mut HashMap<NodeId, String>, exprs: &ExprTable, id: NodeId) {
+    match exprs.error(id) {
+        Some(msg) => {
+            if errors.get(&id).map(String::as_str) != Some(msg.as_str()) {
+                errors.insert(id, msg.clone());
+            }
+        }
+        None => {
+            errors.remove(&id);
+        }
     }
 }
 

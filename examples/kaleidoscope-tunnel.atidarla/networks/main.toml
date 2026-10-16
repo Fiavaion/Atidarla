@@ -50,7 +50,7 @@ type = "img.kaleidoscope"
 pos = [220.0, 420.0]
 inputs.in = { node = 4, output = "out" }
 params.rotation = { value = 0.0, bind = { node = 2, channel = "seconds" } }
-params.segments = 8
+params.segments = { value = 8, expr = "6 + 2 * floor(time / 4 % 3)" }
 
 [[node]]
 id = 6

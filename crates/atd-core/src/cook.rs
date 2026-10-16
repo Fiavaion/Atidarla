@@ -49,25 +49,56 @@ enum Mark {
     Done,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Step {
+    Visit,
+    /// An expression dependency: if it would close a cycle, it is skipped
+    /// (the expression reads the previous frame's value).
+    Soft,
+    Expand,
+}
+
+/// What a node's parameter expressions add to the network (PRD A22).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Extra {
+    /// Nodes the expressions read: cooked first when possible.
+    pub deps: Vec<NodeId>,
+    /// An expression reads `time` or `frame`, or runs in Python.
+    pub time_dependent: bool,
+}
+
 #[derive(Debug, Default)]
 pub struct Scheduler {
     dirty: HashSet<NodeId>,
     stats: HashMap<NodeId, CookStat>,
+    extra: HashMap<NodeId, Extra>,
     // Scratch buffers reused by `plan`.
     marks: HashMap<NodeId, Mark>,
     included: HashSet<NodeId>,
-    stack: Vec<(NodeId, bool)>,
+    stack: Vec<(NodeId, Step)>,
 }
 
 impl Scheduler {
-    /// Marks `nodes` and everything downstream of them dirty.
+    /// Marks `nodes` and everything downstream of them dirty, including
+    /// nodes whose expressions read them.
     pub fn mark_dirty(&mut self, net: &Network, nodes: impl IntoIterator<Item = NodeId>) {
         let mut queue: Vec<NodeId> = nodes.into_iter().collect();
         while let Some(n) = queue.pop() {
             if self.dirty.insert(n) {
                 queue.extend(net.downstream_of(n));
+                queue.extend(
+                    self.extra
+                        .iter()
+                        .filter(|(_, e)| e.deps.contains(&n))
+                        .map(|(id, _)| *id),
+                );
             }
         }
+    }
+
+    /// Replaces the expression dependencies of every node.
+    pub fn set_extra(&mut self, extra: HashMap<NodeId, Extra>) {
+        self.extra = extra;
     }
 
     /// Drops state for a removed node.
@@ -117,10 +148,10 @@ impl Scheduler {
             if net.node(r).is_none() {
                 return Err(PlanError::NoNode(r));
             }
-            self.stack.push((r, false));
+            self.stack.push((r, Step::Visit));
         }
 
-        while let Some((n, expanded)) = self.stack.pop() {
+        while let Some((n, step)) = self.stack.pop() {
             let node = net.node(n).ok_or(PlanError::NoNode(n))?;
             let schema = registry.get(&node.type_id);
             let is_feedback = |input: &str| {
@@ -129,10 +160,12 @@ impl Scheduler {
                     .is_some_and(|i| i.feedback)
             };
 
-            if expanded {
+            let extra = self.extra.get(&n);
+            if step == Step::Expand {
                 let mut needs = self.dirty.contains(&n)
                     || !self.stats.contains_key(&n)
-                    || schema.is_some_and(|s| s.time_dependent);
+                    || schema.is_some_and(|s| s.time_dependent)
+                    || extra.is_some_and(|e| e.time_dependent);
                 for (input, src) in net.inputs_of(n) {
                     if is_feedback(input) || self.included.contains(&src.node) {
                         needs = true;
@@ -142,6 +175,15 @@ impl Scheduler {
                     if self.included.contains(&b.node) {
                         needs = true;
                     }
+                }
+                // A dependency still in progress closes a loop through
+                // expressions: whether it cooks is not known yet, so cook.
+                if extra.is_some_and(|e| {
+                    e.deps.iter().any(|d| {
+                        self.included.contains(d) || self.marks.get(d) == Some(&Mark::InProgress)
+                    })
+                }) {
+                    needs = true;
                 }
                 if needs {
                     self.included.insert(n);
@@ -153,22 +195,30 @@ impl Scheduler {
 
             match self.marks.get(&n) {
                 Some(Mark::Done) => continue,
+                Some(Mark::InProgress) if step == Step::Soft => continue,
                 Some(Mark::InProgress) => return Err(PlanError::Cycle(n)),
                 None => {}
             }
             self.marks.insert(n, Mark::InProgress);
-            self.stack.push((n, true));
+            self.stack.push((n, Step::Expand));
             // Push inputs in reverse so they are visited in input-name order.
             let first = self.stack.len();
             for (input, src) in net.inputs_of(n) {
                 if !is_feedback(input) && self.marks.get(&src.node) != Some(&Mark::Done) {
-                    self.stack.push((src.node, false));
+                    self.stack.push((src.node, Step::Visit));
                 }
             }
             // Channel bindings are dependencies too; dangling ones are inert.
             for b in net.bindings_of(n) {
                 if net.node(b.node).is_some() && self.marks.get(&b.node) != Some(&Mark::Done) {
-                    self.stack.push((b.node, false));
+                    self.stack.push((b.node, Step::Visit));
+                }
+            }
+            if let Some(e) = extra {
+                for &d in &e.deps {
+                    if d != n && net.node(d).is_some() && !self.marks.contains_key(&d) {
+                        self.stack.push((d, Step::Soft));
+                    }
                 }
             }
             self.stack[first..].reverse();
@@ -240,6 +290,54 @@ mod tests {
             assert_eq!(plan, [lfo]);
             cook_all(&mut s, &plan);
         }
+    }
+
+    #[test]
+    fn expression_dependencies_order_and_dirty_but_never_fail() {
+        let reg = test_registry();
+        let mut net = Network::default();
+        let a = add(&mut net, &reg, "img.gen");
+        let b = add(&mut net, &reg, "img.gen");
+        let mut s = Scheduler::default();
+        let mut plan = Vec::new();
+        // b's expression reads a: a cooks first, even if only b is asked for.
+        s.set_extra(HashMap::from([(
+            b,
+            Extra {
+                deps: vec![a],
+                time_dependent: false,
+            },
+        )]));
+        s.plan(&net, &reg, &[b], &mut plan).unwrap();
+        assert_eq!(plan, [a, b]);
+        cook_all(&mut s, &plan);
+        // Dirtying a dirties b through the expression.
+        s.mark_dirty(&net, [a]);
+        s.plan(&net, &reg, &[b], &mut plan).unwrap();
+        assert_eq!(plan, [a, b]);
+        cook_all(&mut s, &plan);
+        // A loop through expressions reads last frame's value: no error.
+        s.set_extra(HashMap::from([
+            (
+                a,
+                Extra {
+                    deps: vec![b],
+                    time_dependent: true,
+                },
+            ),
+            (
+                b,
+                Extra {
+                    deps: vec![a],
+                    time_dependent: false,
+                },
+            ),
+        ]));
+        s.plan(&net, &reg, &[a, b], &mut plan).unwrap();
+        assert_eq!(plan.len(), 2, "time-dependent a and its reader b: {plan:?}");
+        cook_all(&mut s, &plan);
+        s.plan(&net, &reg, &[a, b], &mut plan).unwrap();
+        assert_eq!(plan.len(), 2, "a cooks every frame, b follows");
     }
 
     #[test]

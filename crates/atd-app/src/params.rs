@@ -3,7 +3,10 @@
 //! Every change goes through the engine's history. Continuous gestures
 //! (dragging a value, typing) are coalesced into one undo step, which is
 //! sealed as soon as no parameter widget is being dragged or focused.
-//! Expressions arrive once their evaluation model is decided (see M1.md).
+//!
+//! Number and toggle parameters can follow an expression (`=` button,
+//! PRD A22): the native subset runs every frame on the cook path, anything
+//! else in Python a frame late. Errors show at the top of the panel.
 
 use atd_core::graph::{ChannelRef, Edit, NodeId, Param};
 use atd_core::registry::WireType;
@@ -84,7 +87,25 @@ pub fn ui(ui: &mut Ui, engine: &mut Engine, node: NodeId) -> Option<String> {
                     .node(node)
                     .and_then(|n| n.params.get(&p.name))
                     .and_then(|p| p.bind.clone());
+                let expr = engine
+                    .network()
+                    .node(node)
+                    .and_then(|n| n.params.get(&p.name))
+                    .and_then(|p| p.expr.clone());
+                let mut set_expr: Option<Option<String>> = None;
                 let new = match &bind {
+                    _ if expr.is_some() => {
+                        let live = engine.expression_value(node, &p.name);
+                        let (changed, busy, toggled) =
+                            expr_widget(ui, node, p, expr.as_deref().unwrap_or(""), live);
+                        active |= busy;
+                        if toggled {
+                            set_expr = Some(None);
+                        } else if let Some(text) = changed {
+                            set_expr = Some(Some(text));
+                        }
+                        None
+                    }
                     Some(b) => {
                         let live = engine.channels(b.node).and_then(|c| c.value(&b.channel));
                         let src = engine
@@ -104,7 +125,24 @@ pub fn ui(ui: &mut Ui, engine: &mut Engine, node: NodeId) -> Option<String> {
                         None
                     }
                     None => {
-                        let (new, busy) = widget(ui, p, &current);
+                        let (new, busy) = ui
+                            .horizontal(|ui| {
+                                let out = widget(ui, p, &current);
+                                if bindable
+                                    && ui
+                                        .small_button("=")
+                                        .on_hover_text(
+                                            "Follow an expression: time, frame, me.digits, \
+                                             op('name').par.x, op('name')['channel'], maths, \
+                                             or any Python",
+                                        )
+                                        .clicked()
+                                {
+                                    set_expr = Some(Some(expr_seed(&current)));
+                                }
+                                out
+                            })
+                            .inner;
                         active |= busy;
                         new
                     }
@@ -116,7 +154,17 @@ pub fn ui(ui: &mut Ui, engine: &mut Engine, node: NodeId) -> Option<String> {
                     .clicked();
                 ui.end_row();
 
-                let edit = if reset {
+                let edit = if let Some(expr) = set_expr {
+                    Some(Edit::SetParam {
+                        node,
+                        param: p.name.clone(),
+                        value: Some(Param {
+                            value: current.clone(),
+                            expr,
+                            bind: None,
+                        }),
+                    })
+                } else if reset {
                     Some(Edit::SetParam {
                         node,
                         param: p.name.clone(),
@@ -153,6 +201,59 @@ pub fn ui(ui: &mut Ui, engine: &mut Engine, node: NodeId) -> Option<String> {
         engine.seal_history();
     }
     error
+}
+
+/// The starting text of a new expression: the current value.
+fn expr_seed(current: &Value) -> String {
+    match current {
+        Value::Bool(b) => if *b { "True" } else { "False" }.to_owned(),
+        Value::Number(n) => n.to_string(),
+        _ => "0".to_owned(),
+    }
+}
+
+/// An expression field. Returns the new text when committed (Enter or
+/// leaving the field; Escape reverts), whether it is being edited, and
+/// whether the `=` toggle was clicked to drop the expression.
+fn expr_widget(
+    ui: &mut Ui,
+    node: NodeId,
+    p: &ParamSchema,
+    stored: &str,
+    live: Option<f64>,
+) -> (Option<String>, bool, bool) {
+    let id = egui::Id::unique(("atd-expr-draft", node.0, &p.name));
+    let mut s = ui
+        .data(|d| d.get_temp::<String>(id))
+        .unwrap_or_else(|| stored.to_owned());
+    let mut toggled = false;
+    let r = ui
+        .horizontal(|ui| {
+            let r = ui.add(
+                egui::TextEdit::singleline(&mut s)
+                    .code_editor()
+                    .desired_width(150.0),
+            );
+            match live {
+                Some(v) => ui.weak(format!("{v:.3}")),
+                None => ui.weak("—"),
+            }
+            .on_hover_text("The expression's current value");
+            toggled = ui
+                .add(egui::Button::new("=").small().selected(true))
+                .on_hover_text("Stop following the expression")
+                .clicked();
+            r
+        })
+        .inner;
+    if r.has_focus() {
+        ui.data_mut(|d| d.insert_temp(id, s));
+        return (None, true, toggled);
+    }
+    ui.data_mut(|d| d.remove::<String>(id));
+    let cancelled = ui.input(|i| i.key_pressed(egui::Key::Escape));
+    let commit = r.lost_focus() && !cancelled && s != stored && !s.trim().is_empty();
+    (commit.then_some(s), false, toggled)
 }
 
 /// The channel-binding dropdown (FR-P2 channel export). Returns
