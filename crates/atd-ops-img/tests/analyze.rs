@@ -62,7 +62,12 @@ fn measure(e: &mut Engine, node: NodeId) -> Vec<(String, f32)> {
         if cooks > 1 && !e.pending() {
             break;
         }
-        assert!(start.elapsed().as_secs() < 10, "readback finished");
+        // Generous: software adapters (WARP) compile and run slowly.
+        assert!(
+            start.elapsed().as_secs() < 60,
+            "readback finished (error: {:?})",
+            e.error(node)
+        );
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
     assert_eq!(e.error(node), None);
@@ -162,8 +167,9 @@ fn analysis_drives_a_parameter() {
             break img[0];
         }
         assert!(
-            start.elapsed().as_secs() < 10,
-            "measurement reached the parameter"
+            start.elapsed().as_secs() < 60,
+            "measurement reached the parameter (analyze error: {:?})",
+            e.error(a)
         );
     };
     assert!(px.abs_diff(64) <= 2, "white × measured 0.25 ≈ 64, got {px}");

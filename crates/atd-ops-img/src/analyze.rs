@@ -119,9 +119,13 @@ const READY: u8 = 3;
 struct Slot {
     buffer: wgpu::Buffer,
     state: Arc<AtomicU8>,
-    /// Engine frame the measurement was recorded in.
+    /// Engine frame the measurement was recorded in, and when.
     frame: u64,
+    since: std::time::Instant,
 }
+
+/// A readback taking longer than this is reported as an error.
+const STUCK: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub struct Analyze {
     reduce: wgpu::ComputePipeline,
@@ -148,7 +152,71 @@ impl std::fmt::Debug for Analyze {
     }
 }
 
+/// The operator: pipelines are built on a worker thread (shader compilers
+/// such as FXC can take seconds, rule 1); until then it outputs zeros.
+enum AnalyzeOp {
+    Building(std::sync::mpsc::Receiver<Result<Analyze, String>>),
+    Ready(Box<Analyze>),
+    Failed(String),
+}
+
 pub fn create(device: &wgpu::Device) -> Box<dyn ImgToSigOp> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let device = device.clone();
+    let spawned = std::thread::Builder::new()
+        .name("atd-analyze-build".into())
+        .spawn(move || {
+            let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+                let op = build(&device);
+                match pollster::block_on(scope.pop()) {
+                    Some(e) => Err(format!("Analyze pipelines: {e}")),
+                    None => Ok(op),
+                }
+            }))
+            .unwrap_or_else(|_| Err("Analyze pipeline build panicked".into()));
+            let _ = tx.send(built);
+        });
+    Box::new(match spawned {
+        Ok(_) => AnalyzeOp::Building(rx),
+        Err(e) => AnalyzeOp::Failed(format!("cannot start build thread: {e}")),
+    })
+}
+
+impl ImgToSigOp for AnalyzeOp {
+    fn cook(&mut self, ctx: &mut ImgToSigCtx<'_>) -> Result<(), String> {
+        if let AnalyzeOp::Building(rx) = self {
+            match rx.try_recv() {
+                Ok(Ok(op)) => *self = AnalyzeOp::Ready(Box::new(op)),
+                Ok(Err(e)) => *self = AnalyzeOp::Failed(e),
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    ctx.cook_again = true;
+                    ctx.output.set_single(&NAMES, &[0.0; 7]);
+                    return Ok(());
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    *self = AnalyzeOp::Failed("Analyze build thread stopped".into());
+                }
+            }
+        }
+        match self {
+            AnalyzeOp::Ready(op) => op.cook(ctx),
+            AnalyzeOp::Failed(e) => {
+                ctx.output.set_single(&NAMES, &[0.0; 7]);
+                Err(e.clone())
+            }
+            AnalyzeOp::Building(_) => unreachable!("handled above"),
+        }
+    }
+
+    fn after_submit(&mut self) {
+        if let AnalyzeOp::Ready(op) = self {
+            op.after_submit();
+        }
+    }
+}
+
+fn build(device: &wgpu::Device) -> Analyze {
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("img.analyze"),
         source: wgpu::ShaderSource::Wgsl(SHADER.into()),
@@ -211,9 +279,10 @@ pub fn create(device: &wgpu::Device) -> Box<dyn ImgToSigOp> {
             ),
             state: Arc::new(AtomicU8::new(IDLE)),
             frame: 0,
+            since: std::time::Instant::now(),
         })
         .collect();
-    Box::new(Analyze {
+    Analyze {
         reduce: pipeline("reduce"),
         combine: pipeline("combine"),
         layout,
@@ -227,10 +296,10 @@ pub fn create(device: &wgpu::Device) -> Box<dyn ImgToSigOp> {
         measured: None,
         last_input: None,
         stale: false,
-    })
+    }
 }
 
-impl ImgToSigOp for Analyze {
+impl Analyze {
     fn cook(&mut self, ctx: &mut ImgToSigCtx<'_>) -> Result<(), String> {
         // Let finished maps report, without waiting.
         let _ = ctx.device.poll(wgpu::PollType::Poll);
@@ -297,6 +366,7 @@ impl ImgToSigOp for Analyze {
             ctx.encoder
                 .copy_buffer_to_buffer(&self.result, 0, &slot.buffer, 0, RESULT_BYTES);
             slot.frame = ctx.frame;
+            slot.since = std::time::Instant::now();
             slot.state.store(RECORDED, Ordering::Release);
             self.last_input = input;
         } else if changed && input.is_some() {
@@ -311,6 +381,21 @@ impl ImgToSigOp for Analyze {
                 .iter()
                 .any(|s| s.state.load(Ordering::Acquire) != IDLE);
         ctx.output.set_single(&NAMES, &self.values);
+        if let Some(slot) = self
+            .slots
+            .iter()
+            .find(|s| s.state.load(Ordering::Acquire) != IDLE && s.since.elapsed() > STUCK)
+        {
+            let states: Vec<u8> = self
+                .slots
+                .iter()
+                .map(|s| s.state.load(Ordering::Acquire))
+                .collect();
+            return Err(format!(
+                "GPU readback has not completed for {:.1} s (slot states {states:?}: 1 recorded, 2 mapping, 3 ready)",
+                slot.since.elapsed().as_secs_f32()
+            ));
+        }
         Ok(())
     }
 
