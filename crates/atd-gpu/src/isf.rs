@@ -247,10 +247,13 @@ pub fn split_source(src: &str) -> Result<(&str, &str), IsfError> {
     let start = src
         .find("/*")
         .ok_or_else(|| IsfError::header("no /* JSON header */ comment"))?;
-    let end = src[start..]
+    // Search after the opening `/*`, so `/*/` is not taken as a closed
+    // comment.
+    let end = src[start + 2..]
         .find("*/")
         .ok_or_else(|| IsfError::header("unterminated header comment"))?
-        + start;
+        + start
+        + 2;
     Ok((&src[start + 2..end], &src[end + 2..]))
 }
 
@@ -1161,7 +1164,25 @@ fn generate(
 }
 
 /// Translates an ISF shader (fragment source, optional `.vs` source) to WGSL.
+///
+/// Imported files are untrusted: a panic anywhere in translation (ours or
+/// naga's) is reported as an error rather than taking the caller down.
 pub fn translate(fs_src: &str, vs_src: Option<&str>) -> Result<IsfShader, IsfError> {
+    std::panic::catch_unwind(|| translate_unguarded(fs_src, vs_src)).unwrap_or_else(|panic| {
+        let msg = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .unwrap_or("unknown panic");
+        Err(IsfError {
+            stage: IsfStage::Validate,
+            line: None,
+            message: format!("translator panicked: {msg}"),
+        })
+    })
+}
+
+fn translate_unguarded(fs_src: &str, vs_src: Option<&str>) -> Result<IsfShader, IsfError> {
     let header = parse_header(fs_src)?;
     let (_, body) = split_source(fs_src)?;
     // Keep the user's line numbers: count the header's lines.
