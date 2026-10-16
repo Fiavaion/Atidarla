@@ -2,7 +2,7 @@
 
 IMG · version 1 · cook budget 300 µs
 
-Plays a movie or still image. HAP, HAP Alpha, HAP Q and HAP R are decoded natively and upload as GPU-compressed textures; PNG and JPEG stills load as one frame; other codecs arrive with FFmpeg.
+Plays a movie or still image. HAP, HAP Alpha, HAP Q and HAP R are decoded natively and upload as GPU-compressed textures; PNG and JPEG stills load as one frame; other codecs (H.264, HEVC, ProRes, VP9 and more) decode through FFmpeg, with hardware decoding where the platform has it, in builds with FFmpeg.
 
 Cooks every frame (time-dependent).
 

@@ -339,10 +339,12 @@ dependencies = [
 name = "atd-io"
 version = "0.0.1"
 dependencies = [
+ "cc",
  "cpal",
  "gilrs",
  "log",
  "midir",
+ "pkg-config",
  "png",
  "rosc",
  "snap",

@@ -37,5 +37,9 @@ atd-py.workspace = true
 rfd.workspace = true
 pollster.workspace = true
 
+[features]
+# Non-HAP video through FFmpeg (PRD A23); needs FFmpeg development files.
+ffmpeg = ["atd-ops-img/ffmpeg"]
+
 [lints]
 workspace = true

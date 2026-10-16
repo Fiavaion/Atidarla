@@ -1,7 +1,8 @@
 //! Video input. HAP (PRD A15, "HAP-first") is decoded natively: [`mov`]
 //! demuxes, [`hap`] unpacks frames to block-compressed texture data for the
-//! GPU, and [`bc`] is the CPU fallback. FFmpeg and hardware decoding join
-//! later behind the same [`MoviePlayer`] interface.
+//! GPU, and [`bc`] is the CPU fallback. Other codecs go through FFmpeg
+//! (`ffmpeg` feature, PRD A23), with hardware decoding where available,
+//! behind the same [`MoviePlayer`] interface.
 //!
 //! [`MoviePlayer`] opens and decodes on its own thread. The cook names the
 //! frame it wants; the thread decodes it and the next few frames into a
@@ -9,6 +10,8 @@
 //! `try_lock` and never waits on the disk (CLAUDE.md rule 1).
 
 pub mod bc;
+#[cfg(feature = "ffmpeg")]
+pub mod ffmpeg;
 pub mod hap;
 pub mod mov;
 
@@ -157,13 +160,14 @@ fn run(path: &std::path::Path, shared: &Shared) -> Result<(), String> {
     if crate::image::is_still(path) {
         return run_still(path, shared);
     }
-    let track = mov::open(path).map_err(|e| e.to_string())?;
+    // HAP natively; anything else (or a container the MOV reader does not
+    // know) through FFmpeg.
+    let track = match mov::open(path) {
+        Ok(track) if track.codec_str().starts_with("Hap") => track,
+        Ok(track) => return run_other(path, shared, &track.codec_str()),
+        Err(e) => return run_other(path, shared, &e.to_string()),
+    };
     let codec = track.codec_str();
-    if !codec.starts_with("Hap") {
-        return Err(format!(
-            "{codec} video is not supported yet (HAP only; FFmpeg decoding is planned)"
-        ));
-    }
     let scale = f64::from(track.timescale.max(1));
     let frames = track.samples.len();
     let duration = track.duration_secs();
@@ -227,6 +231,95 @@ fn run(path: &std::path::Path, shared: &Shared) -> Result<(), String> {
             }
         }
         // Sleep until a new frame is wanted (or a timeout, to notice stop).
+        let Ok(mut flag) = shared.wake_lock.lock() else {
+            break;
+        };
+        if !*flag {
+            flag = shared
+                .wake
+                .wait_timeout(flag, Duration::from_millis(50))
+                .map(|(g, _)| g)
+                .map_err(|_| "movie thread lock poisoned".to_owned())?;
+        }
+        *flag = false;
+    }
+    Ok(())
+}
+
+/// A movie that is not HAP: FFmpeg when built with it.
+#[cfg(not(feature = "ffmpeg"))]
+fn run_other(_path: &std::path::Path, _shared: &Shared, what: &str) -> Result<(), String> {
+    Err(format!(
+        "{what}: this build plays HAP movies and PNG/JPEG stills; other codecs need FFmpeg \
+         (build with the `ffmpeg` feature)"
+    ))
+}
+
+/// A movie that is not HAP, decoded by FFmpeg to RGBA.
+#[cfg(feature = "ffmpeg")]
+fn run_other(path: &std::path::Path, shared: &Shared, _what: &str) -> Result<(), String> {
+    let mut decoder = ffmpeg::Decoder::open(path, true)?;
+    let frames = decoder.frames();
+    let duration = match decoder.times.as_slice() {
+        [.., last] if frames > 1 => last * frames as f64 / (frames - 1) as f64,
+        _ => 0.0,
+    };
+    let codec = match &decoder.hardware {
+        Some(hw) => format!("{} ({hw})", decoder.codec),
+        None => decoder.codec.clone(),
+    };
+    let _ = shared.info.set(MovieInfo {
+        width: decoder.width,
+        height: decoder.height,
+        frames,
+        duration,
+        rate: if duration > 0.0 {
+            frames as f64 / duration
+        } else {
+            0.0
+        },
+        codec,
+        times: decoder.times.clone(),
+    });
+    while !shared.stop.load(Ordering::Relaxed) {
+        let wanted = shared
+            .wanted
+            .load(Ordering::Relaxed)
+            .min(frames.saturating_sub(1));
+        let window: Vec<usize> = (0..=LOOKAHEAD)
+            .map(|k| (wanted + k) % frames.max(1))
+            .collect();
+        if let Ok(mut cache) = shared.cache.lock() {
+            cache.retain(|(i, _)| window.contains(i));
+        }
+        for &index in &window {
+            if shared.stop.load(Ordering::Relaxed)
+                || shared.wanted.load(Ordering::Relaxed) != wanted
+            {
+                break;
+            }
+            let cached = shared
+                .cache
+                .lock()
+                .map(|c| c.iter().any(|(i, _)| *i == index))
+                .unwrap_or(true);
+            if cached {
+                continue;
+            }
+            let mut data = Vec::new();
+            decoder
+                .frame(index, &mut data)
+                .map_err(|e| format!("frame {index}: {e}"))?;
+            if let Ok(mut cache) = shared.cache.lock() {
+                cache.push((
+                    index,
+                    Arc::new(HapFrame {
+                        format: HapFormat::Rgba8,
+                        data,
+                    }),
+                ));
+            }
+        }
         let Ok(mut flag) = shared.wake_lock.lock() else {
             break;
         };

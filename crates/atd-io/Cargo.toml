@@ -20,5 +20,15 @@ gilrs.workspace = true
 thiserror.workspace = true
 log.workspace = true
 
+[build-dependencies]
+cc = "1"
+pkg-config = "0.3"
+
+[features]
+# Video through FFmpeg (PRD A23): an LGPL build, linked dynamically. Needs
+# FFmpeg's development files: found with pkg-config, or in FFMPEG_DIR
+# (`include/`, `lib/`), as on Windows.
+ffmpeg = []
+
 [lints]
 workspace = true

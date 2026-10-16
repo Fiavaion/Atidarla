@@ -37,5 +37,9 @@ pollster.workspace = true
 atd-interop.workspace = true
 png.workspace = true
 
+[features]
+# Non-HAP video through FFmpeg (PRD A23); needs FFmpeg development files.
+ffmpeg = ["atd-ops-img/ffmpeg"]
+
 [lints]
 workspace = true

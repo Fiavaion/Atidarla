@@ -29,5 +29,9 @@ pollster.workspace = true
 serde_json.workspace = true
 atd-format.workspace = true
 
+[features]
+# Movie In plays non-HAP video through FFmpeg (PRD A23).
+ffmpeg = ["atd-io/ffmpeg"]
+
 [lints]
 workspace = true

@@ -19,7 +19,7 @@ pub fn schema() -> OperatorSchema {
         type_id: "img.movie_in".into(),
         family: OpFamily::Img,
         label: "Movie In".into(),
-        summary: "Plays a movie or still image. HAP, HAP Alpha, HAP Q and HAP R are decoded natively and upload as GPU-compressed textures; PNG and JPEG stills load as one frame; other codecs arrive with FFmpeg.".into(),
+        summary: "Plays a movie or still image. HAP, HAP Alpha, HAP Q and HAP R are decoded natively and upload as GPU-compressed textures; PNG and JPEG stills load as one frame; other codecs (H.264, HEVC, ProRes, VP9 and more) decode through FFmpeg, with hardware decoding where the platform has it, in builds with FFmpeg.".into(),
         version: 1,
         params: vec![
             ParamSchema::path("file", "File").help("Path to a `.mov` file (HAP family) or a PNG/JPEG still."),
