@@ -20,7 +20,7 @@ None.
 
 | Name | Label | Type | Default | Range / options | Description |
 |---|---|---|---|---|---|
-| `file` | File | string | `""` |  | Path to a `.mov` file (HAP family) or a PNG/JPEG still. |
+| `file` | File | path | `""` |  | Path to a `.mov` file (HAP family) or a PNG/JPEG still. |
 | `play` | Play | toggle | `true` |  | Advance the playhead; off holds the frame at Cue. |
 | `loop` | Loop | toggle | `true` |  | Restart at the end; off holds the last frame. |
 | `speed` | Speed | float | `1.0` |  | Playback rate; negative plays backwards. |

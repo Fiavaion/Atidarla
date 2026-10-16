@@ -262,3 +262,37 @@ fn native_size_follows_the_file() {
     assert_eq!((t.width(), t.height()), (64, 32), "project size");
     std::fs::remove_file(path).ok();
 }
+
+#[test]
+fn relative_paths_are_relative_to_the_project_folder() {
+    let Some(mut e) = engine(false) else {
+        require_gpu();
+        return;
+    };
+    // The project folder is the test data folder: "hap1.mov" is in it.
+    e.set_project_dir(Some(data("")));
+    let id = e.alloc_id();
+    e.edit(
+        "add",
+        [
+            Edit::AddNode {
+                node: Node::new(id, "img.movie_in", "movie1"),
+            },
+            Edit::SetParam {
+                node: id,
+                param: "file".into(),
+                value: Some(Param::constant(json!("hap1.mov"))),
+            },
+            Edit::SetParam {
+                node: id,
+                param: "cue".into(),
+                value: Some(Param::constant(json!(0.0))),
+            },
+        ],
+    )
+    .unwrap();
+    frame(&mut e, id, 0.0);
+    let later = frame(&mut e, id, 0.25);
+    let want = std::fs::read(data("hap1.f2.rgba")).unwrap();
+    assert!(worst(&later, &want) <= 2, "the relative file plays");
+}

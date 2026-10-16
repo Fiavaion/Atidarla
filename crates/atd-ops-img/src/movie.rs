@@ -22,7 +22,7 @@ pub fn schema() -> OperatorSchema {
         summary: "Plays a movie or still image. HAP, HAP Alpha, HAP Q and HAP R are decoded natively and upload as GPU-compressed textures; PNG and JPEG stills load as one frame; other codecs arrive with FFmpeg.".into(),
         version: 1,
         params: vec![
-            ParamSchema::string("file", "File", "").help("Path to a `.mov` file (HAP family) or a PNG/JPEG still."),
+            ParamSchema::path("file", "File").help("Path to a `.mov` file (HAP family) or a PNG/JPEG still."),
             ParamSchema::toggle("play", "Play", true).help("Advance the playhead; off holds the frame at Cue."),
             ParamSchema::toggle("loop", "Loop", true).help("Restart at the end; off holds the last frame."),
             ParamSchema::float("speed", "Speed", 1.0, None, None)
@@ -220,7 +220,7 @@ impl GpuOp for MovieIn {
         let path = p.str("file");
         if path != self.path {
             self.path = path.to_owned();
-            self.player = (!path.is_empty()).then(|| MoviePlayer::open(path));
+            self.player = (!path.is_empty()).then(|| MoviePlayer::open(p.resolve(path)));
             self.shown = None;
             self.upload = None;
             self.playing = false;

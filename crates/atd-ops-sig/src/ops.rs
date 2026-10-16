@@ -579,8 +579,7 @@ pub static DEFS: &[Def] = &[
                 "Plays a WAV file as audio-rate channels (`left`/`right`, or `mono`). Decoding runs off the render thread.",
                 &[],
                 vec![
-                    ParamSchema::string("file", "File", "")
-                        .help("Path to a WAV file (PCM or float)."),
+                    ParamSchema::path("file", "File").help("Path to a WAV file (PCM or float)."),
                     ParamSchema::toggle("play", "Play", true).help("Advance the playhead."),
                     ParamSchema::toggle("loop", "Loop", true)
                         .help("Restart at the end of the file."),

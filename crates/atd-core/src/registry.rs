@@ -184,6 +184,11 @@ impl ParamSchema {
         Self::new(name, label, ParamKind::String, Value::from(default))
     }
 
+    /// A file path; relative paths are relative to the project folder.
+    pub fn path(name: &str, label: &str) -> Self {
+        Self::new(name, label, ParamKind::Path, Value::from(""))
+    }
+
     pub fn menu(name: &str, label: &str, options: &[&str], default: &str) -> Self {
         debug_assert!(options.contains(&default), "menu default must be an option");
         let options = options.iter().map(|o| (*o).to_owned()).collect();

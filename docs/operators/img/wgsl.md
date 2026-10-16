@@ -24,7 +24,7 @@ Cooks every frame (time-dependent).
 | Name | Label | Type | Default | Range / options | Description |
 |---|---|---|---|---|---|
 | `code` | Code | string | `"return textureSample(in0, samp, uv);"` |  | The shader body, used when File is empty. |
-| `file` | File | string | `""` |  | Path to a file holding the shader body; reloads when it changes. |
+| `file` | File | path | `""` |  | Path to a file holding the shader body; reloads when it changes. |
 | `p1` | P1 | vec4 | `[0.0,0.0,0.0,0.0]` |  | Returned by `p1()`. |
 | `p2` | P2 | vec4 | `[0.0,0.0,0.0,0.0]` |  | Returned by `p2()`. |
 | `p3` | P3 | vec4 | `[0.0,0.0,0.0,0.0]` |  | Returned by `p3()`. |

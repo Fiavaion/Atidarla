@@ -37,7 +37,7 @@ pub fn schema() -> OperatorSchema {
                 .multiline(),
             ParamSchema::menu("font", "Font", FONTS, "sans")
                 .help("Built-in font: `sans` (Ubuntu Light) or `mono` (Hack)."),
-            ParamSchema::string("font_file", "Font File", "")
+            ParamSchema::path("font_file", "Font File")
                 .help("Path to a .ttf or .otf file; overrides Font when set."),
             ParamSchema::float("size", "Size", 0.1, Some(0.0), None)
                 .help("Line height as a fraction of the image height."),
@@ -87,7 +87,9 @@ const BODY: &str = r#"
 struct Job {
     text: String,
     font: String,
+    /// As written in the parameter, and resolved to a file.
     font_file: String,
+    font_path: std::path::PathBuf,
     px: u32,
     spacing: f32,
     align: String,
@@ -104,7 +106,7 @@ pub struct Raster {
 /// Font bytes: a bundled font or a file's contents.
 fn load_font(job: &Job) -> Result<std::borrow::Cow<'static, [u8]>, String> {
     if !job.font_file.is_empty() {
-        let bytes = std::fs::read(&job.font_file).map_err(|e| format!("{}: {e}", job.font_file))?;
+        let bytes = std::fs::read(&job.font_path).map_err(|e| format!("{}: {e}", job.font_file))?;
         FontRef::new(&bytes).map_err(|e| format!("{}: {e}", job.font_file))?;
         return Ok(bytes.into());
     }
@@ -336,6 +338,7 @@ impl GpuOp for Text {
                 text: p.str("text").to_owned(),
                 font: p.str("font").to_owned(),
                 font_file: p.str("font_file").to_owned(),
+                font_path: p.resolve(p.str("font_file")),
                 px,
                 spacing: p.f32("spacing"),
                 align: p.str("align").to_owned(),

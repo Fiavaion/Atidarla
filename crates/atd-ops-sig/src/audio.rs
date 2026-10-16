@@ -4,7 +4,6 @@
 //! the samples played since the previous frame. Decoding happens on a worker
 //! thread, never on the cook path (CLAUDE.md rule 1).
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
@@ -102,7 +101,7 @@ impl SigOp for AudioFileIn {
             self.loading = None;
             if !path.is_empty() {
                 let (tx, rx) = channel();
-                let file = PathBuf::from(path);
+                let file = p.resolve(path);
                 std::thread::Builder::new()
                     .name("atd-audio-decode".into())
                     .spawn(move || {

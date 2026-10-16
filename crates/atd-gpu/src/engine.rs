@@ -16,6 +16,7 @@
 //! factories registered by the `atd-ops-*` crates.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use atd_core::cook::{CookStat, PlanError, Scheduler};
@@ -219,6 +220,8 @@ pub struct Params<'a> {
     registry: &'a Registry,
     sig: &'a HashMap<NodeId, Channels>,
     node: NodeId,
+    /// Project folder that relative paths are relative to.
+    project_dir: Option<&'a Path>,
 }
 
 impl<'a> Params<'a> {
@@ -235,6 +238,24 @@ impl<'a> Params<'a> {
             registry,
             sig,
             node,
+            project_dir: None,
+        }
+    }
+
+    /// The same parameters with relative paths resolved against `dir`.
+    pub fn with_project_dir(mut self, dir: Option<&'a Path>) -> Self {
+        self.project_dir = dir;
+        self
+    }
+
+    /// A path parameter's text as a file path: absolute paths as they are,
+    /// relative ones relative to the project folder (PRD §5.5). This
+    /// allocates, so operators call it when the text changes, not per frame.
+    pub fn resolve(&self, path: &str) -> PathBuf {
+        let p = Path::new(path);
+        match self.project_dir {
+            Some(dir) if p.is_relative() && !path.is_empty() => dir.join(p),
+            _ => p.to_owned(),
         }
     }
 
@@ -539,6 +560,8 @@ pub struct Engine {
     /// Nodes that asked to cook again next frame ([`CookCtx::cook_again`]).
     again: Vec<NodeId>,
     released: Vec<wgpu::Texture>,
+    /// Folder of the open project: relative paths are relative to it.
+    project_dir: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for Engine {
@@ -599,7 +622,33 @@ impl Engine {
             sig_sources: Vec::new(),
             again: Vec::new(),
             released: Vec::new(),
+            project_dir: None,
         }
+    }
+
+    /// Sets the folder relative paths in parameters are relative to (the
+    /// open project's). Set it before [`Engine::load`]: operators resolve a
+    /// path when it changes.
+    pub fn set_project_dir(&mut self, dir: Option<PathBuf>) {
+        self.project_dir = dir;
+    }
+
+    pub fn project_dir(&self) -> Option<&Path> {
+        self.project_dir.as_deref()
+    }
+
+    /// Changes the project resolution (generators' output size); every
+    /// node cooks again.
+    pub fn set_resolution(&mut self, width: u32, height: u32) {
+        let max = self.device.limits().max_texture_dimension_2d;
+        let (width, height) = (width.clamp(1, max), height.clamp(1, max));
+        if (width, height) == (self.config.width, self.config.height) {
+            return;
+        }
+        self.config.width = width;
+        self.config.height = height;
+        let all: Vec<NodeId> = self.net.nodes().map(|n| n.id).collect();
+        self.scheduler.mark_dirty(&self.net, all);
     }
 
     pub fn network(&self) -> &Network {
@@ -757,6 +806,7 @@ impl Engine {
             sig_sources,
             released,
             again,
+            project_dir,
             ..
         } = self;
         scheduler.plan(net, registry, requested, plan)?;
@@ -810,6 +860,7 @@ impl Engine {
                         registry,
                         sig,
                         node: id,
+                        project_dir: project_dir.as_deref(),
                     },
                     time,
                     frame: *frame,
@@ -866,6 +917,7 @@ impl Engine {
                         registry,
                         sig,
                         node: id,
+                        project_dir: project_dir.as_deref(),
                     },
                     time,
                     dt,
@@ -933,6 +985,7 @@ impl Engine {
                             registry,
                             sig,
                             node: id,
+                            project_dir: project_dir.as_deref(),
                         },
                         input_size,
                         project,
@@ -962,6 +1015,7 @@ impl Engine {
                     registry,
                     sig,
                     node: id,
+                    project_dir: project_dir.as_deref(),
                 },
                 time,
                 frame: *frame,

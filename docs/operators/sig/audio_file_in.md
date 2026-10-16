@@ -20,7 +20,7 @@ None.
 
 | Name | Label | Type | Default | Range / options | Description |
 |---|---|---|---|---|---|
-| `file` | File | string | `""` |  | Path to a WAV file (PCM or float). |
+| `file` | File | path | `""` |  | Path to a WAV file (PCM or float). |
 | `play` | Play | toggle | `true` |  | Advance the playhead. |
 | `loop` | Loop | toggle | `true` |  | Restart at the end of the file. |
 | `gain` | Gain | float | `1.0` | ≥ 0 | Scales the samples. |

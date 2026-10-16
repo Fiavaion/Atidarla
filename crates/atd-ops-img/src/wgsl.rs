@@ -47,7 +47,7 @@ pub fn schema() -> OperatorSchema {
             ParamSchema::string("code", "Code", DEFAULT)
                 .help("The shader body, used when File is empty.")
                 .multiline(),
-            ParamSchema::string("file", "File", "")
+            ParamSchema::path("file", "File")
                 .help("Path to a file holding the shader body; reloads when it changes."),
             ParamSchema::vec("p1", "P1", &[0.0, 0.0, 0.0, 0.0]).help("Returned by `p1()`."),
             ParamSchema::vec("p2", "P2", &[0.0, 0.0, 0.0, 0.0]).help("Returned by `p2()`."),
@@ -91,17 +91,24 @@ impl Drop for Watcher {
     }
 }
 
-fn watch(device: wgpu::Device, format: wgpu::TextureFormat, path: String) -> Watcher {
+/// Watches `file` (the parameter text `path`, for change detection).
+fn watch(
+    device: wgpu::Device,
+    format: wgpu::TextureFormat,
+    path: String,
+    file: std::path::PathBuf,
+) -> Watcher {
     let (tx, rx) = channel();
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = stop.clone();
     let thread_path = path.clone();
+    let thread_file = file;
     let spawned = std::thread::Builder::new()
         .name("atd-wgsl-watch".into())
         .spawn(move || {
             let mut last: Option<Result<String, String>> = None;
             while !thread_stop.load(Ordering::Relaxed) {
-                let now = std::fs::read_to_string(&thread_path)
+                let now = std::fs::read_to_string(&thread_file)
                     .map_err(|e| format!("{thread_path}: {e}"));
                 if last.as_ref() != Some(&now) {
                     let built = match &now {
@@ -196,7 +203,12 @@ impl GpuOp for Wgsl {
             self.code = None;
             self.building = None;
             if self.watcher.as_ref().is_none_or(|w| w.path != file) {
-                self.watcher = Some(watch(self.device.clone(), self.format, file.to_owned()));
+                self.watcher = Some(watch(
+                    self.device.clone(),
+                    self.format,
+                    file.to_owned(),
+                    p.resolve(file),
+                ));
             }
         }
 

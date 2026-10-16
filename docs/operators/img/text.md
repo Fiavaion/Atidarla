@@ -22,7 +22,7 @@ Draws text (several lines allowed) over the input or a background colour, in a b
 |---|---|---|---|---|---|
 | `text` | Text | string | `"Atidarla"` |  | The text; several lines are allowed. |
 | `font` | Font | menu | `"sans"` | `sans`, `mono` | Built-in font: `sans` (Ubuntu Light) or `mono` (Hack). |
-| `font_file` | Font File | string | `""` |  | Path to a .ttf or .otf file; overrides Font when set. |
+| `font_file` | Font File | path | `""` |  | Path to a .ttf or .otf file; overrides Font when set. |
 | `size` | Size | float | `0.1` | ≥ 0 | Line height as a fraction of the image height. |
 | `spacing` | Line Spacing | float | `1.0` | ≥ 0 | Distance between lines, as a multiple of the font's line height. |
 | `position` | Position | vec2 | `[0.5,0.5]` |  | Anchor point as a fraction of the image from the bottom-left. |
