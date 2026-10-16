@@ -45,7 +45,8 @@ pub fn schema() -> OperatorSchema {
         version: 1,
         params: vec![
             ParamSchema::string("code", "Code", DEFAULT)
-                .help("The shader body, used when File is empty."),
+                .help("The shader body, used when File is empty.")
+                .multiline(),
             ParamSchema::string("file", "File", "")
                 .help("Path to a file holding the shader body; reloads when it changes."),
             ParamSchema::vec("p1", "P1", &[0.0, 0.0, 0.0, 0.0]).help("Returned by `p1()`."),

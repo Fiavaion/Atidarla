@@ -20,7 +20,7 @@ Draws text (several lines allowed) over the input or a background colour, in a b
 
 | Name | Label | Type | Default | Range / options | Description |
 |---|---|---|---|---|---|
-| `text` | Text | string | `"Atidarla"` |  | The text; `\n` starts a new line. |
+| `text` | Text | string | `"Atidarla"` |  | The text; several lines are allowed. |
 | `font` | Font | menu | `"sans"` | `sans`, `mono` | Built-in font: `sans` (Ubuntu Light) or `mono` (Hack). |
 | `font_file` | Font File | string | `""` |  | Path to a .ttf or .otf file; overrides Font when set. |
 | `size` | Size | float | `0.1` | ≥ 0 | Line height as a fraction of the image height. |

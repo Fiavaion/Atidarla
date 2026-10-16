@@ -315,7 +315,17 @@ fn widget(ui: &mut Ui, p: &ParamSchema, v: &Value) -> (Option<Value>, bool) {
                 .unwrap_or_else(|| stored.to_owned());
             let (r, picked) = ui
                 .horizontal(|ui| {
-                    let r = ui.add_sized([180.0, 18.0], egui::TextEdit::singleline(&mut s));
+                    let r = if p.multiline {
+                        // Enter adds a line; Ctrl/Cmd+Enter or leaving commits.
+                        ui.add(
+                            egui::TextEdit::multiline(&mut s)
+                                .code_editor()
+                                .desired_rows(4)
+                                .desired_width(260.0),
+                        )
+                    } else {
+                        ui.add_sized([180.0, 18.0], egui::TextEdit::singleline(&mut s))
+                    };
                     // Offered values (device names), listed in the background.
                     let mut picked = None;
                     if let Some(key) = &p.suggest {
@@ -344,6 +354,14 @@ fn widget(ui: &mut Ui, p: &ParamSchema, v: &Value) -> (Option<Value>, bool) {
             if let Some(o) = picked {
                 ui.data_mut(|d| d.remove::<String>(id));
                 return (Some(json!(o)), false);
+            }
+            let submit = p.multiline
+                && r.has_focus()
+                && ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Enter));
+            if submit {
+                r.surrender_focus();
+                ui.data_mut(|d| d.remove::<String>(id));
+                return ((s != stored).then(|| json!(s)), false);
             }
             if r.has_focus() {
                 ui.data_mut(|d| d.insert_temp(id, s));

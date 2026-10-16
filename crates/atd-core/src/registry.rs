@@ -129,6 +129,9 @@ pub struct ParamSchema {
     /// (e.g. `audio.inputs`, `midi.inputs`). The value is still free text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub suggest: Option<String>,
+    /// For string parameters: edited as several lines (text, code).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub multiline: bool,
 }
 
 impl ParamSchema {
@@ -140,6 +143,7 @@ impl ParamSchema {
             default,
             help: String::new(),
             suggest: None,
+            multiline: false,
         }
     }
 
@@ -214,6 +218,12 @@ impl ParamSchema {
     /// Offers the values listed under `key` in the UI (see [`Self::suggest`]).
     pub fn suggest(mut self, key: &str) -> Self {
         self.suggest = Some(key.into());
+        self
+    }
+
+    /// Marks a string parameter as multi-line text.
+    pub fn multiline(mut self) -> Self {
+        self.multiline = true;
         self
     }
 
@@ -478,6 +488,7 @@ mod tests {
                     default: json!(""),
                     help: String::new(),
                     suggest: None,
+                    multiline: false,
                 },
                 ParamSchema {
                     name: "strength".into(),
@@ -489,6 +500,7 @@ mod tests {
                     default: json!(0.5),
                     help: String::new(),
                     suggest: None,
+                    multiline: false,
                 },
             ],
             inputs: vec![SocketSchema {
@@ -636,6 +648,7 @@ mod tests {
             default: json!("over"),
             help: String::new(),
             suggest: None,
+            multiline: false,
         };
         assert!(menu.validate(&json!("add")).is_ok());
         assert!(menu.validate(&json!("mul")).is_err());
@@ -646,6 +659,7 @@ mod tests {
             default: json!([0, 0, 0]),
             help: String::new(),
             suggest: None,
+            multiline: false,
         };
         assert!(v3.validate(&json!([1, 2.5, 3])).is_ok());
         assert!(v3.validate(&json!([1, 2])).is_err());
@@ -659,6 +673,7 @@ mod tests {
             default: json!(1),
             help: String::new(),
             suggest: None,
+            multiline: false,
         };
         assert!(i.validate(&json!(4)).is_ok());
         assert!(i.validate(&json!(0)).is_err());

@@ -32,7 +32,9 @@ pub fn schema() -> OperatorSchema {
         summary: "Draws text (several lines allowed) over the input or a background colour, in a built-in or TrueType/OpenType font.".into(),
         version: 1,
         params: vec![
-            ParamSchema::string("text", "Text", "Atidarla").help("The text; `\\n` starts a new line."),
+            ParamSchema::string("text", "Text", "Atidarla")
+                .help("The text; several lines are allowed.")
+                .multiline(),
             ParamSchema::menu("font", "Font", FONTS, "sans")
                 .help("Built-in font: `sans` (Ubuntu Light) or `mono` (Hack)."),
             ParamSchema::string("font_file", "Font File", "")
