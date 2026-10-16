@@ -86,6 +86,61 @@ jobs:
             isf-${{ matrix.name }}.json
           if-no-files-found: ignore
 
+  ffmpeg:
+    # PRD A23: video other than HAP plays through FFmpeg (LGPL, dynamic). The
+    # feature is off by default, so this job builds and tests it on each OS.
+    # Hardware decode (VideoToolbox, D3D11VA) shows in the test output when the
+    # runner has it; the software path must pass everywhere.
+    name: FFmpeg (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.optional }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: windows, os: windows-latest, optional: false, python: python, gpu: "1" }
+          - { name: macos-arm64, os: macos-latest, optional: false, python: python3, gpu: "1" }
+          - { name: linux, os: ubuntu-latest, optional: true, python: python3, gpu: "" }
+    env:
+      ATD_PYTHON: ${{ matrix.python }}
+      ATD_REQUIRE_GPU: ${{ matrix.gpu }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.0"
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ffmpeg
+      - name: FFmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libavcodec-dev libavformat-dev libavutil-dev libswscale-dev pkg-config libasound2-dev libudev-dev
+      - name: FFmpeg (macOS)
+        # Homebrew's build is GPL: fine to test against, never shipped (A23).
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg pkgconf
+      - name: FFmpeg (Windows, LGPL shared build)
+        # The stable 9.0 branch of BtbN's builds (include/, lib/, bin/ with the
+        # DLLs). The dated builds are pruned, so this one moves with 9.0.x.
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          curl -fsSL -o ffmpeg.zip https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n9.0-latest-win64-lgpl-shared-9.0.zip
+          unzip -q ffmpeg.zip -d "$RUNNER_TEMP/ffmpeg"
+          dir=$(cygpath -w "$(ls -d "$RUNNER_TEMP"/ffmpeg/*/)")
+          echo "FFMPEG_DIR=$dir" >> "$GITHUB_ENV"
+          echo "$dir\bin" >> "$GITHUB_PATH"
+      - name: Clippy
+        run: cargo clippy -p atd-io -p atd-ops-img --all-targets --features atd-io/ffmpeg -- -D warnings
+      - name: Test
+        run: cargo test -p atd-io -p atd-ops-img --features atd-io/ffmpeg
+      - name: Decoder in use (software or hardware)
+        run: cargo test -p atd-io --features ffmpeg --test ffmpeg -- --nocapture
+
   app-smoke:
     # M0 AC2: the shell starts, renders frames and screenshots on each OS.
     name: App smoke (${{ matrix.name }})

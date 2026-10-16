@@ -100,7 +100,14 @@ fn player_decodes_ahead_without_blocking() {
 
 #[test]
 fn unsupported_files_report_errors() {
-    for (file, expect) in [("README.md", "not a QuickTime"), ("missing.mov", "")] {
+    // With FFmpeg, anything the native reader declines goes to FFmpeg, which
+    // words its own error.
+    let not_a_movie = if cfg!(feature = "ffmpeg") {
+        ""
+    } else {
+        "not a QuickTime"
+    };
+    for (file, expect) in [("README.md", not_a_movie), ("missing.mov", "")] {
         let player = MoviePlayer::open(data(file));
         let start = Instant::now();
         while player.error().is_none() {

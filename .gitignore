@@ -15,3 +15,6 @@ __pycache__/
 .DS_Store
 .idea/
 *.swp
+
+# Throwaway output and local tool downloads (never committed)
+.scratch/
