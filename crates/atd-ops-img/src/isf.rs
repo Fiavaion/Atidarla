@@ -23,7 +23,7 @@ use atd_gpu::isf::{
     TextureSource, UNIFORM_BINDING, UniformType, VERTEX_COUNT,
 };
 
-use crate::stateful::{PingPong, STATE, clear};
+use crate::stateful::{PingPong, STATE, clear, clear_view};
 
 /// An imported ISF shader: schema plus translated source.
 #[derive(Debug, Clone)]
@@ -347,6 +347,9 @@ pub struct IsfOp {
     views: Vec<(wgpu::Texture, wgpu::TextureView, u64)>,
     /// The current pass's sampled textures (reused buffer).
     key: Vec<wgpu::Texture>,
+    /// Uniform bytes last written, to skip identical writes. Starts as
+    /// all ones, so the first frame always writes.
+    written: Vec<u8>,
     cooks: u64,
 }
 
@@ -355,6 +358,30 @@ const CACHE: usize = 8;
 
 /// Cached entries unused for this many cooks are dropped.
 const STALE_COOKS: u64 = 16;
+
+/// The view of `texture` from `views` (made and cached on a miss).
+fn cached_view<'v>(
+    views: &'v mut Vec<(wgpu::Texture, wgpu::TextureView, u64)>,
+    texture: &wgpu::Texture,
+    now: u64,
+) -> &'v wgpu::TextureView {
+    let i = match views.iter().position(|(t, _, _)| t == texture) {
+        Some(i) => i,
+        None => {
+            if views.len() == 2 * CACHE {
+                views.remove(0);
+            }
+            views.push((
+                texture.clone(),
+                texture.create_view(&Default::default()),
+                now,
+            ));
+            views.len() - 1
+        }
+    };
+    views[i].2 = now;
+    &views[i].1
+}
 
 /// A sampled texture's origin, resolved once from the header.
 #[derive(Debug, Clone, Copy)]
@@ -560,6 +587,7 @@ impl IsfOp {
             binds: (0..passes).map(|_| Vec::with_capacity(CACHE)).collect(),
             views: Vec::with_capacity(2 * CACHE),
             key: Vec::with_capacity(shader.textures.len()),
+            written: vec![0xFF; stride as usize * passes],
             cooks: 0,
         })
     }
@@ -751,6 +779,13 @@ impl GpuOp for IsfOp {
         self.cooks += 1;
         let now = self.cooks;
 
+        // Cached bind groups and views hold their textures: drop those not
+        // used lately (in place, no allocation).
+        for binds in &mut self.binds {
+            binds.retain(|e| now - e.2 <= STALE_COOKS);
+        }
+        self.views.retain(|e| now - e.2 <= STALE_COOKS);
+
         // Size targets; (re)create on change, clear non-persistent ones.
         for p in 0..passes {
             let Some(ti) = self.pass_target[p] else {
@@ -769,17 +804,10 @@ impl GpuOp for IsfOp {
                 clear(ctx.encoder, b.write());
                 t.buffers = Some(b);
             } else if !t.persistent && first {
-                let b = t.buffers.as_ref().expect("checked above");
-                clear(ctx.encoder, b.read());
+                let read = t.buffers.as_ref().expect("checked above").read();
+                clear_view(ctx.encoder, cached_view(&mut self.views, read, now));
             }
         }
-
-        // Cached bind groups and views hold their textures: drop those not
-        // used lately (in place, no allocation).
-        for binds in &mut self.binds {
-            binds.retain(|e| now - e.2 <= STALE_COOKS);
-        }
-        self.views.retain(|e| now - e.2 <= STALE_COOKS);
 
         // Every pass's uniforms, written in one go.
         for p in 0..passes {
@@ -792,7 +820,10 @@ impl GpuOp for IsfOp {
             };
             self.pack(p, size, &ctx.params, ctx.time, dt);
         }
-        ctx.queue.write_buffer(&self.uniforms, 0, &self.data);
+        if self.written != self.data {
+            ctx.queue.write_buffer(&self.uniforms, 0, &self.data);
+            self.written.copy_from_slice(&self.data);
+        }
 
         for p in 0..passes {
             let at = p as u64 * self.stride;
@@ -866,20 +897,7 @@ impl GpuOp for IsfOp {
                 ),
                 None => (ctx.output, &self.out_pipeline),
             };
-            let view = match self.views.iter().position(|(t, _, _)| t == dest) {
-                Some(i) => {
-                    self.views[i].2 = now;
-                    &self.views[i].1
-                }
-                None => {
-                    if self.views.len() == 2 * CACHE {
-                        self.views.remove(0);
-                    }
-                    let view = dest.create_view(&Default::default());
-                    self.views.push((dest.clone(), view, now));
-                    &self.views.last().expect("pushed").1
-                }
-            };
+            let view = cached_view(&mut self.views, dest, now);
             {
                 let mut pass = ctx.encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("atd-isf"),

@@ -58,12 +58,17 @@ pub(crate) fn texture(
     })
 }
 
+/// Clears a texture to transparent black. Makes a view: per-frame callers
+/// with a cached view use [`clear_view`].
 pub(crate) fn clear(encoder: &mut wgpu::CommandEncoder, t: &wgpu::Texture) {
-    let view = t.create_view(&Default::default());
+    clear_view(encoder, &t.create_view(&Default::default()));
+}
+
+pub(crate) fn clear_view(encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
     encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some("atd-clear"),
         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-            view: &view,
+            view,
             depth_slice: None,
             resolve_target: None,
             ops: wgpu::Operations {
