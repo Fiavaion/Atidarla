@@ -40,12 +40,43 @@ pub enum Message {
         channel: u8,
         program: u8,
     },
+    /// MIDI Time Code quarter frame (`F1`): piece 0–7 and its 4-bit value.
+    QuarterFrame {
+        piece: u8,
+        value: u8,
+    },
+    /// MIDI Time Code full frame (universal real-time SysEx): rate code
+    /// 0 = 24, 1 = 25, 2 = 29.97 drop-frame, 3 = 30 fps.
+    TimecodeFull {
+        hours: u8,
+        minutes: u8,
+        seconds: u8,
+        frames: u8,
+        rate: u8,
+    },
 }
 
 /// Parses one complete MIDI message (as delivered by `midir`). System and
 /// unknown messages give `None`. Note-on with velocity 0 is a note-off.
 pub fn parse(bytes: &[u8]) -> Option<Message> {
     let status = *bytes.first()?;
+    if status == 0xF1 {
+        let d = *bytes.get(1)?;
+        return (d < 0x80).then_some(Message::QuarterFrame {
+            piece: d >> 4,
+            value: d & 0x0F,
+        });
+    }
+    // F0 7F <device> 01 01 hh mm ss ff F7
+    if let [0xF0, 0x7F, _, 0x01, 0x01, hh, mm, ss, ff, 0xF7] = *bytes {
+        return Some(Message::TimecodeFull {
+            hours: hh & 0x1F,
+            minutes: mm & 0x3F,
+            seconds: ss & 0x3F,
+            frames: ff & 0x1F,
+            rate: (hh >> 5) & 0x03,
+        });
+    }
     let channel = (status & 0x0F) + 1;
     let data = |i: usize| bytes.get(i).copied().filter(|b| *b < 0x80);
     Some(match status & 0xF0 {
@@ -390,6 +421,20 @@ mod tests {
             })
         );
         assert_eq!(parse(&[0xF8]), None, "clock is not a channel message");
+        assert_eq!(
+            parse(&[0xF1, 0x35]),
+            Some(Message::QuarterFrame { piece: 3, value: 5 })
+        );
+        assert_eq!(
+            parse(&[0xF0, 0x7F, 0x7F, 0x01, 0x01, 0x20 | 13, 59, 30, 24, 0xF7]),
+            Some(Message::TimecodeFull {
+                hours: 13,
+                minutes: 59,
+                seconds: 30,
+                frames: 24,
+                rate: 1
+            })
+        );
         assert_eq!(parse(&[0xB0, 7]), None, "truncated");
         assert_eq!(parse(&[0xB0, 0x80, 1]), None, "data bytes are 7-bit");
         assert_eq!(control_change(1, 7, 64), [0xB0, 7, 64]);

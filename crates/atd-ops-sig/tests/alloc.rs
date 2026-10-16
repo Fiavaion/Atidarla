@@ -165,6 +165,17 @@ fn every_sig_operator_cooks_without_allocating() {
             )
             .unwrap();
         }
+        if schema.type_id == "sig.timecode_in" {
+            net.apply(
+                &reg,
+                Edit::SetParam {
+                    node: id,
+                    param: "midi_device".into(),
+                    value: Some(Param::constant(json!("virtual"))),
+                },
+            )
+            .unwrap();
+        }
         if schema.type_id.starts_with("sig.midi_") {
             net.apply(
                 &reg,

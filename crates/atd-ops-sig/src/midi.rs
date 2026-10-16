@@ -90,6 +90,8 @@ impl SigOp for MidiInOp {
                 | Message::PitchBend { channel, .. }
                 | Message::ChannelPressure { channel, .. }
                 | Message::Program { channel, .. } => channel,
+                // Timecode is Timecode In's business.
+                Message::QuarterFrame { .. } | Message::TimecodeFull { .. } => continue,
             };
             if filter != 0 && i64::from(channel) != filter {
                 continue;
@@ -109,6 +111,7 @@ impl SigOp for MidiInOp {
                 Message::Program { program, .. } => {
                     self.set(channel, PROGRAM, 0, f32::from(program));
                 }
+                Message::QuarterFrame { .. } | Message::TimecodeFull { .. } => {}
             }
         }
         self.messages = messages;

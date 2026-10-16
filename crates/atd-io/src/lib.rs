@@ -15,4 +15,5 @@ pub mod dmx;
 pub mod image;
 pub mod midi;
 pub mod osc;
+pub mod timecode;
 pub mod video;
