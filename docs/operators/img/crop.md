@@ -28,6 +28,6 @@ Keeps a rectangle of the input. By default the output is that rectangle at its o
 
 All platforms.
 
-## Example
+## Examples
 
-Pending: runnable example projects arrive with the project format (PRD A11, Proposed).
+- [Keying](../../../examples/keying.atidarla/) — `strip`

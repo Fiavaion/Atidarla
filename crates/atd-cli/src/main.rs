@@ -3,6 +3,7 @@
 mod bench;
 mod docs;
 mod isf_import;
+mod project;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -35,6 +36,25 @@ enum Command {
     Bake { project: PathBuf },
     /// Expose MCP + OSC/REST without UI (FR-H3, M5).
     Serve { project: Option<PathBuf> },
+    /// Check project folders: they load, validate against the operator
+    /// registry and are in canonical form; with --gpu, every node cooks
+    /// without errors.
+    Check {
+        /// Project folders (`*.atidarla`).
+        #[arg(required = true)]
+        projects: Vec<PathBuf>,
+        /// Also cook every node on a GPU.
+        #[arg(long)]
+        gpu: bool,
+        /// Frames to cook with --gpu, at 60 per second.
+        #[arg(long, default_value_t = 60)]
+        frames: u32,
+    },
+    /// Rewrite project folders in canonical form (after editing by hand).
+    Fmt {
+        #[arg(required = true)]
+        projects: Vec<PathBuf>,
+    },
     /// Print the operator registry as JSON (schemas + capability flags).
     Registry,
     /// Generate operator reference pages from the registry.
@@ -42,6 +62,9 @@ enum Command {
         /// Output directory.
         #[arg(long, default_value = "docs/operators")]
         out: PathBuf,
+        /// Example projects to link from each page.
+        #[arg(long, default_value = "examples")]
+        examples: PathBuf,
         /// Fail if the committed pages differ from the generated ones.
         #[arg(long)]
         check: bool,
@@ -87,7 +110,17 @@ fn main() -> ExitCode {
             );
             Ok(())
         }
-        Command::Docs { out, check } => docs::run(&builtin_registry(), &out, check),
+        Command::Docs {
+            out,
+            examples,
+            check,
+        } => docs::run(&builtin_registry(), &out, &examples, check),
+        Command::Check {
+            projects,
+            gpu,
+            frames,
+        } => project::check(&projects, project::CheckOptions { gpu, frames }),
+        Command::Fmt { projects } => project::fmt(&projects),
         Command::IsfImport {
             dir,
             report,

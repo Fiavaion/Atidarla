@@ -1,0 +1,12 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "Shaders"
+description = '''
+Code as operators. shaders/Glow Rings.fs is an ISF shader inside the project: opening the
+project imports it as the operator img.isf_glow_rings. WGSL holds its shader inline (edit the
+code parameter and it recompiles while the old one keeps running). Projection turns the rings,
+treated as an equirectangular panorama, into a fisheye view.
+
+Try: save Glow Rings.fs with a change and reopen the project, or edit the WGSL code.
+'''
+resolution = [1280, 720]

@@ -1,0 +1,12 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "Kaleidoscope tunnel"
+description = '''
+Coloured noise drifting through a kaleidoscope, mirrored, tiled, hue-cycled and glowing.
+
+Speed integrates a Constant rate, so Noise's z drifts at a steady pace; the Timer turns the
+kaleidoscope; an LFO swings the hue.
+
+Try: change the kaleidoscope's segments, or Tile's repeat.
+'''
+resolution = [1280, 720]

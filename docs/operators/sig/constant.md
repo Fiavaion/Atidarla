@@ -31,6 +31,7 @@ None.
 
 All platforms.
 
-## Example
+## Examples
 
-Pending: runnable example projects arrive with the project format (PRD A11, Proposed).
+- [Beat switcher](../../../examples/beat-switcher.atidarla/) — `step`
+- [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `rate`

@@ -30,6 +30,9 @@ Brightness, contrast, gamma, opacity and invert.
 
 All platforms.
 
-## Example
+## Examples
 
-Pending: runnable example projects arrive with the project format (PRD A11, Proposed).
+- [Audio-reactive feedback](../../../examples/audio-reactive-feedback.atidarla/) — `level1`
+- [Beat switcher](../../../examples/beat-switcher.atidarla/) — `level1`
+- [Live control](../../../examples/live-control.atidarla/) — `level1`
+- [Signal scope](../../../examples/signal-scope.atidarla/) — `meter`

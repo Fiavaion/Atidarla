@@ -44,6 +44,17 @@ impl View {
         self.offset = anchor - origin - before.to_vec2() * self.zoom;
     }
 
+    /// Frames `bounds` (canvas units) in a canvas of `size` with a margin,
+    /// never zooming in past 100%.
+    pub fn fit(&mut self, size: Vec2, bounds: Rect) {
+        let margin = 40.0;
+        let zoom = ((size.x - 2.0 * margin) / bounds.width().max(1.0))
+            .min((size.y - 2.0 * margin) / bounds.height().max(1.0))
+            .clamp(MIN_ZOOM, 1.0);
+        self.zoom = zoom;
+        self.offset = size / 2.0 - bounds.center().to_vec2() * zoom;
+    }
+
     /// Pans on background drags (primary or middle) and zooms about the
     /// pointer on scroll or pinch while `background` is hovered.
     pub fn handle_input(&mut self, ui: &Ui, background: &Response, origin: Pos2) {
@@ -146,5 +157,33 @@ mod tests {
         assert_eq!(view.zoom, MAX_ZOOM);
         view.zoom_about(Pos2::ZERO, Pos2::ZERO, 1e-6);
         assert_eq!(view.zoom, MIN_ZOOM);
+    }
+
+    #[test]
+    fn fit_frames_the_bounds() {
+        let mut view = View::default();
+        let size = Vec2::new(800.0, 600.0);
+        let bounds = Rect::from_min_max(Pos2::new(-100.0, 0.0), Pos2::new(1500.0, 400.0));
+        view.fit(size, bounds);
+        let origin = Pos2::ZERO;
+        let (a, b) = (
+            view.to_screen(origin, bounds.min),
+            view.to_screen(origin, bounds.max),
+        );
+        assert!(
+            (a.x - 40.0).abs() < 0.01 && (b.x - 760.0).abs() < 0.01,
+            "{a:?} {b:?}"
+        );
+        assert!(a.y > 40.0 && b.y < 560.0);
+        // A small patch is centred at 100%, not magnified.
+        view.fit(
+            size,
+            Rect::from_min_size(Pos2::ZERO, Vec2::new(100.0, 50.0)),
+        );
+        assert_eq!(view.zoom, 1.0);
+        assert_eq!(
+            view.to_screen(origin, Pos2::new(50.0, 25.0)),
+            Pos2::new(400.0, 300.0)
+        );
     }
 }

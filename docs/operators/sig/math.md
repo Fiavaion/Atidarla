@@ -31,6 +31,8 @@ Combines A with B channel by channel, then maps the range from→to.
 
 All platforms.
 
-## Example
+## Examples
 
-Pending: runnable example projects arrive with the project format (PRD A11, Proposed).
+- [Audio-reactive feedback](../../../examples/audio-reactive-feedback.atidarla/) — `loudness`
+- [Beat switcher](../../../examples/beat-switcher.atidarla/) — `index`, `flash`, `spin`
+- [Live control](../../../examples/live-control.atidarla/) — `degrees`

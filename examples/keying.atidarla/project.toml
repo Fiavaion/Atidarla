@@ -1,0 +1,11 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "Keying"
+description = '''
+Chroma and luma keys on a still (media/greenscreen.png): the green background is keyed out
+and the disc placed over a gradient; the grey strip along the bottom is cropped out and
+luma-keyed, then blended on top. Movie In plays PNG/JPEG stills as well as HAP movies.
+
+Try: lower Chroma Key's tolerance until green fringes appear, or move Luma Key's low.
+'''
+resolution = [640, 360]

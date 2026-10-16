@@ -1,14 +1,17 @@
-//! M1 AC1 pattern without the project format (which waits on PRD A11): an
-//! audio-reactive feedback patch built from edits, saved to JSON, loaded
-//! into a second engine, and cooked in lock step. The reloaded network is
-//! identical, both engines produce identical pixels, and the image follows
-//! the audio.
+//! M1 AC1: the audio-reactive feedback example project
+//! (`examples/audio-reactive-feedback.atidarla`) loaded from disk, saved to a
+//! new folder (byte-identical files) and loaded from there into a second
+//! engine. Both are cooked in lock step: identical pixels every frame, and
+//! the image follows the audio. CI runs this on Windows (WARP) and macOS
+//! (Metal).
 
-use atd_core::graph::{Edit, Endpoint, Network, Node, NodeId, Param, Wire};
+use std::path::Path;
+
+use atd_core::graph::{Edit, NodeId, Param};
 use atd_core::registry::Registry;
 use atd_gpu::engine::{Engine, EngineConfig, OpLibrary};
 use atd_interop::readback::read_rgba8;
-use serde_json::{Value, json};
+use serde_json::json;
 
 fn engine() -> Option<Engine> {
     let instance =
@@ -64,74 +67,6 @@ fn bursts() -> TempFile {
     TempFile(path)
 }
 
-/// Builds the patch; returns (audio, output) nodes.
-fn build(e: &mut Engine, wav: &str) -> (NodeId, NodeId) {
-    let mut ids = Vec::new();
-    let mut edits = Vec::new();
-    let mut node = |e: &mut Engine, ty: &str, name: &str, params: &[(&str, Value)]| {
-        let id = e.alloc_id();
-        ids.push(id);
-        edits.push(Edit::AddNode {
-            node: Node::new(id, ty, name),
-        });
-        for (p, v) in params {
-            edits.push(Edit::SetParam {
-                node: id,
-                param: (*p).into(),
-                value: Some(Param::constant(v.clone())),
-            });
-        }
-        id
-    };
-    let audio = node(
-        e,
-        "sig.audio_file_in",
-        "audio1",
-        &[("file", json!(wav)), ("play", json!(false))],
-    );
-    let spectrum = node(e, "sig.spectrum", "spectrum1", &[("smoothing", json!(0.0))]);
-    let noise = node(e, "img.noise", "noise1", &[("monochrome", json!(false))]);
-    let fb = node(e, "img.feedback", "feedback1", &[]);
-    let xform = node(
-        e,
-        "img.transform",
-        "transform1",
-        &[("scale", json!([0.98, 0.98]))],
-    );
-    let comp = node(
-        e,
-        "img.composite",
-        "composite1",
-        &[("operation", json!("over")), ("opacity", json!(0.15))],
-    );
-    let out = node(e, "img.level", "level1", &[]);
-    let wire = |a: NodeId, b: NodeId, input: &str| Edit::Connect {
-        wire: Wire::new(Endpoint::new(a, "out"), Endpoint::new(b, input)),
-    };
-    edits.extend([
-        wire(audio, spectrum, "in"),
-        wire(noise, fb, "in"),
-        wire(fb, xform, "in"),
-        wire(noise, comp, "a"),
-        wire(xform, comp, "b"),
-        wire(comp, out, "in"),
-        // The loop: the output's previous frame feeds the feedback node.
-        wire(out, fb, "loop"),
-        Edit::SetParam {
-            node: out,
-            param: "brightness".into(),
-            value: Some(Param::bound(json!(0.0), spectrum, "level")),
-        },
-        Edit::SetParam {
-            node: xform,
-            param: "rotate".into(),
-            value: Some(Param::bound(json!(0.0), spectrum, "band5")),
-        },
-    ]);
-    e.edit("build patch", edits).unwrap();
-    (audio, out)
-}
-
 fn pixels(e: &Engine, node: NodeId) -> Vec<u8> {
     read_rgba8(e.device(), e.queue(), e.result(node).unwrap()).unwrap()
 }
@@ -167,15 +102,54 @@ fn audio_reactive_feedback_patch_round_trips_and_reacts() {
         return;
     };
     let mut b = engine().unwrap();
-    let wav = bursts();
-    let (audio, out) = build(&mut a, &wav.0.to_string_lossy());
+    let example = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/audio-reactive-feedback.atidarla");
+    let project = atd_format::load(&example).unwrap();
 
-    // Save and reload: the network text round-trips exactly.
-    let saved = serde_json::to_string_pretty(a.network()).unwrap();
-    let loaded: Network = serde_json::from_str(&saved).unwrap();
-    b.load(loaded).unwrap();
-    assert_eq!(b.network(), a.network());
-    assert_eq!(serde_json::to_string_pretty(b.network()).unwrap(), saved);
+    // Saved to a new folder, the files are byte for byte the same.
+    let copy = std::env::temp_dir().join(format!("atd-ac1-{}.atidarla", std::process::id()));
+    let _ = std::fs::remove_dir_all(&copy);
+    atd_format::save(&copy, &project).unwrap();
+    for file in ["project.toml", "networks/main.toml"] {
+        assert_eq!(
+            std::fs::read(copy.join(file)).unwrap(),
+            std::fs::read(example.join(file)).unwrap(),
+            "{file} round-trips byte for byte"
+        );
+    }
+    let reloaded = atd_format::load(&copy).unwrap();
+    std::fs::remove_dir_all(&copy).ok();
+    assert_eq!(reloaded, project);
+
+    for (e, p, dir) in [(&mut a, &project, &example), (&mut b, &reloaded, &example)] {
+        e.set_project_dir(Some(dir.clone()));
+        e.load(p.main().unwrap().clone()).unwrap();
+    }
+    assert_eq!(a.network(), b.network());
+    let node = |e: &Engine, name: &str| e.network().node_by_name(name).unwrap().id;
+    let (audio, out) = (node(&a, "audio1"), node(&a, "level1"));
+
+    // Tone bursts instead of the drum loop give a clear on/off to measure;
+    // paused until both engines have decoded them.
+    let wav = bursts();
+    for e in [&mut a, &mut b] {
+        e.edit(
+            "test audio",
+            [
+                Edit::SetParam {
+                    node: audio,
+                    param: "file".into(),
+                    value: Some(Param::constant(json!(wav.0.to_string_lossy()))),
+                },
+                Edit::SetParam {
+                    node: audio,
+                    param: "play".into(),
+                    value: Some(Param::constant(json!(false))),
+                },
+            ],
+        )
+        .unwrap();
+    }
 
     ready(&mut a, audio, out);
     ready(&mut b, audio, out);
@@ -204,8 +178,10 @@ fn audio_reactive_feedback_patch_round_trips_and_reacts() {
     }
     let avg = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
     let (on, off) = (avg(&brightness_on), avg(&brightness_off));
+    // Loudness maps to brightness 0.35–1.6: dim in silence, bright on a tone.
+    eprintln!("mean brightness: {on:.1} with tone, {off:.1} in silence");
     assert!(
-        off < 2.0 && on > 10.0,
+        on > 2.0 * off && on - off > 20.0,
         "the image follows the audio: {on:.1} with tone, {off:.1} in silence"
     );
 }

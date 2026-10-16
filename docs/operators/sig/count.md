@@ -27,6 +27,6 @@ Counts how many times the input rises above a threshold. Outputs `count`.
 
 All platforms.
 
-## Example
+## Examples
 
-Pending: runnable example projects arrive with the project format (PRD A11, Proposed).
+- [Beat switcher](../../../examples/beat-switcher.atidarla/) — `beats`

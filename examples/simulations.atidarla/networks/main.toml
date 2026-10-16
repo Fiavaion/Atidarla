@@ -1,0 +1,92 @@
+# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 10
+
+[[node]]
+id = 0
+name = "orbit"
+type = "sig.lfo"
+pos = [0.0, 0.0]
+params.amplitude = 180.0
+params.frequency = 0.1
+params.offset = 180.0
+params.waveform = "ramp"
+
+[[node]]
+id = 1
+name = "wobble"
+type = "sig.noise"
+pos = [0.0, 140.0]
+params.amplitude = 0.02
+params.frequency = 0.5
+params.offset = 0.05
+
+[[node]]
+id = 2
+name = "dot"
+type = "img.shape"
+pos = [0.0, 280.0]
+params.centre = [0.75, 0.5]
+params.size = [0.06, 0.06]
+
+[[node]]
+id = 3
+name = "orbiting"
+type = "img.transform"
+pos = [220.0, 280.0]
+inputs.in = { node = 2, output = "out" }
+params.rotate = { value = 0.0, bind = { node = 0, channel = "lfo" } }
+
+[[node]]
+id = 4
+name = "seed"
+type = "img.shape"
+pos = [0.0, 420.0]
+params.size = [0.08, 0.08]
+
+[[node]]
+id = 5
+name = "pattern"
+type = "img.reaction_diffusion"
+pos = [440.0, 420.0]
+inputs.seed = { node = 4, output = "out" }
+params.colour_b = [0.2, 0.9, 0.7, 1.0]
+params.feed = 0.037
+params.kill = 0.06
+params.steps = 12
+
+[[node]]
+id = 6
+name = "smoke"
+type = "img.fluid"
+pos = [440.0, 140.0]
+inputs.dye = { node = 3, output = "out" }
+inputs.velocity = { node = 3, output = "out" }
+params.emitter_radius = { value = 0.05, bind = { node = 1 } }
+
+[[node]]
+id = 7
+name = "pond"
+type = "img.ripple"
+pos = [440.0, 280.0]
+inputs.drive = { node = 3, output = "out" }
+params.strength = 0.3
+
+[[node]]
+id = 8
+name = "screen"
+type = "img.composite"
+pos = [660.0, 280.0]
+inputs.a = { node = 5, output = "out" }
+inputs.b = { node = 6, output = "out" }
+params.operation = "screen"
+
+[[node]]
+id = 9
+name = "all"
+type = "img.composite"
+pos = [880.0, 280.0]
+inputs.a = { node = 8, output = "out" }
+inputs.b = { node = 7, output = "out" }
+params.opacity = 0.5
+params.operation = "add"

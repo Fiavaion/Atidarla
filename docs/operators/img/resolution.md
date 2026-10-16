@@ -29,6 +29,6 @@ Resamples the input to another size: a fraction of the input (or of the project 
 
 All platforms.
 
-## Example
+## Examples
 
-Pending: runnable example projects arrive with the project format (PRD A11, Proposed).
+- [Keying](../../../examples/keying.atidarla/) — `half`

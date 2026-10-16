@@ -29,6 +29,6 @@ Draws SIG channels as an image: waveforms (samples along x, a row per channel) o
 
 All platforms.
 
-## Example
+## Examples
 
-Pending: runnable example projects arrive with the project format (PRD A11, Proposed).
+- [Signal scope](../../../examples/signal-scope.atidarla/) — `waveform`, `trace`, `bars`, `others`

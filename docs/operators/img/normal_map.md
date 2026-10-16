@@ -26,6 +26,6 @@ Treats luminance as height and outputs tangent-space normals (RGB = XYZ × 0.5 +
 
 All platforms.
 
-## Example
+## Examples
 
-Pending: runnable example projects arrive with the project format (PRD A11, Proposed).
+- [Image processing](../../../examples/image-processing.atidarla/) — `normals`

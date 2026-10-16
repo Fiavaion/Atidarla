@@ -1,0 +1,14 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "Beat switcher"
+description = '''
+A 120 BPM clock switches between four generators, one per beat of the bar, flashes on every
+beat and turns the star a step per beat.
+
+Beat gives beat and bar phases; Select picks one channel; Math rescales bar_phase (0 to 1) to a
+Switch index (0 to 4); Trigger fires an envelope at the start of each beat, Count counts them,
+and Math multiplies the count by a Constant to get degrees.
+
+Try: set Beat's bpm to 90, or Switch's blend on to crossfade between generators.
+'''
+resolution = [1280, 720]

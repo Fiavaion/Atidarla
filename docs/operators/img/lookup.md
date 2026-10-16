@@ -27,6 +27,6 @@ Recolours input A through a lookup image B: each pixel's luminance picks a colou
 
 All platforms.
 
-## Example
+## Examples
 
-Pending: runnable example projects arrive with the project format (PRD A11, Proposed).
+- [Image processing](../../../examples/image-processing.atidarla/) — `coloured`

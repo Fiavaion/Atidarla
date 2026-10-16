@@ -27,6 +27,6 @@ Outputs the previous frame of the `loop` input, closing a feedback loop; outputs
 
 All platforms.
 
-## Example
+## Examples
 
-Pending: runnable example projects arrive with the project format (PRD A11, Proposed).
+- [Audio-reactive feedback](../../../examples/audio-reactive-feedback.atidarla/) — `feedback1`

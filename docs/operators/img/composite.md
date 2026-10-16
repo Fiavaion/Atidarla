@@ -28,6 +28,11 @@ Combines input A with input B using a blend operation.
 
 All platforms.
 
-## Example
+## Examples
 
-Pending: runnable example projects arrive with the project format (PRD A11, Proposed).
+- [Audio-reactive feedback](../../../examples/audio-reactive-feedback.atidarla/) — `composite1`
+- [Image processing](../../../examples/image-processing.atidarla/) — `outlined`, `masked`
+- [Keying](../../../examples/keying.atidarla/) — `over`
+- [Signal scope](../../../examples/signal-scope.atidarla/) — `scopes`, `all`
+- [Simulations](../../../examples/simulations.atidarla/) — `screen`, `all`
+- [Time effects](../../../examples/time-effects.atidarla/) — `compare`

@@ -61,6 +61,12 @@ jobs:
       - name: Show bench JSON
         shell: bash
         run: cat bench-${{ matrix.name }}.json
+      - name: Example projects (M1 AC1, AC4; rule 7)
+        # Every example loads, validates against the registry and is in
+        # canonical form; where the runner has a GPU, every node cooks for a
+        # second without errors and every binding finds its channel.
+        shell: bash
+        run: cargo run -p atd-cli --release -- check ${{ matrix.gpu == '1' && '--gpu' || '' }} examples/*.atidarla
       - name: ISF import (M1 AC2, FR-K6)
         # Translate, build and cook the public Vidvox ISF collection (MIT) at
         # a pinned commit on the runner's GPU; fail below 90%. Slow compiles
@@ -109,7 +115,8 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then RUN="xvfb-run -a -s '-screen 0 1440x900x24'"; else RUN=""; fi
-          eval $RUN ./target/release/atidarla-app --smoke 120 --screenshot shell-${{ matrix.name }}.png
+          # Opens the AC1 example project, so the shell is shown with a real patch.
+          eval $RUN ./target/release/atidarla-app examples/audio-reactive-feedback.atidarla --smoke 120 --screenshot shell-${{ matrix.name }}.png
       - uses: actions/upload-artifact@v4
         if: always()
         with:

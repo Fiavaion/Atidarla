@@ -1,0 +1,151 @@
+# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 19
+
+[[node]]
+id = 0
+name = "mic"
+type = "sig.audio_in"
+pos = [0.0, 0.0]
+params.device = "test-tone"
+
+[[node]]
+id = 1
+name = "loudness"
+type = "sig.envelope"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+
+[[node]]
+id = 2
+name = "smooth"
+type = "sig.filter"
+pos = [440.0, 0.0]
+inputs.in = { node = 1, output = "out" }
+params.cutoff = 2.0
+
+[[node]]
+id = 3
+name = "slow"
+type = "sig.lag"
+pos = [660.0, 0.0]
+inputs.in = { node = 2, output = "out" }
+params.lag_down = 0.5
+params.lag_up = 0.05
+
+[[node]]
+id = 4
+name = "clamped"
+type = "sig.limit"
+pos = [880.0, 0.0]
+inputs.in = { node = 3, output = "out" }
+
+[[node]]
+id = 5
+name = "history"
+type = "sig.trail"
+pos = [1100.0, 0.0]
+inputs.in = { node = 4, output = "out" }
+params.length = 240
+
+[[node]]
+id = 6
+name = "bands"
+type = "sig.spectrum"
+pos = [220.0, 140.0]
+inputs.in = { node = 0, output = "out" }
+params.bands = 16
+
+[[node]]
+id = 7
+name = "hits"
+type = "sig.onset"
+pos = [220.0, 280.0]
+inputs.in = { node = 0, output = "out" }
+
+[[node]]
+id = 8
+name = "wave"
+type = "sig.pattern"
+pos = [220.0, 420.0]
+params.cycles = 2.0
+params.shape = "triangle"
+params.speed = 0.5
+
+[[node]]
+id = 9
+name = "both"
+type = "sig.merge"
+pos = [440.0, 350.0]
+inputs.a = { node = 7, output = "out" }
+inputs.b = { node = 8, output = "out" }
+
+[[node]]
+id = 10
+name = "waveform"
+type = "img.channel_image"
+pos = [440.0, 560.0]
+inputs.sig = { node = 0, output = "out" }
+
+[[node]]
+id = 11
+name = "trace"
+type = "img.channel_image"
+pos = [1320.0, 140.0]
+inputs.sig = { node = 5, output = "out" }
+
+[[node]]
+id = 12
+name = "bars"
+type = "img.channel_image"
+pos = [440.0, 700.0]
+inputs.sig = { node = 6, output = "out" }
+params.layout = "channels"
+
+[[node]]
+id = 13
+name = "others"
+type = "img.channel_image"
+pos = [660.0, 420.0]
+inputs.sig = { node = 9, output = "out" }
+
+[[node]]
+id = 14
+name = "scopes"
+type = "img.composite"
+pos = [880.0, 560.0]
+inputs.a = { node = 10, output = "out" }
+inputs.b = { node = 11, output = "out" }
+params.operation = "add"
+
+[[node]]
+id = 15
+name = "all"
+type = "img.composite"
+pos = [1100.0, 630.0]
+inputs.a = { node = 14, output = "out" }
+inputs.b = { node = 12, output = "out" }
+params.operation = "add"
+
+[[node]]
+id = 16
+name = "probe"
+type = "img.analyze"
+pos = [1320.0, 630.0]
+inputs.in = { node = 15, output = "out" }
+
+[[node]]
+id = 17
+name = "luma"
+type = "sig.select"
+pos = [1540.0, 630.0]
+inputs.in = { node = 16, output = "out" }
+params.channels = "luma"
+
+[[node]]
+id = 18
+name = "meter"
+type = "img.level"
+pos = [1760.0, 420.0]
+inputs.in = { node = 13, output = "out" }
+params.brightness = { value = 1.0, bind = { node = 17, channel = "luma" } }

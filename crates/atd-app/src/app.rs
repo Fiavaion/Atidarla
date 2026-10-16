@@ -11,7 +11,14 @@ use serde_json::json;
 
 use crate::dock::{DockState, TabViewer};
 use crate::patch::PatchEditor;
+use crate::project::{Action, ProjectState};
 use crate::smoke::{Smoke, SmokeArgs};
+
+const NEW: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::N);
+const OPEN: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::O);
+const SAVE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::S);
+const SAVE_AS: KeyboardShortcut =
+    KeyboardShortcut::new(Modifiers::COMMAND.plus(Modifiers::SHIFT), Key::S);
 
 /// Flags shown in the Platform panel so the capability mechanism is visible
 /// before any flagged operator exists (PRD A7, A19).
@@ -43,6 +50,11 @@ pub struct AtidarlaApp {
     start: Instant,
     /// The latest uncaptured GPU error, shown until dismissed.
     gpu_error: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    project: ProjectState,
+    /// Window title last sent, to send it only on change.
+    title: String,
+    /// The user confirmed quitting with unsaved changes.
+    quitting: bool,
 }
 
 /// Everything the tabs render, split from the dock so both can be borrowed.
@@ -63,7 +75,11 @@ struct Panels {
 }
 
 impl AtidarlaApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, smoke: Option<SmokeArgs>) -> Self {
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        smoke: Option<SmokeArgs>,
+        open: Option<std::path::PathBuf>,
+    ) -> Self {
         let rs = cc.wgpu_render_state.as_ref();
         let info = rs.map(|rs| rs.adapter.get_info());
         let platform = info
@@ -112,7 +128,23 @@ impl AtidarlaApp {
                 },
             )
         });
-        let viewed = engine.as_mut().and_then(demo_patch);
+        let mut viewed = engine.as_mut().and_then(demo_patch);
+        let mut project = ProjectState::untitled(
+            engine
+                .as_ref()
+                .map_or(&atd_core::graph::Network::default(), |e| e.network()),
+        );
+        if let (Some(engine), Some(dir)) = (engine.as_mut(), open) {
+            viewed = project.run(engine, Action::OpenDir(dir));
+            if let Some((msg, true)) = &project.message {
+                log::error!("{msg}");
+                if smoke.is_some() {
+                    // Smoke runs must fail loudly on a project that does not load.
+                    eprintln!("error: {msg}");
+                    std::process::exit(1);
+                }
+            }
+        }
 
         let dock = DockState::new(
             vec![Tab::Operators, Tab::Platform],
@@ -127,7 +159,7 @@ impl AtidarlaApp {
                 platform,
                 adapter,
                 engine,
-                patch: PatchEditor::with_selection(viewed),
+                patch: PatchEditor::with_selection(viewed).frame_all(),
                 viewed,
                 viewer: Default::default(),
                 image_rect: None,
@@ -137,6 +169,9 @@ impl AtidarlaApp {
             },
             smoke: smoke.map(Smoke::new),
             start: Instant::now(),
+            project,
+            title: String::new(),
+            quitting: false,
         }
     }
 }
@@ -213,13 +248,10 @@ impl std::fmt::Debug for AtidarlaApp {
 impl eframe::App for AtidarlaApp {
     fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
         self.shortcuts(ui);
+        self.project_frame(ui.ctx());
         egui::Panel::top("menu_bar").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
-                ui.menu_button("File", |ui| {
-                    if ui.button("Quit").clicked() {
-                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-                    }
-                });
+                ui.menu_button("File", |ui| self.file_menu(ui));
                 ui.menu_button("Edit", |ui| {
                     let (undo, redo) = self.panels.engine.as_ref().map_or((None, None), |e| {
                         (
@@ -259,6 +291,21 @@ impl eframe::App for AtidarlaApp {
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.weak(format!("Atidarla {}", atd_core::VERSION));
+                    if let Some((msg, error)) = self.project.message.clone() {
+                        let short: String = msg.chars().take(80).collect();
+                        ui.separator();
+                        let label = if error {
+                            ui.colored_label(egui::Color32::from_rgb(230, 80, 80), short)
+                        } else {
+                            ui.weak(short)
+                        };
+                        if label
+                            .on_hover_text(format!("{msg}\n\nClick to dismiss."))
+                            .clicked()
+                        {
+                            self.project.message = None;
+                        }
+                    }
                     let last = self.gpu_error.lock().ok().and_then(|g| g.clone());
                     if let Some(e) = last {
                         let short: String =
@@ -292,13 +339,153 @@ impl eframe::App for AtidarlaApp {
 }
 
 impl AtidarlaApp {
-    fn shortcuts(&mut self, ui: &Ui) {
+    fn file_menu(&mut self, ui: &mut Ui) {
+        let has_engine = self.panels.engine.is_some();
+        let item = |ui: &mut Ui, text: &str, shortcut: &KeyboardShortcut| {
+            ui.add_enabled(
+                has_engine,
+                egui::Button::new(text).shortcut_text(ui.ctx().format_shortcut(shortcut)),
+            )
+            .clicked()
+        };
+        if item(ui, "New Project", &NEW) {
+            self.request(Action::New);
+        }
+        if item(ui, "Open Project…", &OPEN) {
+            self.request(Action::Open);
+        }
+        ui.separator();
+        if item(ui, "Save", &SAVE) {
+            self.save();
+        }
+        if item(ui, "Save As…", &SAVE_AS) {
+            self.project.save_as();
+        }
+        ui.separator();
+        if ui.button("Quit").clicked() {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+    }
+
+    fn request(&mut self, action: Action) {
+        if let Some(engine) = &mut self.panels.engine {
+            let view = self.project.request(engine, action);
+            self.show_loaded(view);
+        }
+    }
+
+    fn save(&mut self) {
+        if let Some(engine) = &mut self.panels.engine {
+            self.project.save(engine);
+        }
+    }
+
+    /// After a load: view and select `view`, forget the old selection.
+    fn show_loaded(&mut self, view: Option<NodeId>) {
+        let loaded = self.project.confirm.is_none()
+            && self.panels.engine.as_ref().is_some_and(|e| {
+                self.panels
+                    .viewed
+                    .is_none_or(|v| e.network().node(v).is_none())
+                    || view.is_some()
+            });
+        if loaded {
+            self.panels.patch = PatchEditor::with_selection(view).frame_all();
+            self.panels.viewed = view;
+        }
+    }
+
+    /// Dialog results, the window title, closing with unsaved changes, and
+    /// the "discard changes?" prompt.
+    fn project_frame(&mut self, ctx: &egui::Context) {
         let Some(engine) = &mut self.panels.engine else {
             return;
         };
-        if ui.ctx().egui_wants_keyboard_input() {
+        if let Some(view) = self.project.poll(engine) {
+            self.show_loaded(Some(view));
+        }
+        let engine = self.panels.engine.as_mut().expect("checked above");
+        let title = self.project.title(Some(engine));
+        if title != self.title {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.title = title;
+        }
+        let dirty = self.project.dirty(engine);
+        if ctx.input(|i| i.viewport().close_requested())
+            && dirty
+            && !self.quitting
+            && self.smoke.is_none()
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.project.confirm = Some(Action::Quit);
+        }
+        let Some(action) = self.project.confirm.clone() else {
+            return;
+        };
+        let name = self.project.meta.name.clone();
+        let can_save = self.project.dir.is_some();
+        let mut choice = None;
+        let modal = egui::Modal::new(egui::Id::unique("discard_changes")).show(ctx, |ui| {
+            ui.heading("Unsaved changes");
+            ui.label(format!("“{name}” has changes that are not saved."));
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if can_save && ui.button("Save").clicked() {
+                    choice = Some(true);
+                }
+                if ui.button("Discard changes").clicked() {
+                    choice = Some(false);
+                }
+                if ui.button("Cancel").clicked() {
+                    self.project.confirm = None;
+                }
+            });
+        });
+        if modal.should_close() {
+            self.project.confirm = None;
+        }
+        let Some(save) = choice else {
+            return;
+        };
+        if save {
+            self.save();
+            if self
+                .project
+                .message
+                .as_ref()
+                .is_some_and(|(_, error)| *error)
+            {
+                self.project.confirm = None;
+                return;
+            }
+        }
+        if action == Action::Quit {
+            self.project.confirm = None;
+            self.quitting = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        } else if let Some(engine) = &mut self.panels.engine {
+            let view = self.project.run(engine, action);
+            self.show_loaded(view);
+        }
+    }
+
+    fn shortcuts(&mut self, ui: &Ui) {
+        if self.panels.engine.is_none() || ui.ctx().egui_wants_keyboard_input() {
             return;
         }
+        // Longer shortcuts first: Cmd+Shift+S also matches Cmd+S.
+        if ui.input_mut(|i| i.consume_shortcut(&SAVE_AS)) {
+            self.project.save_as();
+        } else if ui.input_mut(|i| i.consume_shortcut(&SAVE)) {
+            self.save();
+        } else if ui.input_mut(|i| i.consume_shortcut(&OPEN)) {
+            self.request(Action::Open);
+        } else if ui.input_mut(|i| i.consume_shortcut(&NEW)) {
+            self.request(Action::New);
+        }
+        let Some(engine) = &mut self.panels.engine else {
+            return;
+        };
         let undo = KeyboardShortcut::new(Modifiers::COMMAND, Key::Z);
         let redo = KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
         let redo_y = KeyboardShortcut::new(Modifiers::COMMAND, Key::Y);

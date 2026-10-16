@@ -27,6 +27,7 @@ Crossfades from input A to input B.
 
 All platforms.
 
-## Example
+## Examples
 
-Pending: runnable example projects arrive with the project format (PRD A11, Proposed).
+- [Keying](../../../examples/keying.atidarla/) — `mix`
+- [Time effects](../../../examples/time-effects.atidarla/) — `echo`

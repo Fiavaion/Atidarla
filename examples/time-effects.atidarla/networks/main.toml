@@ -1,0 +1,52 @@
+# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 6
+
+[[node]]
+id = 0
+name = "clip"
+type = "img.movie_in"
+pos = [0.0, 0.0]
+params.file = "media/testsrc.mov"
+params.size = "project"
+
+[[node]]
+id = 1
+name = "delayed"
+type = "img.cache"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+params.delay = 4
+
+[[node]]
+id = 2
+name = "echo"
+type = "img.blend"
+pos = [440.0, 0.0]
+inputs.a = { node = 0, output = "out" }
+inputs.b = { node = 1, output = "out" }
+params.mix = 0.5
+
+[[node]]
+id = 3
+name = "columns"
+type = "img.ramp"
+pos = [0.0, 140.0]
+
+[[node]]
+id = 4
+name = "slit_scan"
+type = "img.time_machine"
+pos = [220.0, 140.0]
+inputs.in = { node = 0, output = "out" }
+inputs.time = { node = 3, output = "out" }
+params.frames = 30
+
+[[node]]
+id = 5
+name = "compare"
+type = "img.composite"
+pos = [660.0, 70.0]
+inputs.a = { node = 2, output = "out" }
+inputs.b = { node = 4, output = "out" }
+params.operation = "difference"

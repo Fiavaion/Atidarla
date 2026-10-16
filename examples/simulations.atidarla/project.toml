@@ -1,0 +1,13 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "Simulations"
+description = '''
+The three 2D solvers side by side: Reaction-Diffusion growing from a dot, a Fluid stirred by
+its emitter and an orbiting dot, and Ripple waves left by the same dot.
+
+The dot orbits because Transform rotates it about the centre, driven by an LFO; SIG Noise
+varies the fluid emitter's radius.
+
+Try: Reaction-Diffusion feed 0.03 and kill 0.055 for spots instead of stripes; pulse reset.
+'''
+resolution = [1280, 720]

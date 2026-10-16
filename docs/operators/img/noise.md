@@ -31,6 +31,8 @@ None.
 
 All platforms.
 
-## Example
+## Examples
 
-Pending: runnable example projects arrive with the project format (PRD A11, Proposed).
+- [Audio-reactive feedback](../../../examples/audio-reactive-feedback.atidarla/) — `noise1`
+- [Image processing](../../../examples/image-processing.atidarla/) — `source`
+- [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `clouds`

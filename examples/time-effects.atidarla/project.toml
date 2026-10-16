@@ -1,0 +1,11 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "Time effects"
+description = '''
+Frames from the past: Cache delays a movie by a few frames for an echo, and Time Machine
+picks each column's frame from a horizontal ramp, a slit-scan. Difference shows where they
+disagree. media/testsrc.mov is a HAP movie made from FFmpeg's test pattern.
+
+Try: replace the ramp with Noise for a liquid slit-scan.
+'''
+resolution = [640, 320]

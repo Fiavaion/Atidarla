@@ -419,6 +419,19 @@ impl Registry {
         Ok(())
     }
 
+    /// Registers `schema`, replacing an operator with the same type ID (a
+    /// project's own shader taking over from another project's).
+    pub fn replace(&mut self, schema: OperatorSchema) -> Result<(), RegistryError> {
+        let old = self.ops.remove(&schema.type_id);
+        let result = self.register(schema);
+        if result.is_err()
+            && let Some(old) = old
+        {
+            self.ops.insert(old.type_id.clone(), old);
+        }
+        result
+    }
+
     pub fn get(&self, type_id: &str) -> Option<&OperatorSchema> {
         self.ops.get(type_id)
     }

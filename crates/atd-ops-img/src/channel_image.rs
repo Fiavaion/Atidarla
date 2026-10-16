@@ -107,8 +107,15 @@ impl GpuOp for ChannelImage {
         let scale = ctx.params.f32("scale");
         let offset = ctx.params.f32("offset");
         let by_channel = ctx.params.str("layout") == "channels";
-        let (channels, samples) = match ctx.sig_inputs.get(0) {
-            Some(ch) if !ch.is_empty() => (ch.len(), ch.samples().max(1)),
+        let input = ctx.sig_inputs.get(0).filter(|ch| !ch.is_empty());
+        // An audio block can have channels but no samples this frame (no new
+        // audio yet, or playback paused): keep showing the last block.
+        if input.is_some_and(|ch| ch.samples() == 0) && self.data.width() > 1 {
+            self.draw(ctx);
+            return Ok(());
+        }
+        let (channels, samples) = match input {
+            Some(ch) if ch.samples() > 0 => (ch.len(), ch.samples()),
             _ => (0, 0),
         };
         // Texture size: (columns, rows) and the sample stride along x.
@@ -124,7 +131,7 @@ impl GpuOp for ChannelImage {
         };
         self.staging.clear();
         self.staging.resize(w * h * 2, 0);
-        if let Some(ch) = ctx.sig_inputs.get(0).filter(|_| channels > 0) {
+        if let Some(ch) = input.filter(|_| channels > 0) {
             // Row 0 of the texture is the top of the image; put channel or
             // sample 0 at the bottom (y up, as in ISF).
             for row in 0..h {
@@ -161,6 +168,13 @@ impl GpuOp for ChannelImage {
                 depth_or_array_layers: 1,
             },
         );
+        self.draw(ctx);
+        Ok(())
+    }
+}
+
+impl ChannelImage {
+    fn draw(&self, ctx: &mut CookCtx<'_>) {
         let interpolate = f32::from(u8::from(ctx.params.bool("interpolate")));
         self.pass.draw(
             ctx.device,
@@ -170,7 +184,6 @@ impl GpuOp for ChannelImage {
             &[[interpolate, 0.0, 0.0, 0.0]],
             ctx.output,
         );
-        Ok(())
     }
 }
 

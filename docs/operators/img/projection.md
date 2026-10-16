@@ -29,6 +29,6 @@ Converts between panoramic and camera projections: equirectangular (360°), fish
 
 All platforms.
 
-## Example
+## Examples
 
-Pending: runnable example projects arrive with the project format (PRD A11, Proposed).
+- [Shaders](../../../examples/shaders.atidarla/) — `fisheye`

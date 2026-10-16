@@ -1,0 +1,13 @@
+# Project files are compared byte for byte (canonical form, CLAUDE.md rule 8),
+# so they keep LF line endings on every OS.
+*.toml text eol=lf
+*.fs text eol=lf
+*.vs text eol=lf
+*.wgsl text eol=lf
+*.md text eol=lf
+
+*.wav binary
+*.mov binary
+*.png binary
+*.jpg binary
+*.rgba binary

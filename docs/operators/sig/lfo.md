@@ -30,6 +30,8 @@ None.
 
 All platforms.
 
-## Example
+## Examples
 
-Pending: runnable example projects arrive with the project format (PRD A11, Proposed).
+- [Image processing](../../../examples/image-processing.atidarla/) — `move`
+- [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `hue_swing`
+- [Simulations](../../../examples/simulations.atidarla/) — `orbit`

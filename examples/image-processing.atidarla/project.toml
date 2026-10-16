@@ -1,0 +1,11 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "Image processing"
+description = '''
+One noise field through the image filters: blur, edges, slope (relief), normal map,
+threshold, a colour lookup from a ramp, displacement by the normals, remapping by the relief and
+a channel swap, with the edges and the threshold mask composited on top.
+
+Try: view each node in turn (click it) to see what it does on its own.
+'''
+resolution = [1280, 720]

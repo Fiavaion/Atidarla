@@ -655,6 +655,12 @@ impl Engine {
         &self.net
     }
 
+    /// Adds operator types (a project's own shaders). Operators already in
+    /// use must not be removed; load the network after extending.
+    pub fn extend<R>(&mut self, f: impl FnOnce(&mut Registry, &mut OpLibrary) -> R) -> R {
+        f(&mut self.registry, &mut self.library)
+    }
+
     pub fn registry(&self) -> &Registry {
         &self.registry
     }

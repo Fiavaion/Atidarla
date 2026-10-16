@@ -33,6 +33,6 @@ None.
 
 All platforms.
 
-## Example
+## Examples
 
-Pending: runnable example projects arrive with the project format (PRD A11, Proposed).
+- [Signal scope](../../../examples/signal-scope.atidarla/) — `wave`

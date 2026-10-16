@@ -29,6 +29,6 @@ Rebuilds each output channel as a weighted sum of the input's R, G, B and A.
 
 All platforms.
 
-## Example
+## Examples
 
-Pending: runnable example projects arrive with the project format (PRD A11, Proposed).
+- [Image processing](../../../examples/image-processing.atidarla/) — `swapped`

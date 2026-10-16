@@ -303,6 +303,39 @@ pub fn register(
     ids
 }
 
+/// Imports a project's `shaders/` folder (PRD §5.5), replacing operators of
+/// the same type ID, so a project's shader wins over another project's or a
+/// shared one. Returns the IDs registered and the failures by file stem; a
+/// missing folder is not an error.
+pub fn register_project_shaders(
+    project: &Path,
+    registry: &mut atd_core::registry::Registry,
+    library: &mut OpLibrary,
+) -> (Vec<String>, Vec<(String, IsfError)>) {
+    let dir = project.join("shaders");
+    if !dir.is_dir() {
+        return (Vec::new(), Vec::new());
+    }
+    let (defs, failed) = match load_dir(&dir) {
+        Ok(loaded) => loaded,
+        Err(e) => {
+            log::warn!("cannot read {}: {e}", dir.display());
+            return (Vec::new(), Vec::new());
+        }
+    };
+    let mut ids = Vec::new();
+    for def in defs {
+        let id = def.schema.type_id.clone();
+        if registry.replace(def.schema.clone()).is_ok() {
+            library.add(id.clone(), move |device, format| {
+                def.instantiate(device, format)
+            });
+            ids.push(id);
+        }
+    }
+    (ids, failed)
+}
+
 /// One pass target: a ping-pong pair at the pass's current size.
 #[derive(Debug)]
 struct Target {

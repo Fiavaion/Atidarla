@@ -26,6 +26,6 @@ Reflects one half of the image onto the other.
 
 All platforms.
 
-## Example
+## Examples
 
-Pending: runnable example projects arrive with the project format (PRD A11, Proposed).
+- [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `mirror1`

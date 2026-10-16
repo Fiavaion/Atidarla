@@ -1,0 +1,123 @@
+# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 14
+
+[[node]]
+id = 0
+name = "move"
+type = "sig.lfo"
+pos = [0.0, 0.0]
+params.amplitude = 2.0
+params.frequency = 0.05
+params.waveform = "ramp"
+
+[[node]]
+id = 1
+name = "source"
+type = "img.noise"
+pos = [0.0, 140.0]
+params.octaves = 4
+params.scale = 6.0
+params.z = { value = 0.0, bind = { node = 0, channel = "lfo" } }
+
+[[node]]
+id = 2
+name = "soft"
+type = "img.blur"
+pos = [220.0, 140.0]
+inputs.in = { node = 1, output = "out" }
+params.size = 6.0
+
+[[node]]
+id = 3
+name = "edges"
+type = "img.edge"
+pos = [440.0, 0.0]
+inputs.in = { node = 2, output = "out" }
+params.mode = "colour"
+
+[[node]]
+id = 4
+name = "relief"
+type = "img.slope"
+pos = [440.0, 140.0]
+inputs.in = { node = 2, output = "out" }
+params.strength = 2.0
+
+[[node]]
+id = 5
+name = "normals"
+type = "img.normal_map"
+pos = [440.0, 280.0]
+inputs.in = { node = 2, output = "out" }
+params.strength = 3.0
+
+[[node]]
+id = 6
+name = "mask"
+type = "img.threshold"
+pos = [440.0, 420.0]
+inputs.in = { node = 2, output = "out" }
+params.softness = 0.05
+
+[[node]]
+id = 7
+name = "palette"
+type = "img.ramp"
+pos = [220.0, 560.0]
+params.colour_a = [0.05, 0.02, 0.2, 1.0]
+params.colour_b = [1.0, 0.7, 0.2, 1.0]
+
+[[node]]
+id = 8
+name = "coloured"
+type = "img.lookup"
+pos = [660.0, 280.0]
+inputs.in = { node = 2, output = "out" }
+inputs.lut = { node = 7, output = "out" }
+
+[[node]]
+id = 9
+name = "warped"
+type = "img.displace"
+pos = [880.0, 280.0]
+inputs.by = { node = 5, output = "out" }
+inputs.in = { node = 8, output = "out" }
+params.amount = 0.04
+
+[[node]]
+id = 10
+name = "remapped"
+type = "img.remap"
+pos = [1100.0, 280.0]
+inputs.in = { node = 9, output = "out" }
+inputs.map = { node = 4, output = "out" }
+
+[[node]]
+id = 11
+name = "swapped"
+type = "img.channel_mix"
+pos = [1320.0, 280.0]
+inputs.in = { node = 10, output = "out" }
+params.blue = [1.0, 0.0, 0.0, 0.0]
+params.green = [0.0, 0.0, 1.0, 0.0]
+params.red = [0.0, 1.0, 0.0, 0.0]
+
+[[node]]
+id = 12
+name = "outlined"
+type = "img.composite"
+pos = [1540.0, 140.0]
+inputs.a = { node = 11, output = "out" }
+inputs.b = { node = 3, output = "out" }
+params.opacity = 0.5
+params.operation = "add"
+
+[[node]]
+id = 13
+name = "masked"
+type = "img.composite"
+pos = [1760.0, 280.0]
+inputs.a = { node = 12, output = "out" }
+inputs.b = { node = 6, output = "out" }
+params.operation = "multiply"

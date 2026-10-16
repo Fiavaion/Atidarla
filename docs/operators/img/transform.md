@@ -30,6 +30,7 @@ Translates, rotates and scales the input around a pivot.
 
 All platforms.
 
-## Example
+## Examples
 
-Pending: runnable example projects arrive with the project format (PRD A11, Proposed).
+- [Audio-reactive feedback](../../../examples/audio-reactive-feedback.atidarla/) — `transform1`
+- [Simulations](../../../examples/simulations.atidarla/) — `orbiting`

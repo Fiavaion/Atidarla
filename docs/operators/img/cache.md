@@ -28,6 +28,6 @@ Cooks every frame (time-dependent).
 
 All platforms.
 
-## Example
+## Examples
 
-Pending: runnable example projects arrive with the project format (PRD A11, Proposed).
+- [Time effects](../../../examples/time-effects.atidarla/) — `delayed`

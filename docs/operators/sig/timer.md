@@ -29,6 +29,7 @@ None.
 
 All platforms.
 
-## Example
+## Examples
 
-Pending: runnable example projects arrive with the project format (PRD A11, Proposed).
+- [Audio-reactive feedback](../../../examples/audio-reactive-feedback.atidarla/) — `clock1`
+- [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `clock`

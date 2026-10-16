@@ -6,6 +6,7 @@ mod channels;
 mod dock;
 mod params;
 mod patch;
+mod project;
 mod smoke;
 mod suggest;
 mod viewer;
@@ -14,10 +15,16 @@ use std::process::ExitCode;
 
 fn main() -> ExitCode {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
-    let smoke = match smoke::SmokeArgs::parse(std::env::args().skip(1)) {
+    // An optional project folder first, then smoke-mode flags.
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let open = (!args.is_empty() && !args[0].starts_with('-'))
+        .then(|| std::path::PathBuf::from(args.remove(0)));
+    let smoke = match smoke::SmokeArgs::parse(args) {
         Ok(smoke) => smoke,
         Err(e) => {
-            eprintln!("error: {e}\nusage: atidarla-app [--smoke [frames]] [--screenshot out.png]");
+            eprintln!(
+                "error: {e}\nusage: atidarla-app [project.atidarla] [--smoke [frames]] [--screenshot out.png]"
+            );
             return ExitCode::from(2);
         }
     };
@@ -55,7 +62,7 @@ fn main() -> ExitCode {
     let result = eframe::run_native(
         "Atidarla",
         options,
-        Box::new(|cc| Ok(Box::new(app::AtidarlaApp::new(cc, smoke)))),
+        Box::new(|cc| Ok(Box::new(app::AtidarlaApp::new(cc, smoke, open)))),
     );
     match result {
         Ok(()) => ExitCode::SUCCESS,

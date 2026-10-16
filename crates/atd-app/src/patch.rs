@@ -179,9 +179,36 @@ pub struct PatchEditor {
     status: Option<(String, Instant)>,
     selected_comment: Option<CommentId>,
     editing: Option<CommentEdit>,
+    /// Frame the whole patch on the next draw (after opening a project).
+    fit: bool,
 }
 
 impl PatchEditor {
+    /// Frames the whole patch the next time the canvas is drawn.
+    pub fn frame_all(mut self) -> Self {
+        self.fit = true;
+        self
+    }
+
+    /// Canvas bounds of every node and comment.
+    fn bounds(engine: &Engine) -> Option<Rect> {
+        let net = engine.network();
+        let nodes = net.nodes().filter_map(|n| {
+            let schema = engine.registry().get(&n.type_id)?;
+            Some(Rect::from_min_size(
+                Pos2::new(n.pos[0], n.pos[1]),
+                node_size(schema),
+            ))
+        });
+        let comments = net.comments().map(|c| {
+            Rect::from_min_size(
+                Pos2::new(c.pos[0], c.pos[1]),
+                Vec2::new(c.size[0], c.size[1]),
+            )
+        });
+        nodes.chain(comments).reduce(|a, b| a.union(b))
+    }
+
     pub fn with_selection(selected: Option<NodeId>) -> Self {
         Self {
             selected,
@@ -256,6 +283,16 @@ impl PatchEditor {
     pub fn ui(&mut self, ui: &mut Ui, engine: &mut Engine) {
         let (rect, bg) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
         let origin = rect.min;
+        let frame_key = bg.hovered()
+            && !ui.ctx().egui_wants_keyboard_input()
+            && ui.input(|i| i.key_pressed(egui::Key::F) && i.modifiers.is_none());
+        if (self.fit || frame_key)
+            && rect.width() > 0.0
+            && let Some(bounds) = Self::bounds(engine)
+        {
+            self.view.fit(rect.size(), bounds);
+            self.fit = false;
+        }
         let shift = ui.input(|i| i.modifiers.shift);
         let boxing = matches!(self.drag, Some(Drag::Select { .. }));
         if !boxing && !(shift && bg.drag_started()) {

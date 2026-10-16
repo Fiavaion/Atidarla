@@ -28,6 +28,6 @@ Adds a glow around bright areas.
 
 All platforms.
 
-## Example
+## Examples
 
-Pending: runnable example projects arrive with the project format (PRD A11, Proposed).
+- [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `glow`

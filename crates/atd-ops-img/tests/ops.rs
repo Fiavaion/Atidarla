@@ -869,6 +869,56 @@ fn channel_image_draws_channels_as_rows_or_columns() {
     assert_px(&cook(&mut e, img), 0, 5, [0, 0, 0, 255], 0);
 }
 
+/// An audio block with channels but no samples (playback paused, or no new
+/// audio this frame) used to index an empty channel and panic.
+#[test]
+fn channel_image_keeps_the_last_block_when_audio_pauses() {
+    let mut e = engine_or_skip!();
+    let path = std::env::temp_dir().join(format!("atd-pause-{}.wav", std::process::id()));
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: 8_000,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut w = hound::WavWriter::create(&path, spec).unwrap();
+    for _ in 0..8_000 {
+        w.write_sample(16_000i16).unwrap();
+    }
+    w.finalize().unwrap();
+    let audio = add(
+        &mut e,
+        "sig.audio_file_in",
+        &[
+            ("file", json!(path.to_string_lossy())),
+            ("play", json!(false)),
+        ],
+    );
+    let img = add(&mut e, "channel_image", &[("interpolate", json!(false))]);
+    wire(&mut e, audio, img, "sig");
+    // Paused before any audio: named channels, zero samples, black.
+    let start = std::time::Instant::now();
+    while e.channels(audio).is_none_or(|c| c.is_empty()) {
+        e.cook(&[img], 0.0).unwrap();
+        assert!(start.elapsed().as_secs() < 10, "audio decoded");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(e.channels(audio).unwrap().samples(), 0);
+    assert_px(&cook(&mut e, img), 3, 3, [0, 0, 0, 255], 0);
+    // Playing: the block shows (0.49 → grey).
+    set(&mut e, audio, "play", json!(true));
+    e.cook(&[img], 0.0).unwrap();
+    e.cook(&[img], 0.1).unwrap();
+    let playing = cook(&mut e, img);
+    assert_px(&playing, 3, 3, [125, 125, 125, 255], 3);
+    // Paused again: the last block stays instead of a crash or a blank.
+    set(&mut e, audio, "play", json!(false));
+    e.cook(&[img], 0.2).unwrap();
+    assert_eq!(e.channels(audio).unwrap().samples(), 0);
+    assert_px(&cook(&mut e, img), 3, 3, [125, 125, 125, 255], 3);
+    std::fs::remove_file(path).ok();
+}
+
 #[test]
 fn projection_maps_directions() {
     let mut e = engine_or_skip!();
