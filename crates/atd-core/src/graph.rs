@@ -685,7 +685,7 @@ impl Network {
                     .wires()
                     .filter(|w| w.from.node == id || w.to.node == id)
                     .collect();
-                let dirty: Vec<NodeId> = self
+                let mut dirty: Vec<NodeId> = self
                     .downstream_of(id)
                     .into_iter()
                     .filter(|&n| n != id)
@@ -694,10 +694,36 @@ impl Network {
                     self.inputs.remove(&w.to);
                 }
                 let node = self.nodes.remove(&id).expect("checked above");
-                Ok(Applied {
-                    inverse: vec![Edit::RestoreNode { node, wires }],
-                    dirty,
-                })
+                let mut inverse = vec![Edit::RestoreNode { node, wires }];
+                // Parameters bound to the removed node keep their value but
+                // lose the binding (no dangling references); undo rebinds.
+                for other in self.nodes.values_mut() {
+                    let schema = registry.get(&other.type_id);
+                    let mut emptied = Vec::new();
+                    for (name, param) in &mut other.params {
+                        if param.bind.as_ref().is_some_and(|b| b.node == id) {
+                            inverse.push(Edit::SetParam {
+                                node: other.id,
+                                param: name.clone(),
+                                value: Some(param.clone()),
+                            });
+                            param.bind = None;
+                            dirty.push(other.id);
+                            // Same rule as SetParam: a constant equal to
+                            // the default is stored as no override.
+                            let default = schema
+                                .and_then(|s| s.params.iter().find(|p| p.name == *name))
+                                .map(|p| &p.default);
+                            if param.expr.is_none() && default == Some(&param.value) {
+                                emptied.push(name.clone());
+                            }
+                        }
+                    }
+                    for name in emptied {
+                        other.params.remove(&name);
+                    }
+                }
+                Ok(Applied { inverse, dirty })
             }
             Edit::RestoreNode { node, wires } => {
                 if self.nodes.contains_key(&node.id) {
@@ -1410,6 +1436,199 @@ pub(crate) mod tests {
             parsed.validated(&reg),
             Err(GraphError::NoParam { .. })
         ));
+    }
+
+    #[test]
+    fn removing_a_bound_source_unbinds_and_undo_rebinds() {
+        let reg = test_registry();
+        let mut net = Network::default();
+        let lfo = add(&mut net, &reg, "sig.lfo");
+        let mix = add(&mut net, &reg, "img.mix");
+        let bound = Param::bound(json!(2.5), lfo, "lfo");
+        net.apply(
+            &reg,
+            Edit::SetParam {
+                node: mix,
+                param: "gain".into(),
+                value: Some(bound.clone()),
+            },
+        )
+        .unwrap();
+        let before = net.clone();
+        let applied = net.apply(&reg, Edit::RemoveNode { id: lfo }).unwrap();
+        // The value stays, the binding goes; the file still validates.
+        let p = &net.node(mix).unwrap().params["gain"];
+        assert_eq!((p.value.clone(), p.bind.clone()), (json!(2.5), None));
+        assert!(applied.dirty.contains(&mix));
+        let text = serde_json::to_string(&net).unwrap();
+        serde_json::from_str::<Network>(&text)
+            .unwrap()
+            .validated(&reg)
+            .unwrap();
+        for inv in applied.inverse {
+            net.apply(&reg, inv).unwrap();
+        }
+        assert_eq!(net, before);
+    }
+
+    /// Deterministic fuzzing: thousands of random edits, valid and not.
+    /// Every accepted edit's inverse restores the network exactly; every
+    /// rejected edit leaves it untouched; and the network always survives
+    /// a JSON round trip through validation (rule 8).
+    #[test]
+    fn random_edits_invert_reject_atomically_and_round_trip() {
+        let reg = test_registry();
+        let mut state = 0x2545_F491_4F6C_DD1Du64;
+        let mut rng = move |n: u64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state % n.max(1)
+        };
+        let types = ["img.gen", "img.mix", "img.feedback", "sig.lfo"];
+        let sockets = ["a", "b", "in", "prev", "nope"];
+        let names = ["gen1", "mix1", "x", "1bad", "lfo_2", "a b"];
+        let mut net = Network::default();
+        let (mut accepted, mut rejected) = (0, 0);
+        for step in 0..4000 {
+            let ids: Vec<NodeId> = net.nodes().map(|n| n.id).collect();
+            let comments: Vec<CommentId> = net.comments().map(|c| c.id).collect();
+            let any_node = |rng: &mut dyn FnMut(u64) -> u64| {
+                if ids.is_empty() || rng(10) == 0 {
+                    NodeId(rng(net.next_id + 3))
+                } else {
+                    ids[rng(ids.len() as u64) as usize]
+                }
+            };
+            let edit = match rng(12) {
+                0..=2 => {
+                    let id = if rng(8) == 0 {
+                        NodeId(rng(net.next_id + 1))
+                    } else {
+                        net.alloc_id()
+                    };
+                    let ty = types[rng(types.len() as u64) as usize];
+                    let name = if rng(4) == 0 {
+                        names[rng(names.len() as u64) as usize].to_owned()
+                    } else {
+                        net.unique_name("n")
+                    };
+                    Edit::AddNode {
+                        node: Node::new(id, ty, name),
+                    }
+                }
+                3 => Edit::RemoveNode {
+                    id: any_node(&mut rng),
+                },
+                4 | 5 => Edit::Connect {
+                    wire: Wire::new(
+                        Endpoint::new(any_node(&mut rng), "out"),
+                        Endpoint::new(
+                            any_node(&mut rng),
+                            sockets[rng(sockets.len() as u64) as usize],
+                        ),
+                    ),
+                },
+                6 => match net.wires().nth(rng(8) as usize) {
+                    Some(wire) => Edit::Disconnect { wire },
+                    None => Edit::Disconnect {
+                        wire: Wire::new(
+                            Endpoint::new(any_node(&mut rng), "out"),
+                            Endpoint::new(any_node(&mut rng), "a"),
+                        ),
+                    },
+                },
+                7 => {
+                    let node = any_node(&mut rng);
+                    let value = match rng(4) {
+                        0 => None,
+                        1 => Some(Param::bound(json!(1.0), any_node(&mut rng), "lfo")),
+                        // Out of range (−5…15 against 0…10) half the time.
+                        _ => Some(Param::constant(json!(rng(21) as f64 - 5.0))),
+                    };
+                    let param = if rng(6) == 0 { "nope" } else { "gain" };
+                    Edit::SetParam {
+                        node,
+                        param: param.into(),
+                        value,
+                    }
+                }
+                8 => Edit::Rename {
+                    node: any_node(&mut rng),
+                    name: names[rng(names.len() as u64) as usize].into(),
+                },
+                9 => Edit::Move {
+                    node: any_node(&mut rng),
+                    pos: [rng(1000) as f32, rng(1000) as f32],
+                },
+                10 => {
+                    let id = if rng(5) == 0 && !ids.is_empty() {
+                        CommentId(ids[0].0)
+                    } else {
+                        net.alloc_comment_id()
+                    };
+                    Edit::AddComment {
+                        comment: Comment {
+                            id,
+                            text: format!("c{step}"),
+                            pos: [0.0, 0.0],
+                            size: [10.0, 10.0],
+                        },
+                    }
+                }
+                _ => match comments.first() {
+                    Some(&id) if rng(2) == 0 => Edit::RemoveComment { id },
+                    Some(&id) => Edit::UpdateComment {
+                        comment: Comment {
+                            id,
+                            text: "u".into(),
+                            pos: [1.0, 2.0],
+                            size: [3.0, 4.0],
+                        },
+                    },
+                    None => Edit::RemoveComment {
+                        id: CommentId(rng(50)),
+                    },
+                },
+            };
+            let before = net.clone();
+            match net.apply(&reg, edit.clone()) {
+                Ok(applied) => {
+                    accepted += 1;
+                    let mut undone = net.clone();
+                    for inv in applied.inverse {
+                        undone
+                            .apply(&reg, inv)
+                            .unwrap_or_else(|e| panic!("inverse of {edit:?}: {e}"));
+                    }
+                    // Allocated IDs are never reused, so compare without them.
+                    undone.next_id = before.next_id;
+                    assert_eq!(undone, before, "step {step}: inverse of {edit:?}");
+                }
+                Err(_) => {
+                    rejected += 1;
+                    let mut unchanged = net.clone();
+                    unchanged.next_id = before.next_id;
+                    assert_eq!(
+                        unchanged, before,
+                        "step {step}: rejected {edit:?} changed the network"
+                    );
+                }
+            }
+            if step % 200 == 0 {
+                let text = serde_json::to_string(&net).unwrap();
+                let back: Network = serde_json::from_str(&text).unwrap();
+                assert_eq!(
+                    back.validated(&reg).unwrap(),
+                    net,
+                    "step {step}: round trip"
+                );
+            }
+        }
+        assert!(
+            accepted > 1000 && rejected > 500,
+            "{accepted} accepted, {rejected} rejected"
+        );
     }
 
     #[test]
