@@ -119,14 +119,25 @@ fn load_font(job: &Job) -> Result<std::borrow::Cow<'static, [u8]>, String> {
 /// the glyph origin at `origin`.
 struct Pen<'r> {
     raster: &'r mut Rasterizer,
+    /// Rightmost column (width − 1).
+    max_x: f32,
     origin: Point,
     current: Point,
     start: Point,
 }
 
 impl Pen<'_> {
+    /// A raster-space point, kept inside the raster's columns. The
+    /// rasteriser indexes rows as `row * width + x`: an x left of 0 or past
+    /// the width lands in a neighbouring row (and overflows on huge values
+    /// from a damaged font). NaN becomes 0, and y is bounded so curve
+    /// subdivision, which grows with distance, stays cheap.
     fn at(&self, x: f32, y: f32) -> Point {
-        point(self.origin.x + x, self.origin.y - y)
+        let fit = |v: f32, hi: f32| if v.is_nan() { 0.0 } else { v.clamp(0.0, hi) };
+        point(
+            fit(self.origin.x + x, self.max_x),
+            fit(self.origin.y - y, MAX_SIDE as f32),
+        )
     }
 }
 
@@ -205,6 +216,7 @@ pub fn rasterise(font: &FontRef<'_>, text: &str, px: f32, spacing: f32, align: &
             let origin = point(pad + shift + x, baseline);
             let mut pen = Pen {
                 raster: &mut raster,
+                max_x: (width - 1) as f32,
                 origin,
                 current: origin,
                 start: origin,
@@ -225,14 +237,23 @@ pub fn rasterise(font: &FontRef<'_>, text: &str, px: f32, spacing: f32, align: &
 
 fn run(job: &Job) -> Result<Raster, String> {
     let bytes = load_font(job)?;
-    let font = FontRef::new(&bytes).map_err(|e| e.to_string())?;
-    Ok(rasterise(
-        &font,
-        &job.text,
-        job.px as f32,
-        job.spacing,
-        &job.align,
-    ))
+    render(&bytes, &job.text, job.px as f32, job.spacing, &job.align)
+}
+
+/// Parses `font` and rasterises `text`. The font parser can panic on some
+/// damaged files; that becomes an error instead of a dead worker.
+pub fn render(
+    font: &[u8],
+    text: &str,
+    px: f32,
+    spacing: f32,
+    align: &str,
+) -> Result<Raster, String> {
+    let font = FontRef::new(font).map_err(|e| e.to_string())?;
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        rasterise(&font, text, px, spacing, align)
+    }))
+    .map_err(|_| "the font file is damaged".to_string())
 }
 
 #[derive(Debug)]
@@ -432,5 +453,112 @@ mod tests {
         let centre = first_ink(&rasterise(&f, text, 32.0, 1.0, "centre"));
         let right = first_ink(&rasterise(&f, text, 32.0, 1.0, "right"));
         assert!(left < centre && centre < right, "{left} {centre} {right}");
+    }
+    #[test]
+    fn outlines_outside_the_raster_stay_in_their_rows() {
+        // A square from x = -5 to 3 over rows 1–3 of a 10×4 raster. Unclamped,
+        // the part left of x = 0 lands at the end of the row above (and
+        // overflows in debug builds); huge and NaN points must not panic.
+        let mut raster = Rasterizer::new(10, 4);
+        let mut pen = Pen {
+            raster: &mut raster,
+            max_x: 9.0,
+            origin: point(0.0, 0.0),
+            current: point(0.0, 0.0),
+            start: point(0.0, 0.0),
+        };
+        pen.move_to(-5.0, -1.0);
+        pen.line_to(3.0, -1.0);
+        pen.line_to(3.0, -4.0);
+        pen.line_to(-5.0, -4.0);
+        pen.close();
+        let mut coverage = vec![0.0f32; 40];
+        raster.for_each_pixel(|i, c| coverage[i] = c);
+        assert!(
+            coverage[..10].iter().all(|c| c.abs() < 1e-3),
+            "row 0 untouched: {coverage:?}"
+        );
+        for row in 1..4 {
+            let line = &coverage[row * 10..row * 10 + 10];
+            assert!(line[..3].iter().all(|c| (c - 1.0).abs() < 1e-3), "{line:?}");
+            assert!(line[4..].iter().all(|c| c.abs() < 1e-3), "{line:?}");
+        }
+        // Huge, infinite and NaN points: no panic, no hang.
+        let mut raster = Rasterizer::new(10, 4);
+        let mut pen = Pen {
+            raster: &mut raster,
+            max_x: 9.0,
+            origin: point(0.0, 0.0),
+            current: point(0.0, 0.0),
+            start: point(0.0, 0.0),
+        };
+        pen.move_to(1e30, f32::NAN);
+        pen.quad_to(-1e30, 1e30, f32::INFINITY, -3.0);
+        pen.curve_to(f32::NAN, 0.0, 1e20, -1e20, f32::NEG_INFINITY, 0.0);
+        pen.close();
+        raster.for_each_pixel(|_, _| {});
+    }
+
+    /// Damaged font files (bytes changed, cut, duplicated ranges, table
+    /// fields forced to extremes) never panic or hang the rasteriser.
+    #[test]
+    fn mutated_fonts_never_panic_or_hang() {
+        let mut seed = 0xbb67_ae85_84ca_a73b_u64;
+        let mut rand = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let seeds = [
+            epaint_default_fonts::UBUNTU_LIGHT,
+            epaint_default_fonts::HACK_REGULAR,
+        ];
+        let rounds: usize = std::env::var("ATD_FUZZ_ROUNDS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(300);
+        let mut slowest = std::time::Duration::ZERO;
+        for round in 0..rounds {
+            let mut bytes = seeds[(rand() % 2) as usize].to_vec();
+            let len = bytes.len();
+            match rand() % 4 {
+                0 => {
+                    // Table directory and headers live near the start.
+                    for _ in 0..1 + rand() % 16 {
+                        let i = (rand() as usize) % len.min(4096);
+                        bytes[i] = rand() as u8;
+                    }
+                }
+                1 => {
+                    for _ in 0..1 + rand() % 64 {
+                        let i = (rand() as usize) % len;
+                        bytes[i] = [0, 0x7F, 0x80, 0xFF][(rand() % 4) as usize];
+                    }
+                }
+                2 => bytes.truncate((rand() as usize) % len),
+                _ => {
+                    let a = (rand() as usize) % len;
+                    let b = (a + (rand() as usize) % 4096).min(len);
+                    let chunk = bytes[a..b].to_vec();
+                    let at = (rand() as usize) % len;
+                    let end = (at + chunk.len()).min(len);
+                    bytes[at..end].copy_from_slice(&chunk[..end - at]);
+                }
+            }
+            let px = [8.0, 64.0, 512.0][(rand() % 3) as usize];
+            let start = std::time::Instant::now();
+            let r = render(&bytes, "Ag\nW@ 9é", px, 1.0, "centre");
+            slowest = slowest.max(start.elapsed());
+            let Ok(r) = r else {
+                continue;
+            };
+            assert_eq!(
+                r.coverage.len(),
+                (r.width * r.height) as usize,
+                "round {round}"
+            );
+        }
+        assert!(slowest < std::time::Duration::from_secs(5), "{slowest:?}");
     }
 }
