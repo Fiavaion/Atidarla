@@ -128,12 +128,12 @@ fn stopped_within(stop: &Receiver<()>, wait: Duration) -> bool {
 
 fn run_null(shared: &Shared, stop: &Receiver<()>) -> Result<(), String> {
     const RATE: u32 = 48_000;
-    let ring = ring_for(shared, RATE, 2);
     let _ = shared.format.set(Format {
         rate: RATE,
         channels: 2,
         device: NULL_OUTPUT.into(),
     });
+    let ring = ring_for(shared, RATE, 2);
     let start = Instant::now();
     let mut played = 0u64;
     let mut buf = vec![0.0f32; 2 * 4800];
@@ -370,7 +370,8 @@ mod tests {
     fn null_output_plays_what_is_pushed() {
         let out = AudioOut::open(NULL_OUTPUT);
         let start = Instant::now();
-        while out.ring().is_none() {
+        // The format and the ring are published one after the other.
+        while out.ring().is_none() || out.format().is_none() {
             assert!(start.elapsed() < Duration::from_secs(5));
             std::thread::sleep(Duration::from_millis(2));
         }

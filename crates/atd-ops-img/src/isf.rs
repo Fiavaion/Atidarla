@@ -19,8 +19,8 @@ use atd_core::registry::{OpFamily, OperatorSchema, ParamSchema, SocketSchema, Wi
 use atd_gpu::engine::{CookCtx, GpuOp, OpLibrary, Params};
 use atd_gpu::fullscreen::FullscreenPass;
 use atd_gpu::isf::{
-    self, FIRST_TEXTURE_BINDING, IsfError, IsfInputKind, IsfShader, SAMPLER_BINDING, TextureSource,
-    UNIFORM_BINDING, UniformType, VERTEX_COUNT,
+    self, FIRST_TEXTURE_BINDING, IsfError, IsfInputKind, IsfShader, SAMPLER_BINDING, SizeExpr,
+    TextureSource, UNIFORM_BINDING, UniformType, VERTEX_COUNT,
 };
 
 use crate::stateful::{PingPong, STATE, clear};
@@ -331,6 +331,40 @@ pub struct IsfOp {
     blit: FullscreenPass,
     /// `IMPORTED` images, by index in the header.
     imports: Vec<Import>,
+    /// Per pass: index of its target in `targets`, if it has one.
+    pass_target: Vec<Option<usize>>,
+    /// Per pass: the first pass that writes its target.
+    pass_first: Vec<bool>,
+    /// Per pass: width and height expressions, parsed once (`None` when
+    /// absent or unparsable: full size).
+    pass_exprs: Vec<(Option<SizeExpr>, Option<SizeExpr>)>,
+    /// Where each sampled texture comes from, in binding order.
+    sources: Vec<Source>,
+    /// Per pass: (sampled textures, bind group, last cook), so steady-state
+    /// frames create no GPU objects (rule 2).
+    binds: Vec<Vec<(Vec<wgpu::Texture>, wgpu::BindGroup, u64)>>,
+    /// (render target, view, last cook).
+    views: Vec<(wgpu::Texture, wgpu::TextureView, u64)>,
+    /// The current pass's sampled textures (reused buffer).
+    key: Vec<wgpu::Texture>,
+    cooks: u64,
+}
+
+/// Bind groups kept per pass.
+const CACHE: usize = 8;
+
+/// Cached entries unused for this many cooks are dropped.
+const STALE_COOKS: u64 = 16;
+
+/// A sampled texture's origin, resolved once from the header.
+#[derive(Debug, Clone, Copy)]
+enum Source {
+    /// Input socket index.
+    Socket(usize),
+    /// `IMPORTED` image index.
+    Import(usize),
+    /// Index into `IsfOp::targets`.
+    Target(usize),
 }
 
 /// An `IMPORTED` image: decoded on the compile thread, uploaded on the
@@ -463,6 +497,41 @@ impl IsfOp {
                 _ => None,
             })
             .collect();
+        let targets: Vec<Target> = targets;
+        let target_index = |name: &str| targets.iter().position(|t| t.name == name);
+        let pass_target: Vec<Option<usize>> = shader
+            .header
+            .passes
+            .iter()
+            .map(|p| p.target.as_deref().and_then(target_index))
+            .collect();
+        let pass_first = (0..pass_target.len())
+            .map(|p| pass_target[p].is_some() && !pass_target[..p].contains(&pass_target[p]))
+            .collect();
+        let sources = shader
+            .textures
+            .iter()
+            .map(|t| match t {
+                TextureSource::Input(i) => Source::Socket(
+                    shader.header.inputs[..*i]
+                        .iter()
+                        .filter(|x| x.kind.is_texture())
+                        .count(),
+                ),
+                TextureSource::Imported(i) => Source::Import(*i),
+                TextureSource::Target(name) => {
+                    Source::Target(target_index(name).expect("every sampled target is known"))
+                }
+            })
+            .collect();
+        let parse = |e: &Option<String>| e.as_deref().and_then(|e| SizeExpr::parse(e).ok());
+        let pass_exprs = shader
+            .header
+            .passes
+            .iter()
+            .map(|p| (parse(&p.width), parse(&p.height)))
+            .collect();
+        let passes = passes as usize;
         Ok(Self {
             shader: shader.clone(),
             layout,
@@ -471,7 +540,7 @@ impl IsfOp {
             sampler,
             uniforms,
             stride,
-            data: vec![0; (stride * passes) as usize],
+            data: vec![0; stride as usize * passes],
             targets,
             last_time: None,
             frame: 0,
@@ -484,6 +553,14 @@ impl IsfOp {
                 "return textureSample(in0, samp, uv);",
             ),
             imports: Vec::new(),
+            pass_target,
+            pass_first,
+            pass_exprs,
+            sources,
+            binds: (0..passes).map(|_| Vec::with_capacity(CACHE)).collect(),
+            views: Vec::with_capacity(2 * CACHE),
+            key: Vec::with_capacity(shader.textures.len()),
+            cooks: 0,
         })
     }
 
@@ -573,7 +650,7 @@ impl IsfOp {
 
     /// Size of pass `p`'s render target for an output of `w`×`h`.
     fn pass_size(&self, p: usize, w: u32, h: u32, params: &Params<'_>) -> (u32, u32) {
-        let pass = &self.shader.header.passes[p];
+        let (width, height) = &self.pass_exprs[p];
         let vars = |name: &str| -> Option<f64> {
             match name {
                 "WIDTH" => Some(f64::from(w)),
@@ -583,13 +660,13 @@ impl IsfOp {
                 )),
             }
         };
-        let eval = |e: &Option<String>, full: u32| {
-            e.as_deref()
-                .and_then(|e| isf::eval_size(e, &vars).ok())
+        let eval = |e: &Option<SizeExpr>, full: u32| {
+            e.as_ref()
+                .and_then(|e| e.eval(&vars).ok())
                 .filter(|v| v.is_finite())
                 .map_or(full, |v| v.clamp(1.0, 8192.0) as u32)
         };
-        (eval(&pass.width, w), eval(&pass.height, h))
+        (eval(width, w), eval(height, h))
     }
 }
 
@@ -671,19 +748,17 @@ impl GpuOp for IsfOp {
         let dt = self.last_time.map_or(0.0, |t| (ctx.time - t).max(0.0));
         self.last_time = Some(ctx.time);
         let passes = self.shader.header.passes.len();
+        self.cooks += 1;
+        let now = self.cooks;
 
         // Size targets; (re)create on change, clear non-persistent ones.
         for p in 0..passes {
-            let Some(name) = self.shader.header.passes[p].target.clone() else {
+            let Some(ti) = self.pass_target[p] else {
                 continue;
             };
             let (tw, th) = self.pass_size(p, w, h, &ctx.params);
-            let first = p == self.first_pass_writing(&name);
-            let t = self
-                .targets
-                .iter_mut()
-                .find(|t| t.name == name)
-                .expect("every pass target has a buffer");
+            let first = self.pass_first[p];
+            let t = &mut self.targets[ti];
             let fresh = t
                 .buffers
                 .as_ref()
@@ -699,160 +774,145 @@ impl GpuOp for IsfOp {
             }
         }
 
+        // Cached bind groups and views hold their textures: drop those not
+        // used lately (in place, no allocation).
+        for binds in &mut self.binds {
+            binds.retain(|e| now - e.2 <= STALE_COOKS);
+        }
+        self.views.retain(|e| now - e.2 <= STALE_COOKS);
+
+        // Every pass's uniforms, written in one go.
         for p in 0..passes {
-            let target = self.shader.header.passes[p].target.clone();
-            let size = match &target {
-                Some(name) => {
-                    let b = self.target(name).buffers.as_ref().expect("sized above");
+            let size = match self.pass_target[p] {
+                Some(ti) => {
+                    let b = self.targets[ti].buffers.as_ref().expect("sized above");
                     [b.read().width() as f32, b.read().height() as f32]
                 }
                 None => [w as f32, h as f32],
             };
             self.pack(p, size, &ctx.params, ctx.time, dt);
-            let at = p as u64 * self.stride;
-            ctx.queue.write_buffer(
-                &self.uniforms,
-                at,
-                &self.data[at as usize..(at + self.stride) as usize],
-            );
+        }
+        ctx.queue.write_buffer(&self.uniforms, 0, &self.data);
 
-            {
-                let out = target;
-                let views: Vec<wgpu::TextureView> = self
-                    .shader
-                    .textures
-                    .iter()
-                    .map(|t| {
-                        let tex = match t {
-                            TextureSource::Input(i) => {
-                                let socket = self.shader.header.inputs[..*i]
-                                    .iter()
-                                    .filter(|x| x.kind.is_texture())
-                                    .count();
-                                ctx.input_or_black(socket)
-                            }
-                            TextureSource::Imported(i) => match self.imports.get(*i) {
-                                Some(Import::Uploaded(t)) => t,
-                                _ => ctx.black,
-                            },
-                            TextureSource::Target(name) => self
-                                .target(name)
-                                .buffers
-                                .as_ref()
-                                .map_or(ctx.black, PingPong::read),
-                        };
-                        tex.create_view(&Default::default())
-                    })
-                    .collect();
-                let mut entries = vec![
-                    wgpu::BindGroupEntry {
-                        binding: UNIFORM_BINDING,
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &self.uniforms,
-                            offset: at,
-                            size: wgpu::BufferSize::new(u64::from(
-                                self.shader.uniforms.size.max(16),
-                            )),
-                        }),
+        for p in 0..passes {
+            let at = p as u64 * self.stride;
+
+            // The textures this pass samples, as the cache key.
+            self.key.clear();
+            for source in &self.sources {
+                let tex = match *source {
+                    Source::Socket(i) => ctx.input_or_black(i),
+                    Source::Import(i) => match self.imports.get(i) {
+                        Some(Import::Uploaded(t)) => t,
+                        _ => ctx.black,
                     },
-                    wgpu::BindGroupEntry {
-                        binding: SAMPLER_BINDING,
-                        resource: wgpu::BindingResource::Sampler(&self.sampler),
-                    },
-                ];
-                for (i, view) in views.iter().enumerate() {
-                    entries.push(wgpu::BindGroupEntry {
-                        binding: FIRST_TEXTURE_BINDING + i as u32,
-                        resource: wgpu::BindingResource::TextureView(view),
-                    });
-                }
-                let bind = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: None,
-                    layout: &self.layout,
-                    entries: &entries,
-                });
-                let (dest, pipeline) = match &out {
-                    Some(name) => (
-                        self.target(name)
-                            .buffers
-                            .as_ref()
-                            .expect("sized")
-                            .write()
-                            .clone(),
-                        &self.target_pipeline,
-                    ),
-                    None => (ctx.output.clone(), &self.out_pipeline),
-                };
-                let view = dest.create_view(&Default::default());
-                {
-                    let mut pass = ctx.encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: Some("atd-isf"),
-                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                            view: &view,
-                            depth_slice: None,
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                                store: wgpu::StoreOp::Store,
-                            },
-                        })],
-                        depth_stencil_attachment: None,
-                        timestamp_writes: None,
-                        occlusion_query_set: None,
-                        multiview_mask: None,
-                    });
-                    pass.set_pipeline(pipeline);
-                    pass.set_bind_group(0, &bind, &[]);
-                    pass.draw(0..VERTEX_COUNT, 0..1);
-                }
-                if let Some(name) = &out {
-                    self.target_mut(name)
+                    Source::Target(i) => self.targets[i]
                         .buffers
-                        .as_mut()
-                        .expect("sized")
-                        .swap();
+                        .as_ref()
+                        .map_or(ctx.black, PingPong::read),
+                };
+                self.key.push(tex.clone());
+            }
+            let binds = &mut self.binds[p];
+            let bind = match binds.iter().position(|(k, _, _)| *k == self.key) {
+                Some(i) => {
+                    binds[i].2 = now;
+                    &binds[i].1
                 }
+                None => {
+                    let views: Vec<wgpu::TextureView> = self
+                        .key
+                        .iter()
+                        .map(|t| t.create_view(&Default::default()))
+                        .collect();
+                    let mut entries = vec![
+                        wgpu::BindGroupEntry {
+                            binding: UNIFORM_BINDING,
+                            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                buffer: &self.uniforms,
+                                offset: at,
+                                size: wgpu::BufferSize::new(u64::from(
+                                    self.shader.uniforms.size.max(16),
+                                )),
+                            }),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: SAMPLER_BINDING,
+                            resource: wgpu::BindingResource::Sampler(&self.sampler),
+                        },
+                    ];
+                    for (i, view) in views.iter().enumerate() {
+                        entries.push(wgpu::BindGroupEntry {
+                            binding: FIRST_TEXTURE_BINDING + i as u32,
+                            resource: wgpu::BindingResource::TextureView(view),
+                        });
+                    }
+                    let bind = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: None,
+                        layout: &self.layout,
+                        entries: &entries,
+                    });
+                    if binds.len() == CACHE {
+                        binds.remove(0);
+                    }
+                    binds.push((self.key.clone(), bind, now));
+                    &binds.last().expect("pushed").1
+                }
+            };
+            let (dest, pipeline) = match self.pass_target[p] {
+                Some(ti) => (
+                    self.targets[ti].buffers.as_ref().expect("sized").write(),
+                    &self.target_pipeline,
+                ),
+                None => (ctx.output, &self.out_pipeline),
+            };
+            let view = match self.views.iter().position(|(t, _, _)| t == dest) {
+                Some(i) => {
+                    self.views[i].2 = now;
+                    &self.views[i].1
+                }
+                None => {
+                    if self.views.len() == 2 * CACHE {
+                        self.views.remove(0);
+                    }
+                    let view = dest.create_view(&Default::default());
+                    self.views.push((dest.clone(), view, now));
+                    &self.views.last().expect("pushed").1
+                }
+            };
+            {
+                let mut pass = ctx.encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("atd-isf"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                pass.set_pipeline(pipeline);
+                pass.set_bind_group(0, bind, &[]);
+                pass.draw(0..VERTEX_COUNT, 0..1);
+            }
+            if let Some(ti) = self.pass_target[p] {
+                self.targets[ti].buffers.as_mut().expect("sized").swap();
             }
         }
         // A final pass with a target is also the output.
-        if let Some(name) = self.shader.header.passes[passes - 1].target.clone() {
-            let src = self
-                .target(&name)
-                .buffers
-                .as_ref()
-                .expect("sized")
-                .read()
-                .clone();
+        if let Some(ti) = self.pass_target[passes - 1] {
+            let src = self.targets[ti].buffers.as_ref().expect("sized").read();
             self.blit
-                .draw(ctx.device, ctx.queue, ctx.encoder, &[&src], &[], ctx.output);
+                .draw(ctx.device, ctx.queue, ctx.encoder, &[src], &[], ctx.output);
         }
         self.frame = self.frame.wrapping_add(1);
         Ok(())
-    }
-}
-
-impl IsfOp {
-    fn target(&self, name: &str) -> &Target {
-        self.targets
-            .iter()
-            .find(|t| t.name == name)
-            .expect("pass targets are known")
-    }
-
-    fn target_mut(&mut self, name: &str) -> &mut Target {
-        self.targets
-            .iter_mut()
-            .find(|t| t.name == name)
-            .expect("pass targets are known")
-    }
-
-    fn first_pass_writing(&self, name: &str) -> usize {
-        self.shader
-            .header
-            .passes
-            .iter()
-            .position(|p| p.target.as_deref() == Some(name))
-            .unwrap_or(0)
     }
 }
 

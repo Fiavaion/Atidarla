@@ -1342,17 +1342,36 @@ fn uniform_layout(module: &naga::Module, header: &IsfHeader) -> Result<UniformLa
 /// Supports numbers, `$WIDTH`, `$HEIGHT`, `$<input>` from `vars`, `+ - * /`,
 /// parentheses, and `floor ceil round abs min max pow sqrt`.
 pub fn eval_size(expr: &str, vars: &dyn Fn(&str) -> Option<f64>) -> Result<f64, String> {
-    let tokens = tokenize(expr)?;
-    let mut p = ExprParser {
-        tokens,
-        pos: 0,
-        vars,
-    };
-    let v = p.expr()?;
-    if p.pos != p.tokens.len() {
-        return Err(format!("unexpected trailing input in {expr:?}"));
+    SizeExpr::parse(expr)?.eval(vars)
+}
+
+/// A pass size expression, tokenized once; evaluating it allocates nothing
+/// unless it fails.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SizeExpr {
+    tokens: Vec<Tok>,
+}
+
+impl SizeExpr {
+    pub fn parse(expr: &str) -> Result<Self, String> {
+        Ok(Self {
+            tokens: tokenize(expr)?,
+        })
     }
-    Ok(v)
+
+    /// The value, with `$NAME` variables from `vars`.
+    pub fn eval(&self, vars: &dyn Fn(&str) -> Option<f64>) -> Result<f64, String> {
+        let mut p = ExprParser {
+            tokens: &self.tokens,
+            pos: 0,
+            vars,
+        };
+        let v = p.expr()?;
+        if p.pos != p.tokens.len() {
+            return Err("unexpected trailing input".into());
+        }
+        Ok(v)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1403,7 +1422,7 @@ fn tokenize(s: &str) -> Result<Vec<Tok>, String> {
 }
 
 struct ExprParser<'a> {
-    tokens: Vec<Tok>,
+    tokens: &'a [Tok],
     pos: usize,
     vars: &'a dyn Fn(&str) -> Option<f64>,
 }
@@ -1445,11 +1464,12 @@ impl ExprParser<'_> {
     }
 
     fn atom(&mut self) -> Result<f64, String> {
-        let tok = self.tokens.get(self.pos).cloned().ok_or("unexpected end")?;
+        let tokens = self.tokens;
+        let tok = tokens.get(self.pos).ok_or("unexpected end")?;
         self.pos += 1;
         match tok {
-            Tok::Num(n) => Ok(n),
-            Tok::Var(name) => (self.vars)(&name).ok_or_else(|| format!("unknown ${name}")),
+            Tok::Num(n) => Ok(*n),
+            Tok::Var(name) => (self.vars)(name).ok_or_else(|| format!("unknown ${name}")),
             Tok::Op('(') => {
                 let v = self.expr()?;
                 self.expect(')')?;
@@ -1457,24 +1477,26 @@ impl ExprParser<'_> {
             }
             Tok::Ident(f) => {
                 self.expect('(')?;
-                let mut args = vec![self.expr()?];
+                let a = self.expr()?;
+                let mut b = None;
+                let mut n = 1;
                 while self.peek_op() == Some(',') {
                     self.pos += 1;
-                    args.push(self.expr()?);
+                    let v = self.expr()?;
+                    b = b.or(Some(v));
+                    n += 1;
                 }
                 self.expect(')')?;
-                let a = args[0];
-                let b = args.get(1).copied();
-                Ok(match (f.as_str(), b) {
-                    ("floor", None) => a.floor(),
-                    ("ceil", None) => a.ceil(),
-                    ("round", None) => a.round(),
-                    ("abs", None) => a.abs(),
-                    ("sqrt", None) => a.sqrt(),
-                    ("min", Some(b)) => a.min(b),
-                    ("max", Some(b)) => a.max(b),
-                    ("pow", Some(b)) => a.powf(b),
-                    _ => return Err(format!("unknown function {f}/{}", args.len())),
+                Ok(match (f.as_str(), n, b) {
+                    ("floor", 1, _) => a.floor(),
+                    ("ceil", 1, _) => a.ceil(),
+                    ("round", 1, _) => a.round(),
+                    ("abs", 1, _) => a.abs(),
+                    ("sqrt", 1, _) => a.sqrt(),
+                    ("min", 2, Some(b)) => a.min(b),
+                    ("max", 2, Some(b)) => a.max(b),
+                    ("pow", 2, Some(b)) => a.powf(b),
+                    _ => return Err(format!("unknown function {f}/{n}")),
                 })
             }
             Tok::Op(c) => Err(format!("unexpected {c:?}")),
