@@ -377,6 +377,39 @@ pub trait SigOp: Send {
     fn cook(&mut self, ctx: &mut SigCtx<'_>) -> Result<(), String>;
 }
 
+/// Context for an IMG→SIG operator (image analysis): GPU access to its IMG
+/// inputs, recording into the frame's command encoder, and channels out.
+#[derive(Debug)]
+pub struct ImgToSigCtx<'a> {
+    pub device: &'a wgpu::Device,
+    pub queue: &'a wgpu::Queue,
+    pub encoder: &'a mut wgpu::CommandEncoder,
+    /// One entry per input socket; `None` if unconnected or not IMG.
+    pub inputs: &'a [Option<wgpu::Texture>],
+    /// An IMG input's source was cooked earlier this frame (its image may
+    /// have changed). False when the node is only cooking again to collect
+    /// results.
+    pub inputs_cooked: bool,
+    pub output: &'a mut Channels,
+    pub params: Params<'a>,
+    pub time: f64,
+    pub frame: u64,
+    /// Set while results are still on their way back from the GPU: the
+    /// engine cooks the node again next frame.
+    pub cook_again: bool,
+}
+
+/// An operator that reads images on the GPU and outputs channels. Results
+/// come back asynchronously: [`Self::after_submit`] runs once the frame's
+/// commands are submitted, where readback buffers may be mapped.
+pub trait ImgToSigOp: Send {
+    fn cook(&mut self, ctx: &mut ImgToSigCtx<'_>) -> Result<(), String>;
+    fn after_submit(&mut self) {}
+}
+
+/// Creates an IMG→SIG operator instance.
+pub type ImgToSigFactory = Box<dyn Fn(&wgpu::Device) -> Box<dyn ImgToSigOp> + Send + Sync>;
+
 /// Creates an IMG operator instance for the engine's device and output format.
 pub type OpFactory =
     Box<dyn Fn(&wgpu::Device, wgpu::TextureFormat) -> Box<dyn GpuOp> + Send + Sync>;
@@ -389,6 +422,7 @@ pub type SigFactory = Box<dyn Fn() -> Box<dyn SigOp> + Send + Sync>;
 pub struct OpLibrary {
     factories: HashMap<String, OpFactory>,
     sig_factories: HashMap<String, SigFactory>,
+    analysis_factories: HashMap<String, ImgToSigFactory>,
 }
 
 impl std::fmt::Debug for OpLibrary {
@@ -397,6 +431,7 @@ impl std::fmt::Debug for OpLibrary {
             .factories
             .keys()
             .chain(self.sig_factories.keys())
+            .chain(self.analysis_factories.keys())
             .collect();
         ids.sort();
         f.debug_struct("OpLibrary").field("types", &ids).finish()
@@ -422,8 +457,20 @@ impl OpLibrary {
         self.sig_factories.insert(type_id.into(), Box::new(factory));
     }
 
+    /// Registers an IMG→SIG (image analysis) operator implementation.
+    pub fn add_img_to_sig(
+        &mut self,
+        type_id: impl Into<String>,
+        factory: impl Fn(&wgpu::Device) -> Box<dyn ImgToSigOp> + Send + Sync + 'static,
+    ) {
+        self.analysis_factories
+            .insert(type_id.into(), Box::new(factory));
+    }
+
     pub fn contains(&self, type_id: &str) -> bool {
-        self.factories.contains_key(type_id) || self.sig_factories.contains_key(type_id)
+        self.factories.contains_key(type_id)
+            || self.sig_factories.contains_key(type_id)
+            || self.analysis_factories.contains_key(type_id)
     }
 }
 
@@ -464,6 +511,7 @@ pub struct Engine {
     scheduler: Scheduler,
     gpu_ops: HashMap<NodeId, Box<dyn GpuOp>>,
     sig_ops: HashMap<NodeId, Box<dyn SigOp>>,
+    analysis_ops: HashMap<NodeId, Box<dyn ImgToSigOp>>,
     results: HashMap<NodeId, wgpu::Texture>,
     sig: HashMap<NodeId, Channels>,
     errors: HashMap<NodeId, String>,
@@ -525,6 +573,7 @@ impl Engine {
             scheduler: Scheduler::default(),
             gpu_ops: HashMap::new(),
             sig_ops: HashMap::new(),
+            analysis_ops: HashMap::new(),
             results: HashMap::new(),
             sig: HashMap::new(),
             errors: HashMap::new(),
@@ -634,6 +683,7 @@ impl Engine {
             .gpu_ops
             .keys()
             .chain(self.sig_ops.keys())
+            .chain(self.analysis_ops.keys())
             .chain(self.results.keys())
             .chain(self.sig.keys())
             .copied()
@@ -642,6 +692,7 @@ impl Engine {
         for id in removed {
             self.gpu_ops.remove(&id);
             self.sig_ops.remove(&id);
+            self.analysis_ops.remove(&id);
             self.sig.remove(&id);
             self.errors.remove(&id);
             self.scheduler.forget(id);
@@ -681,6 +732,7 @@ impl Engine {
             scheduler,
             gpu_ops,
             sig_ops,
+            analysis_ops,
             results,
             sig,
             errors,
@@ -718,6 +770,55 @@ impl Engine {
                 .outputs
                 .first()
                 .is_some_and(|o| o.wire == WireType::Sig);
+
+            if is_sig && let Some(factory) = library.analysis_factories.get(&node.type_id) {
+                let op = analysis_ops.entry(id).or_insert_with(|| factory(device));
+                inputs.clear();
+                let mut inputs_cooked = false;
+                for socket in &schema.inputs {
+                    let src = net
+                        .inputs_of(id)
+                        .find(|(name, _)| *name == socket.name)
+                        .map(|(_, src)| src.node)
+                        .filter(|_| socket.wire == WireType::Img);
+                    // The plan is in dependency order: sources come first.
+                    inputs_cooked |= src.is_some_and(|s| plan.contains(&s));
+                    inputs.push(src.and_then(|s| results.get(&s)).cloned());
+                }
+                let mut out = sig.remove(&id).unwrap_or_default();
+                let mut ctx = ImgToSigCtx {
+                    device,
+                    queue,
+                    encoder: &mut encoder,
+                    inputs,
+                    inputs_cooked,
+                    output: &mut out,
+                    params: Params {
+                        net,
+                        registry,
+                        sig,
+                        node: id,
+                    },
+                    time,
+                    frame: *frame,
+                    cook_again: false,
+                };
+                let result = op.cook(&mut ctx);
+                if ctx.cook_again {
+                    again.push(id);
+                }
+                match result {
+                    Ok(()) => {
+                        errors.remove(&id);
+                    }
+                    Err(e) => {
+                        errors.insert(id, e);
+                    }
+                }
+                sig.insert(id, out);
+                scheduler.record(id, start.elapsed());
+                continue;
+            }
 
             if is_sig {
                 if let std::collections::hash_map::Entry::Vacant(slot) = sig_ops.entry(id) {
@@ -843,6 +944,11 @@ impl Engine {
         inputs.clear();
 
         queue.submit([encoder.finish()]);
+        for id in plan.iter() {
+            if let Some(op) = analysis_ops.get_mut(id) {
+                op.after_submit();
+            }
+        }
         for t in released.drain(..) {
             pool.release(t);
         }
@@ -860,6 +966,7 @@ impl Engine {
         self.scheduler = Scheduler::default();
         self.gpu_ops.clear();
         self.sig_ops.clear();
+        self.analysis_ops.clear();
         self.sig.clear();
         self.errors.clear();
         self.again.clear();
