@@ -14,6 +14,7 @@ mod movie;
 mod ops;
 mod ops2;
 mod stateful;
+mod text;
 
 use atd_core::registry::Registry;
 use atd_gpu::engine::{CookCtx, GpuOp, OpLibrary};
@@ -86,7 +87,7 @@ pub fn register(registry: &mut Registry) {
     let schemas = defs()
         .map(|d| (d.schema)())
         .chain(STATEFUL.iter().map(|s| (s.0)()))
-        .chain([channel_image::schema(), movie::schema()]);
+        .chain([channel_image::schema(), movie::schema(), text::schema()]);
     for schema in schemas {
         registry
             .register(schema)
@@ -98,6 +99,7 @@ pub fn register(registry: &mut Registry) {
 pub fn library(library: &mut OpLibrary) {
     library.add(channel_image::schema().type_id, channel_image::create);
     library.add(movie::schema().type_id, movie::create);
+    library.add(text::schema().type_id, text::create);
     for (schema, factory) in STATEFUL {
         library.add(schema().type_id, factory);
     }
@@ -125,7 +127,7 @@ mod tests {
         register(&mut registry);
         assert_eq!(
             registry.len(),
-            DEFS.len() + DEFS2.len() + STATEFUL.len() + 2
+            DEFS.len() + DEFS2.len() + STATEFUL.len() + 3
         );
         for op in registry.iter() {
             assert!(op.cook_budget_us > 0, "{} has a cook budget", op.type_id);
@@ -160,5 +162,6 @@ mod tests {
         }
         assert!(lib.contains(&channel_image::schema().type_id));
         assert!(lib.contains(&movie::schema().type_id));
+        assert!(lib.contains(&text::schema().type_id));
     }
 }
