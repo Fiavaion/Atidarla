@@ -33,7 +33,16 @@ fn engine() -> Option<Engine> {
 }
 
 /// Two seconds of 1 kHz tone bursts: 0.25 s on, 0.25 s off.
-fn bursts() -> std::path::PathBuf {
+/// A temporary file, deleted when dropped (also when a test fails).
+struct TempFile(std::path::PathBuf);
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        std::fs::remove_file(&self.0).ok();
+    }
+}
+
+fn bursts() -> TempFile {
     let path = std::env::temp_dir().join(format!("atd-ac1-{}.wav", std::process::id()));
     let spec = hound::WavSpec {
         channels: 1,
@@ -52,7 +61,7 @@ fn bursts() -> std::path::PathBuf {
         w.write_sample((s * 32767.0) as i16).unwrap();
     }
     w.finalize().unwrap();
-    path
+    TempFile(path)
 }
 
 /// Builds the patch; returns (audio, output) nodes.
@@ -159,7 +168,7 @@ fn audio_reactive_feedback_patch_round_trips_and_reacts() {
     };
     let mut b = engine().unwrap();
     let wav = bursts();
-    let (audio, out) = build(&mut a, &wav.to_string_lossy());
+    let (audio, out) = build(&mut a, &wav.0.to_string_lossy());
 
     // Save and reload: the network text round-trips exactly.
     let saved = serde_json::to_string_pretty(a.network()).unwrap();
@@ -199,5 +208,4 @@ fn audio_reactive_feedback_patch_round_trips_and_reacts() {
         off < 2.0 && on > 10.0,
         "the image follows the audio: {on:.1} with tone, {off:.1} in silence"
     );
-    std::fs::remove_file(wav).ok();
 }

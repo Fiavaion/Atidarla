@@ -271,7 +271,13 @@ impl SigOp for OscIn {
                 }
             }
         });
-        Ok(())
+        match rx.ignored() {
+            0 => Ok(()),
+            n => Err(format!(
+                "more than {} OSC addresses received; {n} messages to new addresses ignored",
+                atd_io::osc::MAX_ADDRESSES
+            )),
+        }
     }
 }
 

@@ -18,6 +18,11 @@ use rosc::{OscMessage, OscPacket, OscType};
 /// How often I/O threads wake to check for shutdown.
 const POLL: Duration = Duration::from_millis(50);
 
+/// Most addresses a receiver keeps. Anyone on the network can send to the
+/// port, so new addresses past this are ignored rather than growing the
+/// map (and the per-frame copy into channels) without bound.
+pub const MAX_ADDRESSES: usize = 1024;
+
 /// Channel name for an OSC address: `/mixer/fader1` → `mixer_fader1`.
 pub fn channel_name(address: &str) -> String {
     let name = address.trim_start_matches('/').replace('/', "_");
@@ -25,29 +30,43 @@ pub fn channel_name(address: &str) -> String {
 }
 
 fn number(arg: &OscType) -> Option<f32> {
-    match arg {
+    let v = match arg {
         OscType::Float(f) => Some(*f),
         OscType::Double(d) => Some(*d as f32),
         OscType::Int(i) => Some(*i as f32),
         OscType::Long(l) => Some(*l as f32),
         OscType::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         _ => None,
-    }
+    };
+    // NaN and infinities would poison everything downstream.
+    v.filter(|v| v.is_finite())
 }
 
-fn store(packet: OscPacket, values: &Mutex<BTreeMap<String, f32>>) {
+#[derive(Debug, Default)]
+struct Received {
+    values: BTreeMap<String, f32>,
+    /// Messages to new addresses dropped because the map was full.
+    ignored: u64,
+}
+
+fn store(packet: OscPacket, received: &Mutex<Received>) {
     match packet {
         OscPacket::Message(m) => {
             if let Some(v) = m.args.first().and_then(number) {
-                values
-                    .lock()
-                    .expect("osc values")
-                    .insert(channel_name(&m.addr), v);
+                let name = channel_name(&m.addr);
+                let mut r = received.lock().expect("osc values");
+                if let Some(slot) = r.values.get_mut(&name) {
+                    *slot = v;
+                } else if r.values.len() < MAX_ADDRESSES {
+                    r.values.insert(name, v);
+                } else {
+                    r.ignored += 1;
+                }
             }
         }
         OscPacket::Bundle(b) => {
             for p in b.content {
-                store(p, values);
+                store(p, received);
             }
         }
     }
@@ -56,7 +75,7 @@ fn store(packet: OscPacket, values: &Mutex<BTreeMap<String, f32>>) {
 /// Receives OSC messages on a UDP port.
 #[derive(Debug)]
 pub struct OscReceiver {
-    values: Arc<Mutex<BTreeMap<String, f32>>>,
+    values: Arc<Mutex<Received>>,
     stop: Arc<AtomicBool>,
     port: u16,
     thread: Option<JoinHandle<()>>,
@@ -68,7 +87,7 @@ impl OscReceiver {
         let socket = UdpSocket::bind(("0.0.0.0", port))?;
         socket.set_read_timeout(Some(POLL))?;
         let port = socket.local_addr()?.port();
-        let values = Arc::new(Mutex::new(BTreeMap::new()));
+        let values = Arc::new(Mutex::new(Received::default()));
         let stop = Arc::new(AtomicBool::new(false));
         let (v, s) = (Arc::clone(&values), Arc::clone(&stop));
         let thread = std::thread::Builder::new()
@@ -105,7 +124,12 @@ impl OscReceiver {
 
     /// Runs `f` on the latest value of every received address, by channel name.
     pub fn with_values<R>(&self, f: impl FnOnce(&BTreeMap<String, f32>) -> R) -> R {
-        f(&self.values.lock().expect("osc values"))
+        f(&self.values.lock().expect("osc values").values)
+    }
+
+    /// Messages ignored because [`MAX_ADDRESSES`] addresses were already kept.
+    pub fn ignored(&self) -> u64 {
+        self.values.lock().expect("osc values").ignored
     }
 }
 
@@ -304,6 +328,104 @@ mod tests {
             "numeric arguments only"
         );
         rx.with_values(|v| assert_eq!((v.get("a"), v.get("b")), (Some(&7.0), Some(&1.0))));
+    }
+
+    #[test]
+    fn addresses_are_capped_and_non_finite_values_dropped() {
+        let r = Mutex::new(Received::default());
+        let msg = |addr: String, v: f32| {
+            OscPacket::Message(OscMessage {
+                addr,
+                args: vec![OscType::Float(v)],
+            })
+        };
+        store(msg("/nan".into(), f32::NAN), &r);
+        store(msg("/inf".into(), f32::INFINITY), &r);
+        assert!(r.lock().unwrap().values.is_empty());
+        for i in 0..MAX_ADDRESSES + 10 {
+            store(msg(format!("/a/{i}"), 1.0), &r);
+        }
+        // Known addresses still update once the map is full.
+        store(msg("/a/0".into(), 2.0), &r);
+        let r = r.into_inner().unwrap();
+        assert_eq!(r.values.len(), MAX_ADDRESSES);
+        assert_eq!(r.ignored, 10);
+        assert_eq!(r.values.get("a_0"), Some(&2.0));
+    }
+
+    /// Damaged and hostile packets: random bytes, and valid packets with
+    /// bytes changed, cut or inserted. Decoding and storing never panics.
+    #[test]
+    fn mutated_packets_never_panic() {
+        let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut rand = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let nested = OscPacket::Bundle(rosc::OscBundle {
+            timetag: rosc::OscTime {
+                seconds: 1,
+                fractional: 2,
+            },
+            content: vec![
+                OscPacket::Message(OscMessage {
+                    addr: "/x/y".into(),
+                    args: vec![OscType::Float(0.5), OscType::Int(3)],
+                }),
+                OscPacket::Bundle(rosc::OscBundle {
+                    timetag: rosc::OscTime {
+                        seconds: 0,
+                        fractional: 1,
+                    },
+                    content: vec![OscPacket::Message(OscMessage {
+                        addr: "/z".into(),
+                        args: vec![OscType::Double(1.5), OscType::String("s".into())],
+                    })],
+                }),
+            ],
+        });
+        let seeds = [rosc::encoder::encode(&nested).unwrap(), {
+            rosc::encoder::encode(&OscPacket::Message(OscMessage {
+                addr: "/b".into(),
+                args: vec![OscType::Bool(true), OscType::Blob(vec![1, 2, 3])],
+            }))
+            .unwrap()
+        }];
+        let r = Mutex::new(Received::default());
+        let rounds: usize = std::env::var("ATD_FUZZ_ROUNDS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(20_000);
+        let mut decoded = 0;
+        for _ in 0..rounds {
+            let mut bytes = seeds[(rand() % 2) as usize].clone();
+            match rand() % 4 {
+                0 => {
+                    let n = (rand() % 64) as usize;
+                    bytes = (0..n).map(|_| rand() as u8).collect();
+                }
+                1 => {
+                    for _ in 0..1 + rand() % 4 {
+                        let i = (rand() as usize) % bytes.len();
+                        bytes[i] = rand() as u8;
+                    }
+                }
+                2 => bytes.truncate((rand() as usize) % (bytes.len() + 1)),
+                _ => {
+                    let i = (rand() as usize) % (bytes.len() + 1);
+                    let junk: Vec<u8> = (0..rand() % 9).map(|_| rand() as u8).collect();
+                    bytes.splice(i..i, junk);
+                }
+            }
+            if let Ok((_, packet)) = rosc::decoder::decode_udp(&bytes) {
+                decoded += 1;
+                store(packet, &r);
+            }
+        }
+        assert!(decoded > 0);
+        assert!(r.lock().unwrap().values.values().all(|v| v.is_finite()));
     }
 
     #[test]

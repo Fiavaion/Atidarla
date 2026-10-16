@@ -52,8 +52,17 @@ unsafe impl GlobalAlloc for Counting {
 #[global_allocator]
 static GLOBAL: Counting = Counting;
 
+/// A temporary file, deleted when dropped (also when a test fails).
+struct TempFile(std::path::PathBuf);
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        std::fs::remove_file(&self.0).ok();
+    }
+}
+
 /// A one-second stereo WAV in the temp directory.
-fn wav_path() -> String {
+fn wav_file() -> TempFile {
     let path = std::env::temp_dir().join(format!("atd-alloc-{}.wav", std::process::id()));
     let spec = hound::WavSpec {
         channels: 2,
@@ -68,11 +77,12 @@ fn wav_path() -> String {
         w.write_sample(v).unwrap();
     }
     w.finalize().unwrap();
-    path.to_string_lossy().into_owned()
+    TempFile(path)
 }
 
 #[test]
 fn every_sig_operator_cooks_without_allocating() {
+    let wav = wav_file();
     let mut reg = Registry::default();
     atd_ops_sig::register(&mut reg);
     let mut net = Network::default();
@@ -126,7 +136,7 @@ fn every_sig_operator_cooks_without_allocating() {
                 Edit::SetParam {
                     node: id,
                     param: "file".into(),
-                    value: Some(Param::constant(json!(wav_path()))),
+                    value: Some(Param::constant(json!(wav.0.to_string_lossy()))),
                 },
             )
             .unwrap();
