@@ -7,7 +7,7 @@ A free, open-source real-time visual instrument for **Windows and macOS** (Linux
 > - the workspace, with CI on Windows (WARP) and macOS (Metal);
 > - capability flags, GPU texture sharing and the AI Host protocol prototype;
 > - the graph engine (undo, pull cook, zero allocations per frame);
-> - 32 IMG and 28 SIG operators;
+> - 32 IMG and 29 SIG operators;
 > - ISF import (99% of the public collection), HAP Movie In, and live Audio In;
 > - the Patch editor.
 >
@@ -28,7 +28,7 @@ A free, open-source real-time visual instrument for **Windows and macOS** (Linux
 | Navigate | drag the background or middle-drag to pan, scroll to zoom, click the minimap |
 | Inspect | viewer modes RGBA / RGB / R / G / B / A and exposure (EV); hover for pixel coordinates |
 
-Media: **Movie In** plays HAP / HAP Alpha / HAP Q / HAP R `.mov` files (decoded on the GPU as BC textures) and PNG/JPEG stills. **Audio In** captures the default input device (or `test-tone`). **Audio File In** plays WAV; **Audio Out** plays audio channels on any output device. **MIDI In/Out** and **OSC In/Out** connect controllers and other software; **DMX Out** drives lighting over Art-Net or sACN; **Timecode In** follows MTC or LTC.
+Media: **Movie In** plays HAP / HAP Alpha / HAP Q / HAP R `.mov` files (decoded on the GPU as BC textures) and PNG/JPEG stills. **Audio In** captures the default input device (or `test-tone`). **Audio File In** plays WAV; **Audio Out** plays audio channels on any output device. **MIDI In/Out** and **OSC In/Out** connect controllers and other software; **DMX Out** drives lighting over Art-Net or sACN; **Timecode In** follows MTC or LTC; **Input Devices** turns the mouse (over the viewer), keyboard and gamepads into channels.
 
 - Requirements and decisions: [`PRD.md`](PRD.md) (binding)
 - Evidence behind each decision: [`RESEARCH.md`](RESEARCH.md)
@@ -55,7 +55,7 @@ To use ISF shaders in the app, set `ATIDARLA_ISF_PATH` to one or more directorie
 
 Set `ATD_PYTHON` to choose the interpreter the AI Host tests spawn (default: `python` on Windows, `python3` elsewhere).
 
-**Linux (best-effort):** the app loads `libxkbcommon-x11` (X11) or the Wayland client libraries at runtime and needs a Vulkan driver. Building needs the ALSA headers for audio input. On Debian/Ubuntu: `apt install libxkbcommon-x11-0 mesa-vulkan-drivers libasound2-dev`.
+**Linux (best-effort):** the app loads `libxkbcommon-x11` (X11) or the Wayland client libraries at runtime and needs a Vulkan driver. Building needs the ALSA headers (audio) and libudev headers (gamepads). On Debian/Ubuntu: `apt install libxkbcommon-x11-0 mesa-vulkan-drivers libasound2-dev libudev-dev`.
 
 ## Layout
 

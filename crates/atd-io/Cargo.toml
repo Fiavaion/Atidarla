@@ -16,6 +16,7 @@ snap.workspace = true
 png.workspace = true
 zune-jpeg.workspace = true
 midir.workspace = true
+gilrs.workspace = true
 thiserror.workspace = true
 log.workspace = true
 

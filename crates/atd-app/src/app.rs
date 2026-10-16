@@ -52,6 +52,10 @@ struct Panels {
     /// Node shown in the viewer: the selection, or the last selected node.
     viewed: Option<NodeId>,
     viewer: crate::viewer::TextureViewer,
+    /// Where the viewed image was drawn this frame (for Input Devices).
+    image_rect: Option<egui::Rect>,
+    /// Wheel notches accumulated over the viewed image.
+    wheel: f32,
     canvas_rect: egui::Rect,
     history: crate::channels::ChannelHistory,
 }
@@ -109,6 +113,8 @@ impl AtidarlaApp {
                 patch: PatchEditor::with_selection(viewed),
                 viewed,
                 viewer: Default::default(),
+                image_rect: None,
+                wheel: 0.0,
                 canvas_rect: egui::Rect::NOTHING,
                 history: Default::default(),
             },
@@ -241,7 +247,9 @@ impl eframe::App for AtidarlaApp {
                 });
             });
         });
+        self.panels.image_rect = None;
         self.dock.show(ui, &mut self.panels);
+        self.feed_input(ui.ctx());
         self.cook_and_present(ui.ctx(), frame);
         if let Some(smoke) = &mut self.smoke {
             smoke.tick(ui.ctx());
@@ -269,6 +277,41 @@ impl AtidarlaApp {
     }
 
     /// Cooks the viewed node and hands its texture to egui.
+    /// Publishes the pointer (over the viewed image) and held keys for the
+    /// Input Devices operator.
+    fn feed_input(&mut self, ctx: &egui::Context) {
+        let p = &mut self.panels;
+        let (pos, buttons, scroll, keys) = ctx.input(|i| {
+            let b = |btn| i.pointer.button_down(btn);
+            (
+                i.pointer.latest_pos(),
+                [
+                    b(egui::PointerButton::Primary),
+                    b(egui::PointerButton::Middle),
+                    b(egui::PointerButton::Secondary),
+                ],
+                i.smooth_scroll_delta.y,
+                i.keys_down.iter().map(|k| k.name()).collect::<Vec<_>>(),
+            )
+        });
+        let mut pointer = atd_io::input::pointer().unwrap_or_default();
+        pointer.inside = false;
+        if let (Some(pos), Some(rect)) = (pos, p.image_rect) {
+            let uv = (pos - rect.min) / rect.size();
+            pointer.x = uv.x.clamp(0.0, 1.0);
+            pointer.y = (1.0f32 - uv.y).clamp(0.0, 1.0);
+            pointer.inside = rect.contains(pos);
+            if pointer.inside {
+                // About one unit per wheel notch.
+                p.wheel += scroll / 50.0;
+            }
+        }
+        pointer.buttons = if pointer.inside { buttons } else { [false; 3] };
+        pointer.wheel = p.wheel;
+        atd_io::input::set_pointer(pointer);
+        atd_io::input::set_keys(keys);
+    }
+
     fn cook_and_present(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         let p = &mut self.panels;
         let Some(engine) = &mut p.engine else { return };
@@ -426,6 +469,7 @@ impl Panels {
                     .fit_to_exact_size(size)
                     .sense(egui::Sense::hover()),
             );
+            self.image_rect = Some(r.rect);
             if let Some(p) = r.hover_pos() {
                 let uv = (p - r.rect.min) / r.rect.size();
                 let (x, y) = (

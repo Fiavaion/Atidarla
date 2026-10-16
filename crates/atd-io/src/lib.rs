@@ -13,6 +13,7 @@ pub mod audio_in;
 pub mod audio_out;
 pub mod dmx;
 pub mod image;
+pub mod input;
 pub mod midi;
 pub mod osc;
 pub mod timecode;
