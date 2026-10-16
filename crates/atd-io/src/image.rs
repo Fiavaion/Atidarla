@@ -182,7 +182,7 @@ mod tests {
         let mut jpeg = std::fs::read(path).unwrap();
         let sof = jpeg
             .windows(2)
-            .position(|w| w[0] == 0xFF && matches!(w[1], 0xC0 | 0xC1 | 0xC2))
+            .position(|w| w[0] == 0xFF && matches!(w[1], 0xC0..=0xC2))
             .unwrap();
         jpeg[sof + 5..sof + 7].copy_from_slice(&60_000u16.to_be_bytes());
         jpeg[sof + 7..sof + 9].copy_from_slice(&60_000u16.to_be_bytes());
