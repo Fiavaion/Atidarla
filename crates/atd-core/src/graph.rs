@@ -1631,6 +1631,87 @@ pub(crate) mod tests {
         );
     }
 
+    /// Project files are untrusted: mutated network JSON must load and
+    /// validate, or fail, without panicking.
+    #[test]
+    fn mutated_network_files_never_panic() {
+        let reg = test_registry();
+        let mut net = Network::default();
+        let g = add(&mut net, &reg, "img.gen");
+        let fb = add(&mut net, &reg, "img.feedback");
+        let mix = add(&mut net, &reg, "img.mix");
+        let lfo = add(&mut net, &reg, "sig.lfo");
+        connect(&mut net, &reg, g, fb, "in");
+        connect(&mut net, &reg, fb, mix, "a");
+        connect(&mut net, &reg, mix, fb, "prev");
+        net.apply(
+            &reg,
+            Edit::SetParam {
+                node: mix,
+                param: "gain".into(),
+                value: Some(Param::bound(json!(2.0), lfo, "lfo")),
+            },
+        )
+        .unwrap();
+        let note = net.alloc_comment_id();
+        net.apply(
+            &reg,
+            Edit::AddComment {
+                comment: Comment {
+                    id: note,
+                    text: "n".into(),
+                    pos: [0.0, 0.0],
+                    size: [1.0, 1.0],
+                },
+            },
+        )
+        .unwrap();
+        let text = serde_json::to_string_pretty(&net).unwrap();
+        let mut state = 0x0BAD_C0DE_0000_0001u64;
+        let mut rng = move |n: usize| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % n.max(1) as u64) as usize
+        };
+        let noise = [
+            "{",
+            "}",
+            "[",
+            "]",
+            "\"",
+            ",",
+            ":",
+            "0",
+            "3",
+            "-1",
+            "1e30",
+            "null",
+            "18446744073709551615",
+        ];
+        let (mut loaded, mut rejected) = (0, 0);
+        for _ in 0..5000 {
+            let mut s = text.clone();
+            for _ in 0..1 + rng(3) {
+                let a = rng(s.len() + 1);
+                let b = (a + rng(10)).min(s.len());
+                match rng(3) {
+                    0 => s.replace_range(a..b, ""),
+                    1 => s.insert_str(a, noise[rng(noise.len())]),
+                    _ => s.replace_range(a..b, noise[rng(noise.len())]),
+                }
+            }
+            match serde_json::from_str::<Network>(&s).map(|n| n.validated(&reg)) {
+                Ok(Ok(_)) => loaded += 1,
+                _ => rejected += 1,
+            }
+        }
+        assert!(
+            loaded > 0 && rejected > 0,
+            "{loaded} loaded, {rejected} rejected"
+        );
+    }
+
     #[test]
     fn deserialisation_rejects_broken_structure() {
         let bad = [
