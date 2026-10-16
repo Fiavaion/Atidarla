@@ -329,8 +329,9 @@ impl SigOp for Spectrum {
         let rms = self.win.rms();
         let rate = self.win.rate_or_default();
         let nyquist = rate / 2.0;
-        let lo = p.f32("min_freq").clamp(1.0, nyquist);
-        let hi = p.f32("max_freq").clamp(lo * 1.001, nyquist);
+        // Keep 1 ≤ lo < hi ≤ Nyquist whatever the parameters and the rate.
+        let lo = p.f32("min_freq").clamp(1.0, (nyquist / 1.001).max(1.0));
+        let hi = p.f32("max_freq").clamp(lo * 1.001, nyquist.max(lo * 1.001));
         let bin_hz = rate / size as f32;
         // A full-scale sine reads ~1: single-sided (×2) over the Hann gain (×2).
         let norm = 4.0 / size as f32;
@@ -341,8 +342,9 @@ impl SigOp for Spectrum {
         for (b, name) in BAND_NAMES.iter().enumerate().take(bands) {
             let f0 = lo * (hi / lo).powf(b as f32 / bands as f32);
             let f1 = lo * (hi / lo).powf((b + 1) as f32 / bands as f32);
-            let i0 = ((f0 / bin_hz).floor() as usize).max(1);
-            let i1 = ((f1 / bin_hz).ceil() as usize).clamp(i0 + 1, size / 2);
+            let top = size / 2;
+            let i0 = ((f0 / bin_hz).floor() as usize).clamp(1, top - 1);
+            let i1 = ((f1 / bin_hz).ceil() as usize).clamp(i0 + 1, top);
             let peak = spectrum[i0..i1]
                 .iter()
                 .map(|c| c.norm())
