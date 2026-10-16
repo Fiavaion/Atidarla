@@ -31,12 +31,20 @@ struct Params { v: array<vec4f, 8> };
 /// a few, so steady-state frames create no GPU objects (rule 2).
 const CACHE: usize = 8;
 
+/// Entries unused for this many draws are dropped. They hold their
+/// textures alive, so without this a pass would keep up to [`CACHE`] dead
+/// textures (say, every size a dragged Resolution passed through) after the
+/// pool has let them go.
+const STALE_DRAWS: u64 = 2 * CACHE as u64;
+
 #[derive(Debug, Default)]
 struct Caches {
-    /// (input textures, bind group), most recently used last.
-    binds: Vec<(Vec<wgpu::Texture>, wgpu::BindGroup)>,
-    /// (output texture, render target view), most recently used last.
-    targets: Vec<(wgpu::Texture, wgpu::TextureView)>,
+    /// (input textures, bind group, last draw), most recently used last.
+    binds: Vec<(Vec<wgpu::Texture>, wgpu::BindGroup, u64)>,
+    /// (output texture, render target view, last draw), most recently used last.
+    targets: Vec<(wgpu::Texture, wgpu::TextureView, u64)>,
+    /// Draws so far.
+    draws: u64,
     /// Uniform bytes last written, to skip identical writes.
     uniforms: Option<[u8; MAX_PARAM_VEC4 * 16]>,
 }
@@ -248,13 +256,19 @@ impl FullscreenPass {
             queue.write_buffer(&self.uniforms, 0, &bytes);
             caches.uniforms = Some(bytes);
         }
+        caches.draws += 1;
+        let now = caches.draws;
+        // Removing in place allocates nothing.
+        caches.binds.retain(|e| now - e.2 <= STALE_DRAWS);
+        caches.targets.retain(|e| now - e.2 <= STALE_DRAWS);
         let bind = match caches
             .binds
             .iter()
-            .position(|(key, _)| key.iter().eq(inputs.iter().copied()))
+            .position(|(key, _, _)| key.iter().eq(inputs.iter().copied()))
         {
             Some(i) => {
-                let hit = caches.binds.remove(i);
+                let mut hit = caches.binds.remove(i);
+                hit.2 = now;
                 caches.binds.push(hit);
                 &caches.binds.last().expect("pushed").1
             }
@@ -288,13 +302,14 @@ impl FullscreenPass {
                     caches.binds.remove(0);
                 }
                 let key = inputs.iter().map(|t| (*t).clone()).collect();
-                caches.binds.push((key, bind));
+                caches.binds.push((key, bind, now));
                 &caches.binds.last().expect("pushed").1
             }
         };
-        let target = match caches.targets.iter().position(|(t, _)| t == output) {
+        let target = match caches.targets.iter().position(|(t, _, _)| t == output) {
             Some(i) => {
-                let hit = caches.targets.remove(i);
+                let mut hit = caches.targets.remove(i);
+                hit.2 = now;
                 caches.targets.push(hit);
                 &caches.targets.last().expect("pushed").1
             }
@@ -303,7 +318,7 @@ impl FullscreenPass {
                     caches.targets.remove(0);
                 }
                 let view = output.create_view(&Default::default());
-                caches.targets.push((output.clone(), view));
+                caches.targets.push((output.clone(), view, now));
                 &caches.targets.last().expect("pushed").1
             }
         };
@@ -326,5 +341,70 @@ impl FullscreenPass {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, bind, &[]);
         pass.draw(0..3, 0..1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn caches_drop_entries_left_unused() {
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let Ok(adapter) =
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+        else {
+            let required =
+                std::env::var("ATD_REQUIRE_GPU").is_ok_and(|v| !v.is_empty() && v != "0");
+            assert!(
+                !required,
+                "ATD_REQUIRE_GPU is set but there is no GPU adapter"
+            );
+            return;
+        };
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let pass = FullscreenPass::new(
+            &device,
+            "test",
+            format,
+            1,
+            "",
+            "return textureSample(in0, samp, uv);",
+        );
+        let texture = |w| {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: None,
+                size: wgpu::Extent3d {
+                    width: w,
+                    height: 4,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+        };
+        let (old_in, old_out) = (texture(3), texture(5));
+        let (a, b, input) = (texture(8), texture(8), texture(8));
+        let mut encoder = device.create_command_encoder(&Default::default());
+        pass.draw(&device, &queue, &mut encoder, &[&old_in], &[], &old_out);
+        // Steady ping-pong between two outputs keeps both, drops the old.
+        for i in 0..=STALE_DRAWS {
+            let out = if i % 2 == 0 { &a } else { &b };
+            pass.draw(&device, &queue, &mut encoder, &[&input], &[], out);
+        }
+        queue.submit([encoder.finish()]);
+        let caches = pass.caches.lock().unwrap();
+        assert!(caches.targets.iter().all(|(t, _, _)| *t != old_out));
+        assert!(caches.binds.iter().all(|(k, _, _)| k[0] != old_in));
+        assert_eq!(caches.targets.len(), 2);
+        assert_eq!(caches.binds.len(), 1);
     }
 }
