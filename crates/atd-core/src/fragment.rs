@@ -109,11 +109,17 @@ impl Fragment {
             }
             edits.push(Edit::AddNode { node: copy });
         }
+        // Clipboard text is untrusted: wires to nodes outside the fragment
+        // are dropped (as dangling bindings are above) rather than trusted.
         for wire in &self.wires {
+            let (Some(&from), Some(&to)) = (map.get(&wire.from.node), map.get(&wire.to.node))
+            else {
+                continue;
+            };
             edits.push(Edit::Connect {
                 wire: Wire::new(
-                    Endpoint::new(map[&wire.from.node], wire.from.socket.clone()),
-                    Endpoint::new(map[&wire.to.node], wire.to.socket.clone()),
+                    Endpoint::new(from, wire.from.socket.clone()),
+                    Endpoint::new(to, wire.to.socket.clone()),
                 ),
             });
         }
@@ -288,5 +294,81 @@ mod tests {
         assert!(Fragment::from_json("{\"nodes\": []}").is_none());
         assert!(Fragment::from_json("not json").is_none());
         assert!(Fragment::copy(&net, &BTreeSet::new()).is_empty());
+    }
+
+    /// Pasted text is untrusted: mutated fragments (and hand-written ones
+    /// with dangling wires) must paste or fail cleanly, never panic.
+    #[test]
+    fn mutated_clipboard_text_never_panics() {
+        let reg = crate::graph::tests::test_registry();
+        let mut net = Network::default();
+        let g = crate::graph::tests::add(&mut net, &reg, "img.gen");
+        let m = crate::graph::tests::add(&mut net, &reg, "img.mix");
+        let l = crate::graph::tests::add(&mut net, &reg, "sig.lfo");
+        crate::graph::tests::connect(&mut net, &reg, g, m, "a");
+        net.apply(
+            &reg,
+            Edit::SetParam {
+                node: m,
+                param: "gain".into(),
+                value: Some(crate::graph::Param::bound(json!(1.0), l, "lfo")),
+            },
+        )
+        .unwrap();
+        let text = Fragment::copy(&net, &[g, m, l].into_iter().collect()).to_json();
+        // A hand-written fragment whose wire points outside it.
+        let dangling = text.replacen(&format!("\"node\": {},", g.0), "\"node\": 999,", 1);
+        assert_ne!(dangling, text, "the dangling case was constructed");
+        let f = Fragment::from_json(&dangling).expect("still a fragment");
+        let mut probe = net.clone();
+        let (edits, _) = f.paste(&net, || probe.alloc_id(), [0.0, 0.0]);
+        assert!(
+            !edits.iter().any(|e| matches!(e, Edit::Connect { .. })),
+            "dangling wire dropped"
+        );
+        let mut state = 0x1234_5678_9ABC_DEF1u64;
+        let mut rng = move |n: usize| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % n.max(1) as u64) as usize
+        };
+        let noise = [
+            "{", "}", "[", "]", "\"", ",", ":", "0", "-1", "1e30", "null", "\"x\"",
+        ];
+        for i in 0..3000 {
+            let mut s = if i % 10 == 0 {
+                dangling.clone()
+            } else {
+                text.clone()
+            };
+            for _ in 0..1 + rng(3) {
+                let mut a = rng(s.len() + 1);
+                while !s.is_char_boundary(a) {
+                    a -= 1;
+                }
+                let mut b = (a + rng(12)).min(s.len());
+                while !s.is_char_boundary(b) {
+                    b -= 1;
+                }
+                match rng(3) {
+                    0 => s.replace_range(a..b, ""),
+                    1 => s.insert_str(a, noise[rng(noise.len())]),
+                    _ => s.replace_range(a..b, noise[rng(noise.len())]),
+                }
+            }
+            let Some(fragment) = Fragment::from_json(&s) else {
+                continue;
+            };
+            if fragment.is_empty() {
+                continue;
+            }
+            let mut target = net.clone();
+            let o = fragment.origin();
+            let (edits, _) = fragment.paste(&target.clone(), || target.alloc_id(), [-o[0], -o[1]]);
+            for e in edits {
+                let _ = target.apply(&reg, e);
+            }
+        }
     }
 }
