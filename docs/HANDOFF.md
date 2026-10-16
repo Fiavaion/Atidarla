@@ -22,35 +22,22 @@ Done on this branch:
   `crates/atd-gpu/src/expr.rs`, Python worker in `crates/atd-py/src/expr.rs`, `=` button in
   `crates/atd-app/src/params.rs`. Reference: `docs/expressions.md`.
 
-## In progress: FFmpeg video (A23)
+## FFmpeg video (A23): done except packaging
 
-Committed but **not finished or in CI yet**:
+- `crates/atd-io/src/video/ffmpeg_shim.c` (C shim over FFmpeg: open, frame times, frame by
+  index with keyframe seeking, RGBA via swscale, hardware decode with software fallback),
+  `crates/atd-io/build.rs` (pkg-config, or `FFMPEG_DIR` with `include/` and `lib/`),
+  `crates/atd-io/src/video/ffmpeg.rs` (Rust FFI) and `run_other` in `video/mod.rs`. Feature
+  chain: `atd-app`/`atd-cli` `ffmpeg` → `atd-ops-img/ffmpeg` → `atd-io/ffmpeg`. Off by default.
+- CI job `FFmpeg` builds, lints and tests it on Windows (BtbN LGPL shared 9.0), macOS
+  (Homebrew) and Linux (apt). Hardware decode was checked on 2026-10-16: `d3d11va` on the
+  RTX 5070 Ti PC, `videotoolbox` on the macOS runner (see the M1 log).
+- **Left: packaging (M6)**: ship FFmpeg's LGPL DLLs/dylibs beside the app, replaceable (A23).
+  **Not yet checked on a real Mac** (only the CI runner): `videotoolbox` on Apple hardware.
 
-- `crates/atd-io/src/video/ffmpeg_shim.c`: a C shim over FFmpeg (open, frame times by
-  scanning packets, frame by index with keyframe seeking, RGBA via swscale with the stream's
-  colour matrix, hardware decode via VideoToolbox / D3D11VA / VAAPI with software fallback).
-- `crates/atd-io/build.rs`: compiles the shim when the `ffmpeg` feature is on; finds FFmpeg
-  with pkg-config, or `FFMPEG_DIR` (`include/`, `lib/`) on Windows.
-- `crates/atd-io/src/video/ffmpeg.rs` (Rust FFI) and `run_other` in `video/mod.rs`: Movie In
-  plays non-HAP files through it. Feature chain: `atd-app`/`atd-cli` `ffmpeg` →
-  `atd-ops-img/ffmpeg` → `atd-io/ffmpeg`. Off by default.
-- `crates/atd-io/tests/ffmpeg.rs` with H.264 (B-frames), VP9 (WebM) and ProRes clips in
-  `tests/data/`: frames in any order match FFmpeg's own decode (≤ 8 levels), the player
-  works end to end, and damaged files do not crash. **Passed locally on Linux with FFmpeg 6.1
-  (software decode).**
-
-Still to do for A23:
-
-1. **CI**: install FFmpeg development files and build/test with
-   `--features atd-io/ffmpeg` on each OS:
-   - Linux: `apt-get install libavcodec-dev libavformat-dev libavutil-dev libswscale-dev`.
-   - macOS: `brew install ffmpeg pkgconf` (a GPL build; fine for testing only, A23 ships LGPL).
-   - Windows: an **LGPL shared** build (for example BtbN FFmpeg-Builds `*-win64-lgpl-shared-*`),
-     set `FFMPEG_DIR` to it and put its `bin/` on `PATH` for the DLLs.
-2. Run the tests on a Mac and a Windows PC: does hardware decode engage (the test prints
-   `via videotoolbox` / `via d3d11va`) and do frames still match?
-3. Add a log row and update the Movie In line in `docs/milestones/M1.md`.
-4. Packaging (M6): ship FFmpeg's LGPL DLLs/dylibs beside the app, replaceable (A23).
+To run it locally on Windows: download BtbN's `ffmpeg-n9.0-latest-win64-lgpl-shared-9.0.zip`
+(into the ignored `.scratch/`), then set `FFMPEG_DIR` to the unpacked folder, add its `bin\` to
+`PATH`, and run `cargo test -p atd-io --features ffmpeg --test ffmpeg -- --nocapture`.
 
 ## Other open M1 items
 
@@ -58,8 +45,11 @@ Still to do for A23:
   machine, save, reload, compare (record in M1.md).
 - **AC3 / PT-1**: `cargo run -p atd-cli --release -- bench` on the RTX 4070 PC.
 - **Share In/Out**: Spout (Windows) and Syphon (macOS) wire-up, on real machines.
-- Check CI for the last pushes (runs 71 onwards). Run 70 failed only on a Windows path test,
-  fixed in `5200807`.
+- Check CI for the newest push; the test fixes of 2026-10-16 are described in `M1.md`.
+- **Test hang on NVIDIA/Windows**: test binaries that create many wgpu instances in parallel
+  (for example `cargo test -p atd-ops-img --test ops`) stall intermittently under the default
+  backend. Run local tests with `WGPU_BACKEND=dx12` (PowerShell: `$env:WGPU_BACKEND="dx12"`).
+  Cause unknown; see the M1 log.
 
 ## Local set-up
 
