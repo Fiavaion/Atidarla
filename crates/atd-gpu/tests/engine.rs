@@ -96,6 +96,24 @@ impl GpuOp for Accumulate {
     }
 }
 
+/// A Fill whose output size comes from its colour: (r × 1000, g × 1000)
+/// pixels, so one parameter drags the size like a Resolution slider.
+struct Sized(Fill);
+impl GpuOp for Sized {
+    fn cook(&mut self, ctx: &mut CookCtx<'_>) -> Result<(), String> {
+        self.0.cook(ctx)
+    }
+    fn output_size(
+        &self,
+        params: &atd_gpu::engine::Params<'_>,
+        _: Option<(u32, u32)>,
+        _: (u32, u32),
+    ) -> Option<(u32, u32)> {
+        let c = params.vec4("colour");
+        Some(((c[0] * 1000.0) as u32, (c[1] * 1000.0) as u32))
+    }
+}
+
 /// Always fails, to test error reporting.
 struct Broken;
 impl GpuOp for Broken {
@@ -126,7 +144,7 @@ fn engine() -> Option<Engine> {
         suggest: None,
         multiline: false,
     };
-    reg.register(schema("img.fill", vec![], vec![colour], false))
+    reg.register(schema("img.fill", vec![], vec![colour.clone()], false))
         .unwrap();
     reg.register(schema(
         "img.invert",
@@ -142,6 +160,8 @@ fn engine() -> Option<Engine> {
         false,
     ))
     .unwrap();
+    reg.register(schema("img.sized", vec![], vec![colour.clone()], false))
+        .unwrap();
     reg.register(schema("img.broken", vec![], vec![], false))
         .unwrap();
     reg.register(schema("img.unimplemented", vec![], vec![], false))
@@ -177,6 +197,16 @@ fn engine() -> Option<Engine> {
             "",
             "return textureSample(in0, samp, uv) * 0.5 + textureSample(in1, samp, uv) * 0.5;",
         )))
+    });
+    lib.add("img.sized", |d, f| {
+        Box::new(Sized(Fill(FullscreenPass::new(
+            d,
+            "sized",
+            f,
+            0,
+            "",
+            "return params.v[0];",
+        ))))
     });
     lib.add("img.broken", |_, _| Box::new(Broken));
 
@@ -268,6 +298,52 @@ fn fill_invert_chain_cooks_and_caches() {
     e.undo().unwrap();
     e.cook(&[inv], 10.0).unwrap();
     assert_eq!(pixel(&e, fill), [204, 0, 0, 255]);
+}
+
+#[test]
+fn dragging_an_output_size_does_not_keep_every_size() {
+    use atd_gpu::pool::{FREE_BUDGET, KEEP_FRAMES};
+    let Some(mut e) = engine() else {
+        return no_gpu();
+    };
+    let sized = add(&mut e, "img.sized", "sized1");
+    let inv = add(&mut e, "img.invert", "invert1");
+    wire(&mut e, sized, inv, "in");
+    // 400 frames, each at a new size up to 1000×500 (2 MB), for two nodes:
+    // about 1 GB of distinct textures, beyond the free budget.
+    let mut t = 0.0;
+    for i in 0..400 {
+        let x = 0.2 + 0.8 * i as f64 / 400.0;
+        set_colour(&mut e, sized, [x, x * 0.5, 0.0, 1.0]);
+        e.cook(&[inv], t).unwrap();
+        t += 1.0;
+        assert!(e.pool().free_bytes() <= FREE_BUDGET);
+    }
+    let last = e.result(inv).map_or(0, |t| t.width());
+    assert!(last > 990, "the invert follows its input's size ({last})");
+    // Idle: textures of sizes no longer used are dropped.
+    for _ in 0..=KEEP_FRAMES {
+        e.cook(&[inv], t).unwrap();
+        t += 1.0;
+    }
+    assert_eq!(
+        e.pool().free_count(),
+        0,
+        "{} bytes free",
+        e.pool().free_bytes()
+    );
+    // Back to a steady size: reuse, no new textures per frame.
+    set_colour(&mut e, sized, [0.5, 0.5, 0.0, 1.0]);
+    e.cook(&[inv], t).unwrap();
+    let created = e.pool().created();
+    for i in 0..20 {
+        set_colour(&mut e, sized, [0.5, 0.5, i as f64 / 20.0, 1.0]);
+        e.cook(&[inv], t + i as f64).unwrap();
+    }
+    assert!(
+        e.pool().created() <= created + 2,
+        "steady state reuses textures"
+    );
 }
 
 #[test]

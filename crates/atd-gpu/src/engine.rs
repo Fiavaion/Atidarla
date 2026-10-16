@@ -997,6 +997,7 @@ impl Engine {
         for t in released.drain(..) {
             pool.release(t);
         }
+        pool.end_frame();
         *frame += 1;
         Ok(plan.len())
     }
