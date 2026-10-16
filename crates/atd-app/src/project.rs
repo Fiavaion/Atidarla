@@ -390,6 +390,13 @@ mod tests {
         node.params["file"].value.as_str().unwrap().to_owned()
     }
 
+    /// The `file` parameter of node `name` in the project saved at `dir`.
+    fn saved_file(dir: &Path, name: &str) -> String {
+        let project = atd_format::load(dir).unwrap();
+        let node = project.main().unwrap().node_by_name(name).unwrap();
+        node.params["file"].value.as_str().unwrap().to_owned()
+    }
+
     #[test]
     fn save_writes_portable_paths_and_save_as_keeps_media_found() {
         let Some(mut e) = engine() else { return };
@@ -431,10 +438,8 @@ mod tests {
         save(&e, &state.meta, &first).unwrap();
         let text = std::fs::read_to_string(first.join("networks/main.toml")).unwrap();
         assert!(text.contains(r#"params.file = "media/clip.mov""#), "{text}");
-        assert!(
-            text.contains(&format!("params.file = {}", json!(outside))),
-            "{text}"
-        );
+        // (Windows paths are written as TOML literal strings: compare values.)
+        assert_eq!(saved_file(&first, "outside"), outside);
         let project = atd_format::load(&first).unwrap();
         assert_eq!(project.resolution, [320, 180]);
 
@@ -455,11 +460,7 @@ mod tests {
         let second = root.join("second.atidarla");
         e.set_project_dir(Some(second.clone()));
         save(&e, &meta, &second).unwrap();
-        let text = std::fs::read_to_string(second.join("networks/main.toml")).unwrap();
-        assert!(text.contains(&format!(
-            "params.file = {}",
-            json!(inside.to_string_lossy())
-        )));
+        assert_eq!(saved_file(&second, "inside"), inside.to_string_lossy());
         std::fs::remove_dir_all(&root).ok();
     }
 
