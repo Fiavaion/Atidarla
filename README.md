@@ -7,7 +7,7 @@ A free, open-source real-time visual instrument for **Windows and macOS** (Linux
 > - the workspace, with CI on Windows (WARP) and macOS (Metal);
 > - capability flags, GPU texture sharing and the AI Host protocol prototype;
 > - the graph engine (undo, pull cook, zero allocations per frame);
-> - 35 IMG and 29 SIG operators;
+> - 36 IMG and 29 SIG operators;
 > - ISF import (99% of the public collection), HAP Movie In, and live Audio In;
 > - the Patch editor.
 >

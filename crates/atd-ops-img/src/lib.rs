@@ -16,6 +16,7 @@ mod ops;
 mod ops2;
 mod stateful;
 mod text;
+mod wgsl;
 
 use atd_core::registry::Registry;
 use atd_gpu::engine::{CookCtx, GpuOp, OpLibrary};
@@ -101,6 +102,7 @@ pub fn register(registry: &mut Registry) {
             movie::schema(),
             text::schema(),
             analyze::schema(),
+            wgsl::schema(),
         ]);
     for schema in schemas {
         registry
@@ -114,6 +116,7 @@ pub fn library(library: &mut OpLibrary) {
     library.add(channel_image::schema().type_id, channel_image::create);
     library.add(movie::schema().type_id, movie::create);
     library.add(text::schema().type_id, text::create);
+    library.add(wgsl::schema().type_id, wgsl::create);
     library.add_img_to_sig(analyze::schema().type_id, analyze::create);
     for (schema, factory) in STATEFUL {
         library.add(schema().type_id, factory);
@@ -142,7 +145,7 @@ mod tests {
         register(&mut registry);
         assert_eq!(
             registry.len(),
-            DEFS.len() + DEFS2.len() + STATEFUL.len() + 4
+            DEFS.len() + DEFS2.len() + STATEFUL.len() + 5
         );
         for op in registry.iter() {
             assert!(op.cook_budget_us > 0, "{} has a cook budget", op.type_id);
@@ -179,5 +182,6 @@ mod tests {
         assert!(lib.contains(&movie::schema().type_id));
         assert!(lib.contains(&text::schema().type_id));
         assert!(lib.contains(&analyze::schema().type_id));
+        assert!(lib.contains(&wgsl::schema().type_id));
     }
 }

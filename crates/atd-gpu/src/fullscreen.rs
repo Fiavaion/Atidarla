@@ -55,7 +55,72 @@ pub struct FullscreenPass {
     caches: std::sync::Mutex<Caches>,
 }
 
+/// The complete WGSL module, and the 1-based line where `shade_body` starts.
+fn source(inputs: usize, helpers: &str, shade_body: &str) -> (String, usize) {
+    let mut source = String::from(VERTEX);
+    for i in 0..inputs {
+        source.push_str(&format!(
+            "@group(0) @binding({}) var in{i}: texture_2d<f32>;\n",
+            i + 2
+        ));
+    }
+    source.push_str(helpers);
+    source.push_str("\nfn shade(uv: vec2f) -> vec4f {\n");
+    let body_line = source.lines().count() + 1;
+    source.push_str(shade_body);
+    source.push_str(
+        "\n}\n\n@fragment\nfn fs(v: VsOut) -> @location(0) vec4f { return shade(v.uv); }\n",
+    );
+    (source, body_line)
+}
+
 impl FullscreenPass {
+    /// Builds a pass from code a user wrote: validates it with naga first,
+    /// so errors name a line of `shade_body`, then creates the pipeline in
+    /// an error scope. Blocks while the driver compiles; call it off the
+    /// render thread.
+    pub fn try_new(
+        device: &wgpu::Device,
+        label: &str,
+        format: wgpu::TextureFormat,
+        inputs: usize,
+        helpers: &str,
+        shade_body: &str,
+    ) -> Result<Self, String> {
+        let (src, body_line) = source(inputs, helpers, shade_body);
+        let place = |loc: Option<naga::SourceLocation>| match loc {
+            Some(l) if l.line_number as usize >= body_line => {
+                format!("line {}: ", l.line_number as usize - body_line + 1)
+            }
+            _ => String::new(),
+        };
+        let module = naga::front::wgsl::parse_str(&src).map_err(|e| {
+            // Prefer the first real (non-empty) labelled span; some errors
+            // also carry an empty placeholder span at offset 0.
+            let loc = e
+                .labels()
+                .find(|(span, _)| span.to_range().is_some_and(|r| !r.is_empty()))
+                .map(|(span, _)| span.location(&src))
+                .or_else(|| e.location(&src));
+            format!("{}{}", place(loc), e.message())
+        })?;
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::default(),
+        )
+        .validate(&module)
+        .map_err(|e| {
+            let loc = e.spans().next().map(|(span, _)| span.location(&src));
+            format!("{}{}", place(loc), e.as_inner())
+        })?;
+        let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let pass = Self::new(device, label, format, inputs, helpers, shade_body);
+        match pollster::block_on(scope.pop()) {
+            Some(e) => Err(e.to_string()),
+            None => Ok(pass),
+        }
+    }
+
     /// Builds the pass. `shade_body` is the WGSL body of
     /// `fn shade(uv: vec2f) -> vec4f`; `helpers` is extra WGSL placed before it.
     pub fn new(
@@ -66,17 +131,7 @@ impl FullscreenPass {
         helpers: &str,
         shade_body: &str,
     ) -> Self {
-        let mut source = String::from(VERTEX);
-        for i in 0..inputs {
-            source.push_str(&format!(
-                "@group(0) @binding({}) var in{i}: texture_2d<f32>;\n",
-                i + 2
-            ));
-        }
-        source.push_str(helpers);
-        source.push_str(&format!(
-            "\nfn shade(uv: vec2f) -> vec4f {{\n{shade_body}\n}}\n\n@fragment\nfn fs(v: VsOut) -> @location(0) vec4f {{ return shade(v.uv); }}\n"
-        ));
+        let (source, _) = source(inputs, helpers, shade_body);
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some(label),
             source: wgpu::ShaderSource::Wgsl(source.into()),
