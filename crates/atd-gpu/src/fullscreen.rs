@@ -27,7 +27,24 @@ struct Params { v: array<vec4f, 8> };
 @group(0) @binding(1) var samp: sampler;
 "#;
 
+/// Bind groups and target views kept per pass: pooled textures cycle among
+/// a few, so steady-state frames create no GPU objects (rule 2).
+const CACHE: usize = 8;
+
+#[derive(Debug, Default)]
+struct Caches {
+    /// (input textures, bind group), most recently used last.
+    binds: Vec<(Vec<wgpu::Texture>, wgpu::BindGroup)>,
+    /// (output texture, render target view), most recently used last.
+    targets: Vec<(wgpu::Texture, wgpu::TextureView)>,
+    /// Uniform bytes last written, to skip identical writes.
+    uniforms: Option<[u8; MAX_PARAM_VEC4 * 16]>,
+}
+
 /// A compiled full-screen pass with `inputs` sampled textures.
+///
+/// Parameters live in one uniform buffer per pass: drawing the same pass
+/// several times in a frame uses the last parameters for every draw.
 #[derive(Debug)]
 pub struct FullscreenPass {
     pipeline: wgpu::RenderPipeline,
@@ -35,6 +52,7 @@ pub struct FullscreenPass {
     uniforms: wgpu::Buffer,
     sampler: wgpu::Sampler,
     inputs: usize,
+    caches: std::sync::Mutex<Caches>,
 }
 
 impl FullscreenPass {
@@ -146,6 +164,7 @@ impl FullscreenPass {
             uniforms,
             sampler,
             inputs,
+            caches: Default::default(),
         }
     }
 
@@ -168,38 +187,75 @@ impl FullscreenPass {
         for (chunk, f) in bytes.chunks_exact_mut(4).zip(data.iter().flatten()) {
             chunk.copy_from_slice(&f.to_le_bytes());
         }
-        queue.write_buffer(&self.uniforms, 0, &bytes);
-
-        let views: Vec<wgpu::TextureView> = inputs
-            .iter()
-            .map(|t| t.create_view(&Default::default()))
-            .collect();
-        let mut entries = vec![
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: self.uniforms.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::Sampler(&self.sampler),
-            },
-        ];
-        for (i, view) in views.iter().enumerate() {
-            entries.push(wgpu::BindGroupEntry {
-                binding: (i + 2) as u32,
-                resource: wgpu::BindingResource::TextureView(view),
-            });
+        let mut caches = self.caches.lock().unwrap_or_else(|e| e.into_inner());
+        let caches = &mut *caches;
+        if caches.uniforms != Some(bytes) {
+            queue.write_buffer(&self.uniforms, 0, &bytes);
+            caches.uniforms = Some(bytes);
         }
-        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &self.layout,
-            entries: &entries,
-        });
-        let target = output.create_view(&Default::default());
+        let bind = match caches
+            .binds
+            .iter()
+            .position(|(key, _)| key.iter().eq(inputs.iter().copied()))
+        {
+            Some(i) => {
+                let hit = caches.binds.remove(i);
+                caches.binds.push(hit);
+                &caches.binds.last().expect("pushed").1
+            }
+            None => {
+                let views: Vec<wgpu::TextureView> = inputs
+                    .iter()
+                    .map(|t| t.create_view(&Default::default()))
+                    .collect();
+                let mut entries = vec![
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: self.uniforms.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    },
+                ];
+                for (i, view) in views.iter().enumerate() {
+                    entries.push(wgpu::BindGroupEntry {
+                        binding: (i + 2) as u32,
+                        resource: wgpu::BindingResource::TextureView(view),
+                    });
+                }
+                let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: None,
+                    layout: &self.layout,
+                    entries: &entries,
+                });
+                if caches.binds.len() == CACHE {
+                    caches.binds.remove(0);
+                }
+                let key = inputs.iter().map(|t| (*t).clone()).collect();
+                caches.binds.push((key, bind));
+                &caches.binds.last().expect("pushed").1
+            }
+        };
+        let target = match caches.targets.iter().position(|(t, _)| t == output) {
+            Some(i) => {
+                let hit = caches.targets.remove(i);
+                caches.targets.push(hit);
+                &caches.targets.last().expect("pushed").1
+            }
+            None => {
+                if caches.targets.len() == CACHE {
+                    caches.targets.remove(0);
+                }
+                let view = output.create_view(&Default::default());
+                caches.targets.push((output.clone(), view));
+                &caches.targets.last().expect("pushed").1
+            }
+        };
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: None,
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &target,
+                view: target,
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
@@ -213,7 +269,7 @@ impl FullscreenPass {
             multiview_mask: None,
         });
         pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, &bind, &[]);
+        pass.set_bind_group(0, bind, &[]);
         pass.draw(0..3, 0..1);
     }
 }

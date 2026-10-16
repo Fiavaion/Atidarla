@@ -66,16 +66,24 @@ pub struct ShaderOp {
 
 impl GpuOp for ShaderOp {
     fn cook(&mut self, ctx: &mut CookCtx<'_>) -> Result<(), String> {
+        const MAX_INPUTS: usize = 4;
         let packed = (self.pack)(ctx);
-        let inputs: Vec<wgpu::Texture> = (0..ctx.inputs.len())
-            .map(|i| ctx.input_or_black(i).clone())
-            .collect();
-        let refs: Vec<&wgpu::Texture> = inputs.iter().collect();
+        let n = ctx.inputs.len();
+        if n > MAX_INPUTS {
+            return Err(format!("at most {MAX_INPUTS} inputs per shader operator"));
+        }
+        // Inputs without a source read the black texture; no allocation.
+        let mut refs: [&wgpu::Texture; MAX_INPUTS] = [ctx.black; MAX_INPUTS];
+        for (r, input) in refs.iter_mut().zip(ctx.inputs) {
+            if let Some(t) = input {
+                *r = t;
+            }
+        }
         self.pass.draw(
             ctx.device,
             ctx.queue,
             ctx.encoder,
-            &refs,
+            &refs[..n],
             &packed.v[..packed.n],
             ctx.output,
         );
