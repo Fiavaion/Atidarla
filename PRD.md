@@ -25,7 +25,7 @@ Status key: **Ratified** = decided by Mark · **Carried** = ratified for NascD a
 | A8 | LLMs: **Ollama default** (local); Anthropic and other cloud providers explicit opt-in per project; **Sovereign mode** (no traffic beyond machine/LAN) is the default for new projects | Carried (NascD D6) + extended | R§4.7 |
 | A9 | Three peer views over one graph: **Patch**, **Stage**, **Timeline** | Proposed | Differentiator D1 |
 | A10 | Eight operator families mapped to TouchDesigner: **IMG** (TOP), **SIG** (CHOP), **PNT** (POP, GPU), **MSH** (SOP, CPU topology), **MAT**, **DAT**, **CMP** (COMP), **AI**; PNT and MSH share one GEO wire type with automatic GPU/CPU residency; **~200 operators by v1.0** (registry §6) | Ratified 2026-10-15 (replaces ~176-op NascD registry and the ~125 draft) | R§2.2, R§2.3, Mark |
-| A11 | Project format = **folder of text files** (one file per network/Pack, stable IDs); binary only for caches | Proposed (revises NascD `.nascdata`) | Gap 5 |
+| A11 | Project format = **folder of text files** (one file per network/Pack, stable IDs); binary only for caches | Ratified 2026-10-16 (revises NascD `.nascdata`) | Gap 5; layout §5.5, TOML |
 | A12 | **Kernel DSL** (VEX-flavoured) lowered via typed IR to WGSL; raw WGSL escape-hatch node | Proposed | R§5.4 |
 | A13 | Adopt differentiators **D1–D10, D12–D14 for v1.0**; **D11 (multi-machine), D15 (web player) in M7** | Proposed | R§7 |
 | A14 | Ableton Link and NDI ship as **optional plugins** (licence isolation, dynamic load) | Proposed | R§5.2 |
@@ -35,6 +35,9 @@ Status key: **Ratified** = decided by Mark · **Carried** = ratified for NascD a
 | A18 | **Platform priority: Windows and macOS are the supported targets; Linux is nice-to-have** — kept compiling where cheap, never gates a milestone | Ratified 2026-10-15 | Mark |
 | A19 | **Platform-exclusive capabilities are allowed** when hardware or SDKs require it (e.g. NVIDIA real-time diffusion, Kinect/Orbbec, Spout vs Syphon); each is declared in the operator registry as a capability flag, shown in the UI, and degrades gracefully (route to LAN/cloud, hide, or substitute) on other platforms | Ratified 2026-10-15 (follows A7) | Mark |
 | A20 | **In-house dock widget in `atd-app`** until `egui_dock` supports egui 0.37 (it and `egui_tiles` target 0.36 as of 2026-10-15); same API shape so it can be swapped back. Keeps the A5 pins (egui 0.37, wgpu 30) intact | Proposed 2026-10-15 (M0) | `docs/milestones/M0.md` |
+| A21 | **M1 AC2 corpus = the public ISF collection as it exists** (Vidvox/ISF-Files at `395072d`, 327 shaders), replacing the "500 shaders" in §9; the ≥90% bar is unchanged | Ratified 2026-10-16 | The collection has 327 shaders; `docs/milestones/M1.md` |
+| A22 | **Expressions (FR-P2) in two tiers:** a native expression subset (arithmetic, maths functions, `time`/`frame`, `me.digits`, parameter and channel references) evaluated in Rust on the cook path; any other expression runs as Python on the Python worker thread, its result latched for the next frame (one frame late, marked in the UI). The render thread never waits on Python (rule 1) | Ratified 2026-10-16 | `docs/milestones/M1.md` |
+| A23 | **Video packaging:** FFmpeg as an **LGPL build** (no `--enable-gpl`/`--enable-nonfree`), **dynamically linked** and shipped as replaceable shared libraries beside the app; hardware decode through the platform APIs (D3D11VA/NVDEC on Windows, VideoToolbox on macOS) with software fallback. HAP stays native (no FFmpeg) | Ratified 2026-10-16 | A4, rule 3; `docs/milestones/M1.md` |
 
 ---
 
@@ -227,7 +230,7 @@ IDs are stable; each maps to a milestone. "MUST" = required for that milestone's
 
 ### 7.1 Patch (node engine)
 - **FR-P1** Node canvas: pan/zoom 60 fps with 2,000 nodes; wire routing; multi-select; copy/paste between projects; search-to-add (fuzzy, by schema keywords); comment boxes; minimap. (M1)
-- **FR-P2** Parameter panel generated from schema; expression slot on every parameter (Python, compiled-cache on hot paths); channel export (SIG → any parameter) by drag. (M1)
+- **FR-P2** Parameter panel generated from schema; expression slot on every parameter (native subset on the cook path, other Python one frame late on the worker thread: A22); channel export (SIG → any parameter) by drag. (M1)
 - **FR-P3** Viewers per family (texture with channel/alpha/HDR, channel plot, geometry 3D with attribute spreadsheet, table). (M1–M2)
 - **FR-P4** Nested networks and Packs: promote parameters, semantic version, embedded help, lock/unlock, update-in-place across project. (M2)
 - **FR-P5** Textport/REPL bound to `atidarla` Python module. (M2)
@@ -342,7 +345,7 @@ Measured by `atidarla bench` on the reference machines; regressions >10% fail CI
 - `atd-core` cook engine, parameter system, expressions (Python via PyO3, cached), exports, undo/redo; text project format + round-trip tests.
 - Node canvas (FR-P1), parameter panel (FR-P2), texture and channel viewers.
 - IMG ≥30 ops and SIG ≥20 ops from §6; Movie In (HAP + FFmpeg + hardware decode on each OS); Share In/Out per OS; ISF import (FR-K6).
-- **Acceptance:** audio-reactive feedback patch built by hand and saved/reloaded identically on Windows and macOS; 500 ISF shaders from the public ISF collection import with ≥90% success; PT-1 met on RTX 4070; project diff in Git is human-readable.
+- **Acceptance:** audio-reactive feedback patch built by hand and saved/reloaded identically on Windows and macOS; the public ISF collection (327 shaders, A21) imports with ≥90% success; PT-1 met on RTX 4070; project diff in Git is human-readable.
 
 ### M2 — Procedural core: PNT, MSH, MAT, Kernel DSL, Python ops, Packs
 - Attribute-buffer framework with GPU/CPU residency; PNT ≥30 ops (incl. particles, forces, Solver Block, For-Each, deformer stack); MSH ≥18 core ops (primitives, Mesh File In/Out, Extrude, Boolean, Subdivide, PolyReduce, Normals, Sweep, Skin, UV Project, Triangulate); MAT ≥6; Render IMG.
