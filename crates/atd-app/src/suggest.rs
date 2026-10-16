@@ -23,6 +23,7 @@ fn cache() -> &'static Mutex<Cache> {
 fn enumerate(key: &str) -> Vec<String> {
     match key {
         "audio.inputs" => atd_io::audio_in::input_devices(),
+        "audio.outputs" => atd_io::audio_out::output_devices(),
         "midi.inputs" => {
             let mut v = vec!["virtual".to_owned()];
             v.extend(atd_io::midi::ports().0);

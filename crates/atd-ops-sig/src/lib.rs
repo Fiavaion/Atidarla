@@ -12,6 +12,7 @@
 //! projects follow once the project format (PRD A11) is ratified.
 
 mod audio;
+mod audio_out;
 mod dmx;
 mod midi;
 mod ops;
@@ -21,6 +22,7 @@ mod sig2;
 use atd_core::registry::Registry;
 use atd_gpu::engine::OpLibrary;
 
+pub use audio_out::DEFS6;
 pub use dmx::DEFS4;
 pub use midi::DEFS3;
 pub use ops::DEFS;
@@ -34,6 +36,7 @@ pub fn defs() -> impl Iterator<Item = &'static Def> {
         .chain(DEFS3)
         .chain(DEFS4)
         .chain(DEFS5)
+        .chain(DEFS6)
 }
 
 /// A SIG operator definition: schema plus implementation factory.

@@ -13,7 +13,7 @@ use rustfft::num_complex::Complex32;
 use rustfft::{Fft, FftPlanner};
 
 /// Most samples emitted in one frame (protects against long stalls).
-const MAX_BLOCK: usize = 16_384;
+pub(crate) const MAX_BLOCK: usize = 16_384;
 
 /// A decoded clip: one `Vec` per channel.
 #[derive(Debug)]

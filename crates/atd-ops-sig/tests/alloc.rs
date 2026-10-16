@@ -98,6 +98,15 @@ fn every_sig_operator_cooks_without_allocating() {
         Channels::single(&["x", "y"], &[0.25, 0.5]),
     );
     let b = source(&mut net, &mut sig, Channels::single(&["k"], &[2.0]));
+    // An audio-rate block (44.1 kHz stereo, one 60 Hz frame).
+    let mut block = Channels::default();
+    block.set_block(&["left", "right"], 44_100.0, 735);
+    for c in 0..2 {
+        for (i, v) in block.channel_mut(c).iter_mut().enumerate() {
+            *v = (i as f32 * 0.06).sin() * 0.5;
+        }
+    }
+    let audio = source(&mut net, &mut sig, block);
 
     let mut cases: Vec<Case> = Vec::new();
     for def in atd_ops_sig::defs() {
@@ -145,6 +154,17 @@ fn every_sig_operator_cooks_without_allocating() {
             )
             .unwrap();
         }
+        if schema.type_id == "sig.audio_out" {
+            net.apply(
+                &reg,
+                Edit::SetParam {
+                    node: id,
+                    param: "device".into(),
+                    value: Some(Param::constant(json!(atd_io::audio_out::NULL_OUTPUT))),
+                },
+            )
+            .unwrap();
+        }
         if schema.type_id.starts_with("sig.midi_") {
             net.apply(
                 &reg,
@@ -178,9 +198,13 @@ fn every_sig_operator_cooks_without_allocating() {
             )
             .unwrap();
         }
-        let inputs: Vec<Option<NodeId>> = (0..schema.inputs.len())
-            .map(|i| [Some(a), Some(b)].get(i).copied().flatten())
-            .collect();
+        let inputs: Vec<Option<NodeId>> = if schema.type_id == "sig.audio_out" {
+            vec![Some(audio)]
+        } else {
+            (0..schema.inputs.len())
+                .map(|i| [Some(a), Some(b)].get(i).copied().flatten())
+                .collect()
+        };
         cases.push((
             schema.type_id,
             id,
@@ -216,6 +240,9 @@ fn every_sig_operator_cooks_without_allocating() {
                 .iter()
                 .any(|(ty, _, _, _, out)| ty == want && !out.is_empty())
         });
+        // Let the null output open, so playback (resampling, the ring) is
+        // what gets measured.
+        std::thread::sleep(std::time::Duration::from_millis(20));
         if loaded {
             break;
         }
