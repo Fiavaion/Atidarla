@@ -959,3 +959,54 @@ fn fluid_carries_dye_upward_and_resets() {
         "empty fluid stays black"
     );
 }
+
+#[test]
+fn time_machine_reaches_back_in_time() {
+    let mut e = engine_or_skip!();
+    let c = add(
+        &mut e,
+        "constant",
+        &[("colour", json!([0.0, 0.0, 0.0, 1.0]))],
+    );
+    let tm = add(&mut e, "time_machine", &[("frames", json!(10))]);
+    wire(&mut e, c, tm, "in");
+    // Frame k shows red k/20.
+    let mut img = None;
+    for k in 0..15 {
+        set(&mut e, c, "colour", json!([k as f64 / 20.0, 0.0, 0.0, 1.0]));
+        img = Some(cook(&mut e, tm));
+    }
+    let red = |v: f64| (v * 255.0).round() as u8;
+    assert!(
+        img.unwrap().px(5, 5)[0].abs_diff(red(14.0 / 20.0)) <= 1,
+        "now"
+    );
+    // Offset 1: the oldest kept frame, nine frames back.
+    set(&mut e, tm, "offset", json!(1.0));
+    set(&mut e, c, "colour", json!([15.0 / 20.0, 0.0, 0.0, 1.0]));
+    let img = cook(&mut e, tm);
+    assert!(
+        img.px(5, 5)[0].abs_diff(red(6.0 / 20.0)) <= 1,
+        "{:?}",
+        img.px(5, 5)
+    );
+
+    // A ramp as the time map: left is now, right is long ago.
+    set(&mut e, tm, "offset", json!(0.0));
+    let ramp = add(&mut e, "ramp", &[]);
+    wire(&mut e, ramp, tm, "time");
+    set(&mut e, c, "colour", json!([16.0 / 20.0, 0.0, 0.0, 1.0]));
+    let img = cook(&mut e, tm);
+    let (left, right) = (img.px(0, 5)[0], img.px(W - 1, 5)[0]);
+    assert!(left.abs_diff(red(16.0 / 20.0)) <= 3, "left {left}");
+    assert!(right.abs_diff(red(7.0 / 20.0)) <= 8, "right {right}");
+    assert!(
+        (1..W).all(|x| img.px(x, 5)[0] <= img.px(x - 1, 5)[0]),
+        "older to the right"
+    );
+
+    // A fresh history starts filled with the first frame, not black.
+    set(&mut e, tm, "frames", json!(20));
+    let img = cook(&mut e, tm);
+    assert!(img.px(W - 1, 5)[0].abs_diff(red(16.0 / 20.0)) <= 1);
+}

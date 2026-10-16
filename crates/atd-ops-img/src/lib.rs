@@ -17,6 +17,7 @@ mod ops;
 mod ops2;
 mod stateful;
 mod text;
+mod time_machine;
 mod wgsl;
 
 use atd_core::registry::Registry;
