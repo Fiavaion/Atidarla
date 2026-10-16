@@ -1010,3 +1010,45 @@ fn time_machine_reaches_back_in_time() {
     let img = cook(&mut e, tm);
     assert!(img.px(W - 1, 5)[0].abs_diff(red(16.0 / 20.0)) <= 1);
 }
+
+#[test]
+fn resolution_sets_size_and_downstream_follows() {
+    let mut e = engine_or_skip!();
+    let ramp = add(&mut e, "ramp", &[]);
+    let res = add(&mut e, "resolution", &[("fraction", json!(0.5))]);
+    let level = add(&mut e, "level", &[]);
+    let cache = add(&mut e, "cache", &[("delay", json!(1))]);
+    wire(&mut e, ramp, res, "in");
+    wire(&mut e, res, level, "in");
+    wire(&mut e, level, cache, "in");
+    for t in 0..3 {
+        e.cook(&[cache], f64::from(t)).unwrap();
+    }
+    let size = |e: &Engine, n: NodeId| {
+        let t = e.result(n).unwrap();
+        (t.width(), t.height())
+    };
+    assert_eq!(size(&e, ramp), (W, H), "generators use the project size");
+    assert_eq!(size(&e, res), (W / 2, H / 2));
+    assert_eq!(
+        size(&e, level),
+        (W / 2, H / 2),
+        "downstream follows its input"
+    );
+    assert_eq!(
+        size(&e, cache),
+        (W / 2, H / 2),
+        "copies work at the new size"
+    );
+    assert_eq!(e.error(cache), None);
+    // The resampled ramp still rises left to right.
+    let px = read_rgba8(e.device(), e.queue(), e.result(level).unwrap()).unwrap();
+    let w = (W / 2) as usize;
+    assert!(px[0] < px[(w / 2) * 4] && px[(w / 2) * 4] < px[(w - 1) * 4]);
+
+    set(&mut e, res, "mode", json!("pixels"));
+    set(&mut e, res, "width", json!(10));
+    set(&mut e, res, "height", json!(4));
+    e.cook(&[cache], 4.0).unwrap();
+    assert_eq!(size(&e, level), (10, 4));
+}

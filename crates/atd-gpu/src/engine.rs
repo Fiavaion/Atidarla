@@ -324,6 +324,18 @@ impl CookCtx<'_> {
 /// A live IMG operator instance (one per node).
 pub trait GpuOp: Send {
     fn cook(&mut self, ctx: &mut CookCtx<'_>) -> Result<(), String>;
+
+    /// The output size this operator wants, given its first IMG input's
+    /// size (if connected) and the project size. `None` (the default)
+    /// follows the input, or the project size for generators.
+    fn output_size(
+        &self,
+        _params: &Params<'_>,
+        _input: Option<(u32, u32)>,
+        _project: (u32, u32),
+    ) -> Option<(u32, u32)> {
+        None
+    }
 }
 
 /// SIG inputs of a node, by input index. Does not allocate.
@@ -891,16 +903,49 @@ impl Engine {
 
             inputs.clear();
             sig_sources.clear();
+            // Size of the first connected IMG input (feedback inputs carry
+            // last frame's image and do not set the size).
+            let mut input_size = None;
             for socket in &schema.inputs {
                 let src = net
                     .inputs_of(id)
                     .find(|(name, _)| *name == socket.name)
                     .map(|(_, src)| src.node);
-                inputs.push(src.and_then(|s| results.get(&s)).cloned());
+                let tex = src.and_then(|s| results.get(&s)).cloned();
+                if input_size.is_none()
+                    && socket.wire == WireType::Img
+                    && !socket.feedback
+                    && let Some(t) = &tex
+                {
+                    input_size = Some((t.width(), t.height()));
+                }
+                inputs.push(tex);
                 sig_sources.push(src.filter(|_| socket.wire == WireType::Sig));
             }
 
-            let output = pool.acquire(key);
+            let project = (config.width, config.height);
+            let wanted = gpu_ops
+                .get(&id)
+                .and_then(|op| {
+                    op.output_size(
+                        &Params {
+                            net,
+                            registry,
+                            sig,
+                            node: id,
+                        },
+                        input_size,
+                        project,
+                    )
+                })
+                .or(input_size)
+                .unwrap_or(project);
+            let max = device.limits().max_texture_dimension_2d;
+            let output = pool.acquire(TexKey {
+                width: wanted.0.clamp(1, max),
+                height: wanted.1.clamp(1, max),
+                ..key
+            });
             let mut ctx = CookCtx {
                 device,
                 queue,

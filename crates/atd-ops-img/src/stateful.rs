@@ -389,4 +389,5 @@ pub static STATEFUL: &[Stateful] = &[
     }),
     (crate::fluid::schema, crate::fluid::create),
     (crate::time_machine::schema, crate::time_machine::create),
+    (crate::resolution::schema, crate::resolution::create),
 ];

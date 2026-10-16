@@ -447,17 +447,24 @@ impl Panels {
             .network()
             .node(viewed)
             .map_or("?", |n| n.name.as_str());
-        let cfg = engine.config();
+        // The viewed node's own size (operators may change resolution).
+        let (w, h, format) = engine.result(viewed).map_or_else(
+            || {
+                let c = engine.config();
+                (c.width, c.height, c.format)
+            },
+            |t| (t.width(), t.height(), t.format()),
+        );
         ui.horizontal(|ui| {
             ui.strong(name);
-            ui.weak(format!("{}×{} {:?}", cfg.width, cfg.height, cfg.format));
+            ui.weak(format!("{w}×{h} {format:?}"));
             if let Some(e) = engine.error(viewed) {
                 ui.colored_label(egui::Color32::from_rgb(230, 80, 80), e);
             }
         });
         ui.horizontal(|ui| self.viewer.toolbar(ui));
         let avail = ui.available_size();
-        let aspect = cfg.width as f32 / cfg.height as f32;
+        let aspect = w as f32 / h.max(1) as f32;
         let size = if avail.x / avail.y.max(1.0) > aspect {
             egui::vec2(avail.y * aspect, avail.y)
         } else {
@@ -473,8 +480,8 @@ impl Panels {
             if let Some(p) = r.hover_pos() {
                 let uv = (p - r.rect.min) / r.rect.size();
                 let (x, y) = (
-                    (uv.x * cfg.width as f32).floor() as i64,
-                    (uv.y * cfg.height as f32).floor() as i64,
+                    (uv.x * w as f32).floor() as i64,
+                    (uv.y * h as f32).floor() as i64,
                 );
                 r.on_hover_text_at_pointer(format!(
                     "pixel {x}, {y}  ·  uv {:.3}, {:.3}",

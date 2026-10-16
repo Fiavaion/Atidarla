@@ -15,6 +15,7 @@ pub mod isf;
 mod movie;
 mod ops;
 mod ops2;
+mod resolution;
 mod stateful;
 mod text;
 mod time_machine;
