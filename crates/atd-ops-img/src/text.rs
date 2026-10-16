@@ -1,4 +1,6 @@
 //! Text (PRD §6, IMG generators): lines of text in a built-in or file font.
+//! Outlines come from `skrifa` (the reader egui uses) and are filled with
+//! `ab_glyph_rasterizer`. Glyphs advance without kerning or shaping.
 //!
 //! The text block is rasterised to a coverage texture on a worker thread
 //! (font files are read there too, rule 1) whenever the text, font, size or
@@ -8,10 +10,13 @@
 
 use std::sync::mpsc::{Receiver, channel};
 
-use ab_glyph::{Font, FontArc, PxScale, ScaleFont};
+use ab_glyph_rasterizer::{Point, Rasterizer, point};
 use atd_core::registry::{OpFamily, OperatorSchema, ParamSchema, SocketSchema, WireType};
 use atd_gpu::engine::{CookCtx, GpuOp};
 use atd_gpu::fullscreen::FullscreenPass;
+use skrifa::instance::{LocationRef, Size};
+use skrifa::outline::{DrawSettings, OutlinePen};
+use skrifa::{FontRef, GlyphId, MetadataProvider};
 
 const FONTS: &[&str] = &["sans", "mono"];
 const ALIGN: &[&str] = &["left", "centre", "right"];
@@ -94,73 +99,121 @@ pub struct Raster {
     pub coverage: Vec<u8>,
 }
 
-fn load_font(job: &Job) -> Result<FontArc, String> {
+/// Font bytes: a bundled font or a file's contents.
+fn load_font(job: &Job) -> Result<std::borrow::Cow<'static, [u8]>, String> {
     if !job.font_file.is_empty() {
         let bytes = std::fs::read(&job.font_file).map_err(|e| format!("{}: {e}", job.font_file))?;
-        return FontArc::try_from_vec(bytes).map_err(|e| format!("{}: {e}", job.font_file));
+        FontRef::new(&bytes).map_err(|e| format!("{}: {e}", job.font_file))?;
+        return Ok(bytes.into());
     }
-    let data = if job.font == "mono" {
-        epaint_default_fonts::HACK_REGULAR
+    Ok(if job.font == "mono" {
+        epaint_default_fonts::HACK_REGULAR.into()
     } else {
-        epaint_default_fonts::UBUNTU_LIGHT
-    };
-    FontArc::try_from_slice(data).map_err(|e| e.to_string())
+        epaint_default_fonts::UBUNTU_LIGHT.into()
+    })
+}
+
+/// Sends outline segments to the rasteriser, in raster space (y down) with
+/// the glyph origin at `origin`.
+struct Pen<'r> {
+    raster: &'r mut Rasterizer,
+    origin: Point,
+    current: Point,
+    start: Point,
+}
+
+impl Pen<'_> {
+    fn at(&self, x: f32, y: f32) -> Point {
+        point(self.origin.x + x, self.origin.y - y)
+    }
+}
+
+impl OutlinePen for Pen<'_> {
+    fn move_to(&mut self, x: f32, y: f32) {
+        self.current = self.at(x, y);
+        self.start = self.current;
+    }
+    fn line_to(&mut self, x: f32, y: f32) {
+        let p = self.at(x, y);
+        self.raster.draw_line(self.current, p);
+        self.current = p;
+    }
+    fn quad_to(&mut self, cx: f32, cy: f32, x: f32, y: f32) {
+        let (c, p) = (self.at(cx, cy), self.at(x, y));
+        self.raster.draw_quad(self.current, c, p);
+        self.current = p;
+    }
+    fn curve_to(&mut self, cx0: f32, cy0: f32, cx1: f32, cy1: f32, x: f32, y: f32) {
+        let (c0, c1, p) = (self.at(cx0, cy0), self.at(cx1, cy1), self.at(x, y));
+        self.raster.draw_cubic(self.current, c0, c1, p);
+        self.current = p;
+    }
+    fn close(&mut self) {
+        if self.current != self.start {
+            self.raster.draw_line(self.current, self.start);
+        }
+        self.current = self.start;
+    }
 }
 
 /// Lays out and rasterises `text` with lines `px` pixels tall.
-pub fn rasterise(font: &FontArc, text: &str, px: f32, spacing: f32, align: &str) -> Raster {
-    let sf = font.as_scaled(PxScale::from(px));
-    let line_height = (sf.ascent() - sf.descent() + sf.line_gap()) * spacing;
+pub fn rasterise(font: &FontRef<'_>, text: &str, px: f32, spacing: f32, align: &str) -> Raster {
+    let size = Size::new(px);
+    let location = LocationRef::default();
+    let metrics = font.metrics(size, location);
+    let advances = font.glyph_metrics(size, location);
+    let charmap = font.charmap();
+    let outlines = font.outline_glyphs();
+    let (ascent, descent) = (metrics.ascent, metrics.descent);
+    let line_height = (ascent - descent + metrics.leading) * spacing;
     let pad = 2.0;
-    // Glyph positions per line (x relative to the line start).
-    let mut lines: Vec<(Vec<(ab_glyph::GlyphId, f32)>, f32)> = Vec::new();
-    for line in text.split('\n') {
-        let mut glyphs = Vec::new();
-        let mut x = 0.0;
-        let mut prev = None;
-        for ch in line.chars() {
-            let id = sf.glyph_id(ch);
-            if let Some(p) = prev {
-                x += sf.kern(p, id);
-            }
-            glyphs.push((id, x));
-            x += sf.h_advance(id);
-            prev = Some(id);
-        }
-        lines.push((glyphs, x));
-    }
+    // Glyphs and their x offsets per line, and each line's width.
+    let lines: Vec<(Vec<(GlyphId, f32)>, f32)> = text
+        .split('\n')
+        .map(|line| {
+            let mut x = 0.0;
+            let glyphs = line
+                .chars()
+                .map(|ch| {
+                    let id = charmap.map(ch).unwrap_or(GlyphId::NOTDEF);
+                    let at = x;
+                    x += advances.advance_width(id).unwrap_or(0.0);
+                    (id, at)
+                })
+                .collect();
+            (glyphs, x)
+        })
+        .collect();
     let widest = lines.iter().map(|(_, w)| *w).fold(0.0f32, f32::max);
-    let text_h = sf.ascent() - sf.descent() + line_height * (lines.len() as f32 - 1.0);
+    let text_h = ascent - descent + line_height * (lines.len() as f32 - 1.0);
     let width = ((widest + 2.0 * pad).ceil() as u32).clamp(1, MAX_SIDE);
     let height = ((text_h + 2.0 * pad).ceil() as u32).clamp(1, MAX_SIDE);
-    let mut coverage = vec![0u8; (width * height) as usize];
+    let mut raster = Rasterizer::new(width as usize, height as usize);
     for (row, (glyphs, line_w)) in lines.iter().enumerate() {
         let shift = match align {
             "left" => 0.0,
             "right" => widest - line_w,
             _ => (widest - line_w) / 2.0,
         };
-        let baseline = pad + sf.ascent() + line_height * row as f32;
+        let baseline = pad + ascent + line_height * row as f32;
         for (id, x) in glyphs {
-            let glyph =
-                id.with_scale_and_position(sf.scale(), ab_glyph::point(pad + shift + x, baseline));
-            let Some(outline) = font.outline_glyph(glyph) else {
+            let Some(glyph) = outlines.get(*id) else {
                 continue;
             };
-            let b = outline.px_bounds();
-            outline.draw(|gx, gy, c| {
-                let (x, y) = (
-                    b.min.x as i64 + i64::from(gx),
-                    b.min.y as i64 + i64::from(gy),
-                );
-                if x >= 0 && y >= 0 && (x as u32) < width && (y as u32) < height {
-                    let i = (y as u32 * width + x as u32) as usize;
-                    let v = (c.clamp(0.0, 1.0) * 255.0).round() as u8;
-                    coverage[i] = coverage[i].max(v);
-                }
-            });
+            let origin = point(pad + shift + x, baseline);
+            let mut pen = Pen {
+                raster: &mut raster,
+                origin,
+                current: origin,
+                start: origin,
+            };
+            let _ = glyph.draw(DrawSettings::unhinted(size, location), &mut pen);
         }
     }
+    let mut coverage = vec![0u8; (width * height) as usize];
+    raster.for_each_pixel(|i, c| {
+        coverage[i] = (c.clamp(0.0, 1.0) * 255.0).round() as u8;
+    });
     Raster {
         width,
         height,
@@ -169,7 +222,8 @@ pub fn rasterise(font: &FontArc, text: &str, px: f32, spacing: f32, align: &str)
 }
 
 fn run(job: &Job) -> Result<Raster, String> {
-    let font = load_font(job)?;
+    let bytes = load_font(job)?;
+    let font = FontRef::new(&bytes).map_err(|e| e.to_string())?;
     Ok(rasterise(
         &font,
         &job.text,
@@ -342,8 +396,8 @@ impl GpuOp for Text {
 mod tests {
     use super::*;
 
-    fn sans() -> FontArc {
-        FontArc::try_from_slice(epaint_default_fonts::UBUNTU_LIGHT).unwrap()
+    fn sans() -> FontRef<'static> {
+        FontRef::new(epaint_default_fonts::UBUNTU_LIGHT).unwrap()
     }
 
     #[test]
