@@ -13,6 +13,19 @@ pub struct Image {
     pub rgba: Vec<u8>,
 }
 
+/// Largest width or height accepted. Larger images cannot become a
+/// texture anyway, and a damaged header must not allocate gigabytes.
+pub const MAX_DIMENSION: u32 = 16_384;
+
+fn check_size(width: u32, height: u32) -> Result<(), String> {
+    if width == 0 || height == 0 || width > MAX_DIMENSION || height > MAX_DIMENSION {
+        return Err(format!(
+            "image is {width}×{height}; sizes up to {MAX_DIMENSION}×{MAX_DIMENSION} are supported"
+        ));
+    }
+    Ok(())
+}
+
 /// True for file names this module can decode.
 pub fn is_still(path: &Path) -> bool {
     path.extension()
@@ -41,6 +54,8 @@ fn png(bytes: &[u8]) -> Result<Image, String> {
     let mut decoder = ::png::Decoder::new(Cursor::new(bytes));
     decoder.set_transformations(::png::Transformations::normalize_to_color8());
     let mut reader = decoder.read_info().map_err(|e| e.to_string())?;
+    let header = reader.info();
+    check_size(header.width, header.height)?;
     let size = reader
         .output_buffer_size()
         .ok_or("PNG too large to decode")?;
@@ -79,7 +94,10 @@ fn png(bytes: &[u8]) -> Result<Image, String> {
 fn jpeg(bytes: &[u8]) -> Result<Image, String> {
     use zune_jpeg::zune_core::colorspace::ColorSpace;
     use zune_jpeg::zune_core::options::DecoderOptions;
-    let options = DecoderOptions::default().jpeg_set_out_colorspace(ColorSpace::RGBA);
+    let options = DecoderOptions::default()
+        .jpeg_set_out_colorspace(ColorSpace::RGBA)
+        .set_max_width(MAX_DIMENSION as usize)
+        .set_max_height(MAX_DIMENSION as usize);
     let mut decoder = zune_jpeg::JpegDecoder::new_with_options(bytes, options);
     let rgba = decoder.decode().map_err(|e| format!("{e:?}"))?;
     let (w, h) = decoder.dimensions().ok_or("JPEG without dimensions")?;
@@ -132,5 +150,103 @@ mod tests {
             .sum::<f64>()
             / reference.len() as f64;
         assert!(mean < 12.0, "mean difference {mean}");
+    }
+    fn crc32(bytes: &[u8]) -> u32 {
+        let mut c = !0u32;
+        for &b in bytes {
+            c ^= u32::from(b);
+            for _ in 0..8 {
+                c = if c & 1 == 1 {
+                    (c >> 1) ^ 0xEDB8_8320
+                } else {
+                    c >> 1
+                };
+            }
+        }
+        !c
+    }
+
+    #[test]
+    fn huge_declared_sizes_are_rejected_before_allocating() {
+        // A valid PNG whose header (with a correct CRC) claims 100000×100000:
+        // 40 GB of RGBA if trusted.
+        let mut png = encode_png(1, 1, ::png::ColorType::Rgba, &[1, 2, 3, 4]);
+        png[16..20].copy_from_slice(&100_000u32.to_be_bytes());
+        png[20..24].copy_from_slice(&100_000u32.to_be_bytes());
+        let crc = crc32(&png[12..29]);
+        png[29..33].copy_from_slice(&crc.to_be_bytes());
+        let err = decode(&png).unwrap_err();
+        assert!(err.contains("100000×100000"), "{err}");
+        // A JPEG whose frame header claims 60000×60000.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/still.jpg");
+        let mut jpeg = std::fs::read(path).unwrap();
+        let sof = jpeg
+            .windows(2)
+            .position(|w| w[0] == 0xFF && matches!(w[1], 0xC0 | 0xC1 | 0xC2))
+            .unwrap();
+        jpeg[sof + 5..sof + 7].copy_from_slice(&60_000u16.to_be_bytes());
+        jpeg[sof + 7..sof + 9].copy_from_slice(&60_000u16.to_be_bytes());
+        assert!(decode(&jpeg).is_err());
+    }
+
+    /// Damaged files: bytes changed, ranges cut or duplicated, truncation.
+    /// Decoding returns an image or an error, never panics, and an image's
+    /// pixels always match its size.
+    #[test]
+    fn mutated_images_never_panic() {
+        let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+        let mut rand = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let still = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/still.jpg");
+        let rgb: Vec<u8> = (0..16 * 9 * 3).map(|i| (i * 7) as u8).collect();
+        let seeds = [
+            std::fs::read(still).unwrap(),
+            encode_png(16, 9, ::png::ColorType::Rgb, &rgb),
+            encode_png(3, 2, ::png::ColorType::GrayscaleAlpha, &[9; 12]),
+        ];
+        let rounds: usize = std::env::var("ATD_FUZZ_ROUNDS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(3_000);
+        let mut decoded = 0;
+        for _ in 0..rounds {
+            let mut bytes = seeds[(rand() % 3) as usize].clone();
+            let len = bytes.len();
+            match rand() % 4 {
+                0 => {
+                    for _ in 0..1 + rand() % 8 {
+                        // Headers are where size fields live: bias there.
+                        let i = if rand() % 2 == 0 {
+                            (rand() as usize) % len.min(64)
+                        } else {
+                            (rand() as usize) % len
+                        };
+                        bytes[i] = rand() as u8;
+                    }
+                }
+                1 => bytes.truncate((rand() as usize) % (len + 1)),
+                2 => {
+                    let a = (rand() as usize) % len;
+                    let b = (a + (rand() as usize) % 64).min(len);
+                    bytes.drain(a..b);
+                }
+                _ => {
+                    let a = (rand() as usize) % len;
+                    let b = (a + (rand() as usize) % 64).min(len);
+                    let chunk = bytes[a..b].to_vec();
+                    let at = (rand() as usize) % (bytes.len() + 1);
+                    bytes.splice(at..at, chunk);
+                }
+            }
+            if let Ok(img) = decode(&bytes) {
+                decoded += 1;
+                assert_eq!(img.rgba.len(), img.width as usize * img.height as usize * 4);
+            }
+        }
+        assert!(decoded > 0);
     }
 }
