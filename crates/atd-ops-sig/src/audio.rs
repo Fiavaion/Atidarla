@@ -30,25 +30,46 @@ impl Clip {
 
 /// Decodes a WAV file (PCM integer or float) into normalised samples.
 pub fn decode_wav(path: &std::path::Path) -> Result<Clip, String> {
-    let mut reader =
-        hound::WavReader::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let len = file.metadata().map_or(u64::MAX, |m| m.len());
+    decode_wav_from(std::io::BufReader::new(file), len)
+        .map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Decodes WAV bytes from `source`, at most `len` bytes long. The sample
+/// count in the header is not trusted for allocation: a damaged header can
+/// claim billions of samples.
+pub fn decode_wav_from(source: impl std::io::Read, len: u64) -> Result<Clip, String> {
+    let mut reader = hound::WavReader::new(source).map_err(|e| e.to_string())?;
     let spec = reader.spec();
+    if spec.sample_format == hound::SampleFormat::Int && !(1..=32).contains(&spec.bits_per_sample) {
+        return Err(format!(
+            "{}-bit samples are not supported",
+            spec.bits_per_sample
+        ));
+    }
     let n = usize::from(spec.channels.max(1));
-    let interleaved: Vec<f32> = match spec.sample_format {
-        hound::SampleFormat::Float => reader.samples::<f32>().collect::<Result<_, _>>(),
+    // Every sample takes at least one byte of the file.
+    let capacity = u64::from(reader.len()).min(len).min(usize::MAX as u64) as usize;
+    let mut interleaved: Vec<f32> = Vec::with_capacity(capacity);
+    match spec.sample_format {
+        hound::SampleFormat::Float => {
+            for s in reader.samples::<f32>() {
+                interleaved.push(s.map_err(|e| e.to_string())?);
+            }
+        }
         hound::SampleFormat::Int => {
-            let scale = 1.0 / (1u64 << (spec.bits_per_sample.max(1) - 1)) as f32;
-            reader
-                .samples::<i32>()
-                .map(|s| s.map(|v| v as f32 * scale))
-                .collect::<Result<_, _>>()
+            let scale = 1.0 / (1u64 << (spec.bits_per_sample - 1)) as f32;
+            for s in reader.samples::<i32>() {
+                interleaved.push(s.map_err(|e| e.to_string())? as f32 * scale);
+            }
         }
     }
-    .map_err(|e| format!("{}: {e}", path.display()))?;
     let mut channels = vec![Vec::with_capacity(interleaved.len() / n); n];
     for frame in interleaved.chunks_exact(n) {
         for (c, s) in frame.iter().enumerate() {
-            channels[c].push(*s);
+            // NaN or infinite float samples would poison everything downstream.
+            channels[c].push(if s.is_finite() { *s } else { 0.0 });
         }
     }
     Ok(Clip {
@@ -400,6 +421,109 @@ mod tests {
         (0..n)
             .map(|i| amp * (std::f32::consts::TAU * freq * i as f32 / rate).sin())
             .collect()
+    }
+
+    fn wav_bytes(spec: hound::WavSpec, samples: usize) -> Vec<u8> {
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        let mut wr = hound::WavWriter::new(&mut bytes, spec).unwrap();
+        for i in 0..samples {
+            match spec.sample_format {
+                hound::SampleFormat::Float => wr.write_sample((i as f32 * 0.1).sin()).unwrap(),
+                hound::SampleFormat::Int => wr.write_sample((i * 37 % 200) as i8).unwrap(),
+            }
+        }
+        wr.finalize().unwrap();
+        bytes.into_inner()
+    }
+
+    #[test]
+    fn damaged_wav_headers_and_non_finite_samples() {
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 8_000,
+            bits_per_sample: 8,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut bytes = wav_bytes(spec, 100);
+        // The data chunk claims 4 GB: 4 billion samples, 16 GB as f32.
+        let data = bytes.windows(4).position(|w| w == b"data").unwrap();
+        bytes[data + 4..data + 8].copy_from_slice(&u32::MAX.to_le_bytes());
+        let len = bytes.len() as u64;
+        // Truncated data is an error, after reading what is there.
+        assert!(decode_wav_from(&bytes[..], len).is_err());
+        let ok = decode_wav_from(&wav_bytes(spec, 100)[..], len).unwrap();
+        assert_eq!((ok.rate, ok.channels.len(), ok.frames()), (8_000, 1, 100));
+
+        let float = hound::WavSpec {
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+            ..spec
+        };
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        let mut wr = hound::WavWriter::new(&mut bytes, float).unwrap();
+        for v in [0.5, f32::NAN, f32::INFINITY, -0.25] {
+            wr.write_sample(v).unwrap();
+        }
+        wr.finalize().unwrap();
+        let bytes = bytes.into_inner();
+        let clip = decode_wav_from(&bytes[..], bytes.len() as u64).unwrap();
+        assert_eq!(clip.channels[0], [0.5, 0.0, 0.0, -0.25]);
+    }
+
+    /// Damaged WAV files never panic, and decoded samples are finite.
+    #[test]
+    fn mutated_wavs_never_panic() {
+        let mut seed = 0x6a09_e667_f3bc_c908_u64;
+        let mut rand = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let spec = |channels, bits, sample_format| hound::WavSpec {
+            channels,
+            sample_rate: 44_100,
+            bits_per_sample: bits,
+            sample_format,
+        };
+        let seeds = [
+            wav_bytes(spec(1, 8, hound::SampleFormat::Int), 64),
+            wav_bytes(spec(2, 32, hound::SampleFormat::Float), 64),
+            wav_bytes(spec(3, 8, hound::SampleFormat::Int), 63),
+        ];
+        let rounds: usize = std::env::var("ATD_FUZZ_ROUNDS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(5_000);
+        let mut decoded = 0;
+        for _ in 0..rounds {
+            let mut bytes = seeds[(rand() % 3) as usize].clone();
+            let len = bytes.len();
+            match rand() % 4 {
+                0 => {
+                    for _ in 0..1 + rand() % 4 {
+                        let i = (rand() as usize) % len.min(48);
+                        bytes[i] = rand() as u8;
+                    }
+                }
+                1 => {
+                    // A size or count field forced to an extreme.
+                    let i = 4 * ((rand() as usize) % 11);
+                    let v = [0u32, 1, u32::MAX, 0x8000_0000][(rand() % 4) as usize];
+                    bytes[i..i + 4].copy_from_slice(&v.to_le_bytes());
+                }
+                2 => bytes.truncate((rand() as usize) % (len + 1)),
+                _ => {
+                    let i = (rand() as usize) % len;
+                    bytes[i] = rand() as u8;
+                }
+            }
+            if let Ok(clip) = decode_wav_from(&bytes[..], bytes.len() as u64) {
+                decoded += 1;
+                assert!(clip.channels.iter().flatten().all(|s| s.is_finite()));
+            }
+        }
+        assert!(decoded > 0);
     }
 
     #[test]
