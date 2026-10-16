@@ -856,3 +856,54 @@ fn channel_image_draws_channels_as_rows_or_columns() {
     .unwrap();
     assert_px(&cook(&mut e, img), 0, 5, [0, 0, 0, 255], 0);
 }
+
+#[test]
+fn projection_maps_directions() {
+    let mut e = engine_or_skip!();
+    // A horizontal ramp as an equirect panorama: value = longitude / 360° + ½.
+    let ramp = add(&mut e, "ramp", &[]);
+    let proj = add(
+        &mut e,
+        "projection",
+        &[("from", json!("equirect")), ("to", json!("perspective"))],
+    );
+    wire(&mut e, ramp, proj, "in");
+    let img = cook(&mut e, proj);
+    let mid = img.px(W / 2, H / 2)[0];
+    assert!(
+        mid.abs_diff(128) <= 6,
+        "looking forward sees longitude 0: {mid}"
+    );
+    assert!(img.px(2, H / 2)[0] < mid && img.px(W - 3, H / 2)[0] > mid);
+    // Yaw 90°: looking right (+x) sees longitude 90° (ramp ¾).
+    set(&mut e, proj, "rotate", json!([90.0, 0.0, 0.0]));
+    let img = cook(&mut e, proj);
+    assert!(
+        img.px(W / 2, H / 2)[0].abs_diff(191) <= 6,
+        "{:?}",
+        img.px(W / 2, H / 2)
+    );
+
+    // Fisheye output: transparent outside the circle.
+    set(&mut e, proj, "rotate", json!([0.0, 0.0, 0.0]));
+    set(&mut e, proj, "to", json!("fisheye"));
+    set(&mut e, proj, "fov", json!(180.0));
+    let img = cook(&mut e, proj);
+    assert_eq!(img.px(0, 0), [0, 0, 0, 0]);
+    assert!(img.px(W / 2, H / 2)[0].abs_diff(128) <= 6);
+
+    // Equirect → cube cross → equirect keeps the panorama (coarsely at 32×16).
+    set(&mut e, proj, "to", json!("cube"));
+    let back = add(
+        &mut e,
+        "projection",
+        &[("from", json!("cube")), ("to", json!("equirect"))],
+    );
+    wire(&mut e, proj, back, "in");
+    let original = cook(&mut e, ramp);
+    let round = cook(&mut e, back);
+    for x in [6, 10, 16, 22, 26] {
+        let (a, b) = (original.px(x, H / 2)[0], round.px(x, H / 2)[0]);
+        assert!(a.abs_diff(b) <= 24, "x {x}: {a} vs {b}");
+    }
+}
