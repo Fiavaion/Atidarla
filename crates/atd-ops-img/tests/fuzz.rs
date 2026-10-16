@@ -199,3 +199,229 @@ fn every_img_operator_survives_random_patches() {
         let _ = e.device().poll(wgpu::PollType::wait_indefinitely());
     }
 }
+
+/// Operators left out of the live-edit soak: they open devices or send to
+/// the network. The SIG fuzz test covers them with safe targets.
+const IO: [&str; 9] = [
+    "sig.osc_in",
+    "sig.osc_out",
+    "sig.dmx_out",
+    "sig.midi_in",
+    "sig.midi_out",
+    "sig.audio_in",
+    "sig.audio_out",
+    "sig.input",
+    "sig.timecode_in",
+];
+
+/// One long-lived engine, edited at random between frames the way a user
+/// patches live: nodes added and deleted, wires made and broken across IMG
+/// and SIG, parameters set and bound, undo and redo. Every frame must cook,
+/// a deleted node must leave no result behind, and free textures must stay
+/// bounded.
+#[test]
+fn live_edits_between_frames_keep_the_engine_consistent() {
+    let instance =
+        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    let Ok(adapter) =
+        pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+    else {
+        let required = std::env::var("ATD_REQUIRE_GPU").is_ok_and(|v| !v.is_empty() && v != "0");
+        assert!(
+            !required,
+            "ATD_REQUIRE_GPU is set but there is no GPU adapter"
+        );
+        return;
+    };
+    let (device, queue) =
+        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
+    let mut reg = Registry::default();
+    atd_ops_img::register(&mut reg);
+    atd_ops_sig::register(&mut reg);
+    let mut lib = OpLibrary::default();
+    atd_ops_img::library(&mut lib);
+    atd_ops_sig::library(&mut lib);
+    let types: Vec<String> = reg
+        .iter()
+        .map(|s| s.type_id.clone())
+        .filter(|t| !IO.contains(&t.as_str()))
+        .collect();
+    let mut e = Engine::new(
+        device,
+        queue,
+        reg.clone(),
+        lib,
+        EngineConfig {
+            width: 37,
+            height: 21,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+        },
+    );
+    let seed = std::env::var("ATD_FUZZ_SEED")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0xA076_1D64_78BD_642Fu64);
+    let mut rng = Rng(seed.max(1));
+    let steps: usize = std::env::var("ATD_FUZZ_ROUNDS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .map_or(400, |r| r * 100);
+    let wire_of = |e: &Engine, id: NodeId, output: bool, i: usize| -> Option<(String, WireType)> {
+        let node = e.network().node(id)?;
+        let schema = reg.get(&node.type_id)?;
+        let sockets = if output {
+            &schema.outputs
+        } else {
+            &schema.inputs
+        };
+        let s = sockets.get(i % sockets.len().max(1))?;
+        Some((s.name.clone(), s.wire))
+    };
+    let mut removed: Vec<NodeId> = Vec::new();
+    let mut t = 0.0;
+    for step in 0..steps {
+        let ids: Vec<NodeId> = e.network().nodes().map(|n| n.id).collect();
+        let pick = |rng: &mut Rng| ids[rng.next(ids.len() as u64) as usize];
+        let action = if ids.len() > 30 {
+            1
+        } else if ids.is_empty() {
+            0
+        } else {
+            rng.next(10)
+        };
+        match action {
+            0 | 9 => {
+                let ty = types[rng.next(types.len() as u64) as usize].clone();
+                let id = e.alloc_id();
+                let name = e.network().unique_name("n");
+                let mut edits = vec![Edit::AddNode {
+                    node: Node::new(id, ty.clone(), name),
+                }];
+                for p in &reg.get(&ty).unwrap().params {
+                    if rng.next(3) == 0
+                        && let Some(v) = random_value(&p.kind, &mut rng)
+                    {
+                        edits.push(Edit::SetParam {
+                            node: id,
+                            param: p.name.clone(),
+                            value: Some(Param::constant(v)),
+                        });
+                    }
+                }
+                // Out-of-range values make the batch fail as a whole; retry bare.
+                if e.edit("add", edits).is_err() {
+                    e.edit(
+                        "add",
+                        [Edit::AddNode {
+                            node: Node::new(id, ty, e.network().unique_name("n")),
+                        }],
+                    )
+                    .unwrap();
+                }
+            }
+            1 => {
+                let id = pick(&mut rng);
+                e.edit("remove", [Edit::RemoveNode { id }]).unwrap();
+                removed.push(id);
+            }
+            2 | 3 => {
+                let (from, to) = (pick(&mut rng), pick(&mut rng));
+                let (o, i) = (rng.next(4) as usize, rng.next(4) as usize);
+                if let (Some((out, ow)), Some((input, iw))) =
+                    (wire_of(&e, from, true, o), wire_of(&e, to, false, i))
+                    && ow == iw
+                {
+                    // Cycles and the like are rejected; fine.
+                    let _ = e.edit(
+                        "wire",
+                        [Edit::Connect {
+                            wire: Wire::new(Endpoint::new(from, &out), Endpoint::new(to, &input)),
+                        }],
+                    );
+                }
+            }
+            4 => {
+                let wires: Vec<Wire> = e.network().wires().collect();
+                if !wires.is_empty() {
+                    let wire = wires[rng.next(wires.len() as u64) as usize].clone();
+                    e.edit("unwire", [Edit::Disconnect { wire }]).unwrap();
+                }
+            }
+            5 | 6 => {
+                let id = pick(&mut rng);
+                let ty = e.network().node(id).unwrap().type_id.clone();
+                let params = &reg.get(&ty).unwrap().params;
+                if !params.is_empty() {
+                    let p = &params[rng.next(params.len() as u64) as usize];
+                    let sig = ids.iter().copied().find(|s| {
+                        let n = e.network().node(*s).unwrap();
+                        reg.get(&n.type_id)
+                            .unwrap()
+                            .outputs
+                            .first()
+                            .is_some_and(|o| o.wire == WireType::Sig)
+                    });
+                    let value = match sig {
+                        Some(s)
+                            if matches!(p.kind, ParamKind::Float { .. }) && rng.next(3) == 0 =>
+                        {
+                            Some(Param::bound(json!(0.0), s, "chan1"))
+                        }
+                        _ => random_value(&p.kind, &mut rng).map(Param::constant),
+                    };
+                    let _ = e.edit(
+                        "param",
+                        [Edit::SetParam {
+                            node: id,
+                            param: p.name.clone(),
+                            value,
+                        }],
+                    );
+                }
+            }
+            7 => {
+                e.undo().unwrap();
+            }
+            _ => {
+                e.redo().unwrap();
+            }
+        }
+        let ids: Vec<NodeId> = e.network().nodes().map(|n| n.id).collect();
+        e.cook(&ids, t)
+            .unwrap_or_else(|err| panic!("step {step}: cook failed: {err}"));
+        t += 1.0 / 30.0;
+        for id in &removed {
+            if e.network().node(*id).is_none() {
+                assert!(
+                    e.result(*id).is_none(),
+                    "step {step}: removed node kept a result"
+                );
+                assert!(
+                    e.channels(*id).is_none(),
+                    "step {step}: removed node kept channels"
+                );
+            }
+        }
+        assert!(
+            e.pool().free_bytes() <= atd_gpu::pool::FREE_BUDGET,
+            "step {step}: free textures over budget"
+        );
+        if step % 50 == 49 {
+            let _ = e.device().poll(wgpu::PollType::wait_indefinitely());
+        }
+    }
+    // Deleting everything leaves nothing behind.
+    let all: Vec<Edit> = e
+        .network()
+        .nodes()
+        .map(|n| Edit::RemoveNode { id: n.id })
+        .collect();
+    if !all.is_empty() {
+        e.edit("clear", all).unwrap();
+    }
+    for _ in 0..=atd_gpu::pool::KEEP_FRAMES {
+        e.cook(&[], t).unwrap();
+        t += 1.0 / 30.0;
+    }
+    assert_eq!(e.pool().free_count(), 0);
+}
