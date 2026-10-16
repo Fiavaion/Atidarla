@@ -202,3 +202,63 @@ fn stills_load_as_a_single_frame() {
     // Time does not change a still.
     assert_eq!(frame(&mut e, node, 3.0), got);
 }
+
+#[test]
+fn native_size_follows_the_file() {
+    let Some(mut e) = engine(false) else {
+        require_gpu();
+        return;
+    };
+    // A 20×10 still, unlike the 64×32 engine.
+    let path = std::env::temp_dir().join(format!("atd-native-{}.png", std::process::id()));
+    {
+        let file = std::fs::File::create(&path).unwrap();
+        let mut enc = png::Encoder::new(std::io::BufWriter::new(file), 20, 10);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.write_header()
+            .unwrap()
+            .write_image_data(&[200u8; 20 * 10 * 4])
+            .unwrap();
+    }
+    let id = e.alloc_id();
+    e.edit(
+        "add",
+        [
+            Edit::AddNode {
+                node: Node::new(id, "img.movie_in", "still"),
+            },
+            Edit::SetParam {
+                node: id,
+                param: "file".into(),
+                value: Some(Param::constant(json!(path.to_string_lossy()))),
+            },
+        ],
+    )
+    .unwrap();
+    let size = |e: &mut Engine| {
+        let start = std::time::Instant::now();
+        loop {
+            e.cook(&[id], 0.0).unwrap();
+            let t = e.result(id).unwrap();
+            if (t.width(), t.height()) == (20, 10) || start.elapsed().as_secs() > 5 {
+                return (t.width(), t.height());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    };
+    assert_eq!(size(&mut e), (20, 10), "native by default");
+    e.edit(
+        "size",
+        [Edit::SetParam {
+            node: id,
+            param: "size".into(),
+            value: Some(Param::constant(json!("project"))),
+        }],
+    )
+    .unwrap();
+    e.cook(&[id], 0.0).unwrap();
+    let t = e.result(id).unwrap();
+    assert_eq!((t.width(), t.height()), (64, 32), "project size");
+    std::fs::remove_file(path).ok();
+}

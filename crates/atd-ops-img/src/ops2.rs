@@ -66,6 +66,23 @@ pub fn shape_schema() -> OperatorSchema {
     )
 }
 
+pub(crate) const CROP_SIZES: &[&str] = &["crop", "input"];
+
+/// Crop's output size: the kept rectangle in pixels (`crop` mode).
+pub(crate) fn crop_size(
+    p: &atd_gpu::engine::Params<'_>,
+    input: Option<(u32, u32)>,
+    project: (u32, u32),
+) -> Option<(u32, u32)> {
+    if p.str("size") != "crop" {
+        return None;
+    }
+    let (w, h) = input.unwrap_or(project);
+    let (lo, hi) = (p.vec4("min"), p.vec4("max"));
+    let side = |n: u32, a: f32, b: f32| ((n as f32 * (b - a).abs()).round() as u32).max(1);
+    Some((side(w, lo[0], hi[0]), side(h, lo[1], hi[1])))
+}
+
 const PROJECTIONS: &[&str] = &["equirect", "fisheye", "perspective", "cube"];
 
 /// Directions: y up, z forward, x right. Equirect longitude 0 faces +z.
@@ -520,13 +537,15 @@ pub static DEFS2: &[Def] = &[
             img(
                 "crop",
                 "Crop",
-                "Keeps a rectangle of the input and stretches it to fill the output.",
+                "Keeps a rectangle of the input. By default the output is that rectangle at its own pixel size; `input` size stretches it to the input's size instead.",
                 &[("in", false)],
                 vec![
                     ParamSchema::vec("min", "Min", &[0.25, 0.25])
                         .help("Bottom-left corner of the kept area, as a fraction of the image."),
                     ParamSchema::vec("max", "Max", &[0.75, 0.75])
                         .help("Top-right corner of the kept area."),
+                    ParamSchema::menu("size", "Size", CROP_SIZES, "crop")
+                        .help("`crop` outputs the kept pixels at their size; `input` keeps the input size."),
                 ],
                 60,
             )

@@ -716,6 +716,18 @@ fn crop_and_switch() {
         &[("min", json!([0.5, 0.0])), ("max", json!([1.0, 1.0]))],
     );
     wire(&mut e, ramp, c, "in");
+    // Default `crop` size: the right half of 32×16 is 16×16.
+    e.cook(&[c], 0.0).unwrap();
+    let t = e.result(c).unwrap();
+    assert_eq!((t.width(), t.height()), (W / 2, H));
+    let px = read_rgba8(e.device(), e.queue(), t).unwrap();
+    assert!(
+        px[0].abs_diff(128) <= 6,
+        "left edge starts mid-ramp: {}",
+        px[0]
+    );
+    // `input` size stretches the kept area back to 32×16.
+    set(&mut e, c, "size", json!("input"));
     let img = cook(&mut e, c);
     assert!(
         img.px(0, 8)[0].abs_diff(128) <= 6,

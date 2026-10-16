@@ -21,6 +21,7 @@ pollster.workspace = true
 log.workspace = true
 
 [dev-dependencies]
+png.workspace = true
 hound.workspace = true
 atd-ops-sig.workspace = true
 atd-interop.workspace = true

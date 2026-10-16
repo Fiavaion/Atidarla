@@ -29,6 +29,8 @@ pub fn schema() -> OperatorSchema {
                 .help("Playback rate; negative plays backwards."),
             ParamSchema::float("cue", "Cue", 0.0, Some(0.0), None)
                 .help("Position in seconds while stopped; playback starts from here."),
+            ParamSchema::menu("size", "Size", &["native", "project"], "native")
+                .help("`native` outputs at the file's resolution; `project` at the project resolution."),
         ],
         inputs: vec![],
         outputs: vec![SocketSchema {
@@ -200,6 +202,19 @@ impl MovieIn {
 }
 
 impl GpuOp for MovieIn {
+    fn output_size(
+        &self,
+        p: &atd_gpu::engine::Params<'_>,
+        _input: Option<(u32, u32)>,
+        _project: (u32, u32),
+    ) -> Option<(u32, u32)> {
+        if p.str("size") != "native" {
+            return None;
+        }
+        let info = self.player.as_ref()?.info()?;
+        Some((info.width, info.height))
+    }
+
     fn cook(&mut self, ctx: &mut CookCtx<'_>) -> Result<(), String> {
         let p = ctx.params;
         let path = p.str("file");

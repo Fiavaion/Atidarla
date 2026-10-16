@@ -66,9 +66,31 @@ pub struct Def {
 pub struct ShaderOp {
     pass: FullscreenPass,
     pack: fn(&CookCtx<'_>) -> Packed,
+    size: Option<SizeRule>,
+}
+
+/// An operator's output size rule (see `GpuOp::output_size`).
+type SizeRule =
+    fn(&atd_gpu::engine::Params<'_>, Option<(u32, u32)>, (u32, u32)) -> Option<(u32, u32)>;
+
+/// Shader operators whose output size is not simply their input's.
+fn size_rule(type_id: &str) -> Option<SizeRule> {
+    match type_id {
+        "img.crop" => Some(ops2::crop_size),
+        _ => None,
+    }
 }
 
 impl GpuOp for ShaderOp {
+    fn output_size(
+        &self,
+        p: &atd_gpu::engine::Params<'_>,
+        input: Option<(u32, u32)>,
+        project: (u32, u32),
+    ) -> Option<(u32, u32)> {
+        self.size.and_then(|f| f(p, input, project))
+    }
+
     fn cook(&mut self, ctx: &mut CookCtx<'_>) -> Result<(), String> {
         const MAX_INPUTS: usize = 4;
         let packed = (self.pack)(ctx);
@@ -129,10 +151,12 @@ pub fn library(library: &mut OpLibrary) {
         let inputs = schema.inputs.len();
         let label = schema.type_id.clone();
         let (helpers, body, pack) = (def.helpers, def.body, def.pack);
+        let size = size_rule(&schema.type_id);
         library.add(schema.type_id, move |device, format| {
             Box::new(ShaderOp {
                 pass: FullscreenPass::new(device, &label, format, inputs, helpers, body),
                 pack,
+                size,
             })
         });
     }
