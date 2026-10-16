@@ -82,8 +82,15 @@ fn section(data: &[u8]) -> Result<(u8, &[u8], &[u8]), HapError> {
     Ok((kind, body, &data[at + size..]))
 }
 
-fn snappy(src: &[u8], out: &mut Vec<u8>) -> Result<(), HapError> {
+/// Decompresses into `out`, refusing to grow it past `limit` bytes (the
+/// frame's known size), whatever the stream claims.
+fn snappy(src: &[u8], out: &mut Vec<u8>, limit: usize) -> Result<(), HapError> {
     let len = snap::raw::decompress_len(src).map_err(|e| HapError::Snappy(e.to_string()))?;
+    if out.len() + len > limit {
+        return Err(HapError::Snappy(format!(
+            "stream claims {len} bytes, more than the frame holds"
+        )));
+    }
     let start = out.len();
     out.resize(start + len, 0);
     snap::raw::Decoder::new()
@@ -102,13 +109,13 @@ pub fn decode(frame: &[u8], width: u32, height: u32, out: &mut HapFrame) -> Resu
     let format = HapFormat::from_type(kind).ok_or(HapError::Unsupported(kind))?;
     out.format = format;
     out.data.clear();
+    let want = width.div_ceil(4) as usize * height.div_ceil(4) as usize * format.block_bytes();
     match kind >> 4 {
         0xA => out.data.extend_from_slice(body),
-        0xB => snappy(body, &mut out.data)?,
-        0xC => decode_chunks(body, &mut out.data)?,
+        0xB => snappy(body, &mut out.data, want)?,
+        0xC => decode_chunks(body, &mut out.data, want)?,
         _ => return Err(HapError::Unsupported(kind)),
     }
-    let want = width.div_ceil(4) as usize * height.div_ceil(4) as usize * format.block_bytes();
     if out.data.len() != want {
         return Err(HapError::Size {
             got: out.data.len(),
@@ -121,7 +128,7 @@ pub fn decode(frame: &[u8], width: u32, height: u32, out: &mut HapFrame) -> Resu
 }
 
 /// "Complex" compression: decode instructions, then chunks.
-fn decode_chunks(body: &[u8], out: &mut Vec<u8>) -> Result<(), HapError> {
+fn decode_chunks(body: &[u8], out: &mut Vec<u8>, limit: usize) -> Result<(), HapError> {
     let (kind, instructions, data) = section(body)?;
     if kind != 0x01 {
         return Err(HapError::Unsupported(kind));
@@ -154,8 +161,9 @@ fn decode_chunks(body: &[u8], out: &mut Vec<u8>) -> Result<(), HapError> {
             .map_or(at, |o| o.get(i).copied().unwrap_or(at));
         let chunk = data.get(start..start + size).ok_or(HapError::Truncated)?;
         match c {
-            0x0A => out.extend_from_slice(chunk),
-            0x0B => snappy(chunk, out)?,
+            0x0A if out.len() + chunk.len() <= limit => out.extend_from_slice(chunk),
+            0x0A => return Err(HapError::Truncated),
+            0x0B => snappy(chunk, out, limit)?,
             other => return Err(HapError::Unsupported(other)),
         }
         at = start + size;

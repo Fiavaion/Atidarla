@@ -150,6 +150,7 @@ fn read_moov(file: &mut File) -> Result<Vec<u8>, MovError> {
 /// Parses the first video track of the movie at `path`.
 pub fn open(path: &Path) -> Result<Track, MovError> {
     let mut file = File::open(path)?;
+    let file_len = file.metadata()?.len();
     let moov = read_moov(&mut file)?;
     for atom in atoms(&moov) {
         let (kind, trak) = atom?;
@@ -166,7 +167,7 @@ pub fn open(path: &Path) -> Result<Track, MovError> {
         if !is_video {
             continue;
         }
-        return parse_track(mdia);
+        return parse_track(mdia, file_len);
     }
     Err(MovError::NoVideo)
 }
@@ -176,7 +177,9 @@ fn need<'a>(data: &'a [u8], kind: &[u8; 4]) -> Result<&'a [u8], MovError> {
         .ok_or_else(|| MovError::Format(format!("missing {} atom", String::from_utf8_lossy(kind))))
 }
 
-fn parse_track(mdia: &[u8]) -> Result<Track, MovError> {
+/// Files are untrusted: every count read from them is checked against what
+/// the file could actually hold before anything is allocated or looped.
+fn parse_track(mdia: &[u8], file_len: u64) -> Result<Track, MovError> {
     let mdhd = need(mdia, b"mdhd")?;
     let (timescale, duration) = match mdhd.first() {
         Some(1) => (be_u32(mdhd, 20)?, be_u64(mdhd, 24)?),
@@ -202,6 +205,18 @@ fn parse_track(mdia: &[u8]) -> Result<Track, MovError> {
     let stsz = need(stbl, b"stsz")?;
     let uniform = be_u32(stsz, 4)?;
     let count = be_u32(stsz, 8)? as usize;
+    // Every sample takes at least one byte of the file (and four of the
+    // table when sizes are listed).
+    let possible = if uniform != 0 {
+        file_len / u64::from(uniform)
+    } else {
+        (stsz.len().saturating_sub(12) / 4) as u64
+    };
+    if count as u64 > possible.min(file_len) {
+        return Err(MovError::Format(format!(
+            "sample table lists {count} frames, more than the file can hold"
+        )));
+    }
     let sizes: Vec<u32> = if uniform != 0 {
         vec![uniform; count]
     } else {
@@ -237,9 +252,15 @@ fn parse_track(mdia: &[u8]) -> Result<Track, MovError> {
     for i in 0..be_u32(stts, 4)? as usize {
         let n = be_u32(stts, 8 + i * 8)?;
         let delta = be_u32(stts, 12 + i * 8)?;
-        for _ in 0..n {
+        // Runs beyond the sample count only advance the clock.
+        let listed = (n as usize).min(count - times.len());
+        for _ in 0..listed {
             times.push(t);
-            t += u64::from(delta);
+            t = t.saturating_add(u64::from(delta));
+        }
+        t = t.saturating_add(u64::from(delta) * u64::from(n - listed as u32));
+        if times.len() == count && listed < n as usize {
+            break;
         }
     }
 
@@ -262,7 +283,7 @@ fn parse_track(mdia: &[u8]) -> Result<Track, MovError> {
                 size,
                 time: times.get(sample).copied().unwrap_or(t),
             });
-            offset += u64::from(size);
+            offset = offset.saturating_add(u64::from(size));
             sample += 1;
         }
     }
@@ -270,6 +291,15 @@ fn parse_track(mdia: &[u8]) -> Result<Track, MovError> {
         return Err(MovError::Format(format!(
             "sample table lists {count} frames but chunks hold {}",
             samples.len()
+        )));
+    }
+    if let Some(s) = samples
+        .iter()
+        .find(|s| s.offset.saturating_add(u64::from(s.size)) > file_len)
+    {
+        return Err(MovError::Format(format!(
+            "frame data at {} (+{} bytes) lies beyond the end of the file",
+            s.offset, s.size
         )));
     }
     Ok(Track {
