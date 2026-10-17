@@ -1,21 +1,27 @@
 //! Per-OS GPU texture sharing (PRD §5.2 `atd-interop`, M0 spikes a and b).
 //!
 //! - **Windows (DX12):** textures backed by a `D3D12_HEAP_FLAG_SHARED`
-//!   resource, exported as NT handles. The same handle feeds Spout
-//!   (D3D11/12 receivers) and CUDA external memory (`cudaImportExternalMemory`
-//!   with `cudaExternalMemoryHandleTypeD3D12Resource`), see [`dx12`].
+//!   resource, exported as NT handles. The same handle feeds D3D11 and
+//!   CUDA external memory (`cudaImportExternalMemory` with
+//!   `cudaExternalMemoryHandleTypeD3D12Resource`), see [`dx12`].
+//!   [`spout`] speaks the Spout 2.007 protocol on top of it, with one GPU
+//!   copy into or out of Spout's legacy-shared D3D11 texture.
 //! - **macOS (Metal):** textures backed by an `IOSurface`, shareable by
 //!   `IOSurfaceID` or mach port; the basis of Syphon, see [`metal`].
 //! - **Everywhere:** [`readback`] copies a texture to CPU memory, the
 //!   fallback when no zero-copy path exists (RESEARCH §4.8).
 //!
 //! Everything here runs outside the render thread's hot path or once at
-//! set-up; per-frame sharing is a handle hand-off, not a copy.
+//! set-up; per-frame sharing is a handle hand-off or a GPU copy, never a
+//! CPU copy (except [`readback`]).
 
 pub mod readback;
 
 #[cfg(windows)]
 pub mod dx12;
+
+#[cfg(windows)]
+pub mod spout;
 
 #[cfg(target_os = "macos")]
 pub mod metal;

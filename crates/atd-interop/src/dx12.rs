@@ -9,8 +9,9 @@
 //! ordering between producer and consumer is the caller's job (a shared
 //! fence in production, `Device::poll` in tests).
 //!
-//! The NT handle is what Spout (D3D11/12 receivers via `OpenSharedResource1`)
-//! and CUDA (`cudaImportExternalMemory`, type `D3D12Resource`) consume.
+//! The NT handle is what D3D11 (`OpenSharedResource1`, used by
+//! [`crate::spout`]) and CUDA (`cudaImportExternalMemory`, type
+//! `D3D12Resource`) consume. Spout itself shares legacy D3D11 handles.
 
 use wgpu::hal::api::Dx12;
 use windows::Win32::Foundation::{CloseHandle, GENERIC_ALL, HANDLE};
@@ -27,11 +28,11 @@ use windows::core::PCWSTR;
 
 use crate::{InteropError, check_format, texture_descriptor};
 
-fn platform(e: windows::core::Error) -> InteropError {
+pub(crate) fn platform(e: windows::core::Error) -> InteropError {
     InteropError::Platform(e.to_string())
 }
 
-fn dxgi_format(format: wgpu::TextureFormat) -> Result<DXGI_FORMAT, InteropError> {
+pub(crate) fn dxgi_format(format: wgpu::TextureFormat) -> Result<DXGI_FORMAT, InteropError> {
     check_format(format)?;
     Ok(match format {
         wgpu::TextureFormat::Bgra8Unorm => DXGI_FORMAT_B8G8R8A8_UNORM,
@@ -40,7 +41,7 @@ fn dxgi_format(format: wgpu::TextureFormat) -> Result<DXGI_FORMAT, InteropError>
 }
 
 /// Runs `f` with the raw D3D12 device behind a wgpu device.
-fn with_raw_device<R>(
+pub(crate) fn with_raw_device<R>(
     device: &wgpu::Device,
     f: impl FnOnce(&ID3D12Device) -> Result<R, InteropError>,
 ) -> Result<R, InteropError> {
@@ -80,7 +81,7 @@ unsafe fn wrap(
 
 /// An owned NT handle to a shared resource. Closed on drop.
 #[derive(Debug)]
-pub struct SharedHandle(HANDLE);
+pub struct SharedHandle(pub(crate) HANDLE);
 
 // SAFETY: an NT handle is a process-wide value, usable from any thread.
 unsafe impl Send for SharedHandle {}
