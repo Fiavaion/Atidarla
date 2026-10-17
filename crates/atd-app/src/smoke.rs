@@ -12,8 +12,10 @@ use egui::ColorImage;
 
 /// Default number of frames rendered before the screenshot.
 const DEFAULT_FRAMES: u32 = 120;
-/// Give up if no screenshot has arrived by then.
-const TIMEOUT: Duration = Duration::from_secs(120);
+/// Give up if no screenshot has arrived by then. The Windows runner draws
+/// about one frame a second on WARP: 120 frames took 103, 107 and 120 s in
+/// three CI runs, so the limit leaves room for a slow one.
+const TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SmokeArgs {
