@@ -350,8 +350,7 @@ mod tests {
 
     #[test]
     fn caches_drop_entries_left_unused() {
-        let instance =
-            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let instance = crate::primary_instance();
         let Ok(adapter) =
             pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
         else {

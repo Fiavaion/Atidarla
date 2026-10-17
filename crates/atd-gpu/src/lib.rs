@@ -80,6 +80,18 @@ pub struct GpuContext {
     pub queue: wgpu::Queue,
 }
 
+/// An instance for tests and tools that bring up many devices at once: Vulkan,
+/// DX12 and Metal only, unless `WGPU_BACKEND` says otherwise. With GL enabled
+/// beside Vulkan, concurrent device creation deadlocks on NVIDIA/Windows (M1 log,
+/// 2026-10-17), and Atidarla does not target GL.
+pub fn primary_instance() -> wgpu::Instance {
+    let mut desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
+    if std::env::var_os("WGPU_BACKEND").is_none() {
+        desc.backends = wgpu::Backends::PRIMARY;
+    }
+    wgpu::Instance::new(desc)
+}
+
 impl GpuContext {
     /// Brings up the highest-performance adapter without a surface. Honours
     /// the standard `WGPU_BACKEND` / `WGPU_ADAPTER_NAME` environment overrides.

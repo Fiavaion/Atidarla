@@ -19,8 +19,7 @@ fn data(name: &str) -> PathBuf {
 /// An engine at the clips' size (64×32), with or without BC textures.
 /// `None` when there is no adapter, or BC was asked for and is missing.
 fn engine(bc: bool) -> Option<Engine> {
-    let instance =
-        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    let instance = atd_gpu::primary_instance();
     let adapter =
         pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
             .ok()?;
@@ -56,8 +55,7 @@ fn engine(bc: bool) -> Option<Engine> {
 fn require_gpu() {
     let required = std::env::var("ATD_REQUIRE_GPU").is_ok_and(|v| !v.is_empty() && v != "0");
     let has_adapter = pollster::block_on(
-        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env())
-            .request_adapter(&wgpu::RequestAdapterOptions::default()),
+        atd_gpu::primary_instance().request_adapter(&wgpu::RequestAdapterOptions::default()),
     )
     .is_ok();
     assert!(

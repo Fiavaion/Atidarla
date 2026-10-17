@@ -356,8 +356,7 @@ mod tests {
     use serde_json::json;
 
     fn engine() -> Option<Engine> {
-        let instance =
-            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let instance = atd_gpu::primary_instance();
         let adapter =
             pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()));
         let Ok(adapter) = adapter else {

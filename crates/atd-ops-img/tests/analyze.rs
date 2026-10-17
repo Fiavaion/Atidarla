@@ -6,8 +6,7 @@ use atd_gpu::engine::{Engine, EngineConfig, OpLibrary};
 use serde_json::{Value, json};
 
 fn engine(w: u32, h: u32) -> Option<Engine> {
-    let instance =
-        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    let instance = atd_gpu::primary_instance();
     let adapter =
         pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
             .ok()?;

@@ -43,8 +43,7 @@ static GLOBAL: Counting = Counting;
 
 #[test]
 fn img_chain_steady_state_allocations() {
-    let instance =
-        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    let instance = atd_gpu::primary_instance();
     let Ok(adapter) =
         pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
     else {
@@ -178,8 +177,7 @@ void main() {
 /// Multi-pass operators get an allowance for their pass count.
 #[test]
 fn every_img_operator_steady_state_allocations() {
-    let instance =
-        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    let instance = atd_gpu::primary_instance();
     let Ok(adapter) =
         pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
     else {

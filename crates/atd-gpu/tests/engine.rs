@@ -126,8 +126,7 @@ const W: u32 = 8;
 const H: u32 = 4;
 
 fn engine() -> Option<Engine> {
-    let instance =
-        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    let instance = atd_gpu::primary_instance();
     let adapter =
         pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
             .ok()?;
@@ -408,8 +407,7 @@ fn sinks_cook_without_being_viewed() {
         return no_gpu();
     }
     // A registry where one operator is a sink.
-    let instance =
-        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    let instance = atd_gpu::primary_instance();
     let adapter =
         pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
             .unwrap();

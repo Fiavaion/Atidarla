@@ -46,10 +46,10 @@ To run it locally on Windows: download BtbN's `ffmpeg-n9.0-latest-win64-lgpl-sha
 - **AC3 / PT-1**: `cargo run -p atd-cli --release -- bench` on the RTX 4070 PC.
 - **Share In/Out**: Spout (Windows) and Syphon (macOS) wire-up, on real machines.
 - Check CI for the newest push; the test fixes of 2026-10-16 are described in `M1.md`.
-- **Test hang on NVIDIA/Windows**: test binaries that create many wgpu instances in parallel
-  (for example `cargo test -p atd-ops-img --test ops`) stall intermittently under the default
-  backend. Run local tests with `WGPU_BACKEND=dx12` (PowerShell: `$env:WGPU_BACKEND="dx12"`).
-  Cause unknown; see the M1 log.
+- **Fixed 2026-10-17**: parallel GPU tests used to hang on NVIDIA/Windows when Vulkan and GL
+  were both enabled; tests now build their instance with `atd_gpu::primary_instance()`. Unfixed:
+  `midi::opening_without_devices_...` missed its deadline twice after long idle periods (not
+  reproducible; see the M1 log). Re-run it before suspecting a real regression.
 
 ## Local set-up
 

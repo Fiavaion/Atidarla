@@ -1305,8 +1305,7 @@ mod tests {
     /// nodes culled) and at 10% (every node visible).
     #[test]
     fn two_thousand_nodes_stay_interactive() {
-        let instance =
-            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let instance = atd_gpu::primary_instance();
         let adapter =
             pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()));
         let Ok(adapter) = adapter else {
