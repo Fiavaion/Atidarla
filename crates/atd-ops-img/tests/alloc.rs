@@ -41,6 +41,11 @@ unsafe impl GlobalAlloc for Counting {
 #[global_allocator]
 static GLOBAL: Counting = Counting;
 
+/// Tests that cook Share In/Out run one at a time: on WARP (Windows CI),
+/// several devices creating D3D11 devices in parallel crash inside WARP
+/// (see `tests/share.rs`).
+static SHARING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[test]
 fn img_chain_steady_state_allocations() {
     let instance = atd_gpu::primary_instance();
@@ -177,6 +182,7 @@ void main() {
 /// Multi-pass operators get an allowance for their pass count.
 #[test]
 fn every_img_operator_steady_state_allocations() {
+    let _sharing = SHARING.lock().unwrap_or_else(|e| e.into_inner());
     let instance = atd_gpu::primary_instance();
     let Ok(adapter) =
         pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
@@ -276,6 +282,11 @@ fn every_img_operator_steady_state_allocations() {
         "img.analyze" => 9.0,
         "img.isf_alloc_passes" => 7.0,
         "img.ripple" | "img.time_machine" => 4.0,
+        // Up to two passes (pass-through and the 8-bit copy, or keeping
+        // and drawing a received frame); 1.1 measured on NVIDIA DX12, up to
+        // 2.1 on WARP, depending on how often the worker is busy. See also
+        // the Spout test below.
+        "img.share_out" | "img.share_in" => 3.0,
         _ => 2.5,
     };
     let mut over = Vec::new();
@@ -289,5 +300,123 @@ fn every_img_operator_steady_state_allocations() {
     assert!(
         over.is_empty(),
         "steady-state allocations per frame over bound (typical {typical:.1}): {over:?}"
+    );
+}
+
+/// Share Out publishing a changing image to a Share In in the same engine
+/// over Spout (Windows, DX12): what the cook thread allocates per frame.
+/// The workers' Spout calls run on their own threads (not counted here;
+/// `atd-interop` keeps them allocation-free after warm-up).
+#[cfg(windows)]
+#[test]
+fn share_out_and_in_steady_state_allocations() {
+    let _sharing = SHARING.lock().unwrap_or_else(|e| e.into_inner());
+    let instance = atd_gpu::primary_instance();
+    let adapters = pollster::block_on(instance.enumerate_adapters(wgpu::Backends::DX12));
+    let Some(adapter) = adapters
+        .into_iter()
+        .min_by_key(|a| a.get_info().device_type == wgpu::DeviceType::Cpu)
+    else {
+        let required = std::env::var("ATD_REQUIRE_GPU").is_ok_and(|v| !v.is_empty() && v != "0");
+        assert!(
+            !required,
+            "ATD_REQUIRE_GPU is set but there is no DX12 adapter"
+        );
+        return;
+    };
+    let (device, queue) =
+        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
+    let mut reg = Registry::default();
+    atd_ops_img::register(&mut reg);
+    atd_ops_sig::register(&mut reg);
+    let mut lib = OpLibrary::default();
+    atd_ops_img::library(&mut lib);
+    atd_ops_sig::library(&mut lib);
+    let config = EngineConfig {
+        width: 64,
+        height: 32,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+    };
+    let mut e = Engine::new(device, queue, reg, lib, config);
+    let name = format!("atd-test-{}-alloc", std::process::id());
+    let [noise, lfo, out, inp] = [(); 4].map(|()| e.alloc_id());
+    e.edit(
+        "patch",
+        [
+            Edit::AddNode {
+                node: Node::new(noise, "img.noise", "noise"),
+            },
+            Edit::AddNode {
+                node: Node::new(lfo, "sig.lfo", "lfo"),
+            },
+            Edit::SetParam {
+                node: noise,
+                param: "z".into(),
+                value: Some(Param::bound(json!(0.0), lfo, "lfo")),
+            },
+            Edit::AddNode {
+                node: Node::new(out, "img.share_out", "out"),
+            },
+            Edit::SetParam {
+                node: out,
+                param: "name".into(),
+                value: Some(Param::constant(json!(name))),
+            },
+            Edit::Connect {
+                wire: Wire::new(Endpoint::new(noise, "out"), Endpoint::new(out, "in")),
+            },
+            Edit::AddNode {
+                node: Node::new(inp, "img.share_in", "in"),
+            },
+            Edit::SetParam {
+                node: inp,
+                param: "name".into(),
+                value: Some(Param::constant(json!(name))),
+            },
+        ],
+    )
+    .unwrap();
+    let mut t = 0.0;
+    let mut frame = |e: &mut Engine, nodes: &[NodeId]| {
+        e.cook(nodes, t).unwrap();
+        t += 1.0 / 60.0;
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    };
+    // Warm up: the sender exists and Share In is receiving.
+    let start = std::time::Instant::now();
+    while !e.status(inp).is_some_and(|s| s.starts_with("Receiving")) {
+        assert!(
+            start.elapsed().as_secs() < 30,
+            "no loopback: {:?}",
+            e.status(inp)
+        );
+        frame(&mut e, &[out, inp]);
+    }
+    for _ in 0..30 {
+        frame(&mut e, &[out, inp]);
+    }
+    let frames = 60;
+    let mut count = |e: &mut Engine, nodes: &[NodeId]| {
+        COUNTING.with(|c| c.set(true));
+        let before = allocs();
+        for _ in 0..frames {
+            frame(e, nodes);
+        }
+        let n = allocs() - before;
+        COUNTING.with(|c| c.set(false));
+        n as f64 / f64::from(frames)
+    };
+    let both = count(&mut e, &[out, inp]);
+    let base = count(&mut e, &[noise]);
+    assert_eq!(e.error(out), None);
+    assert_eq!(e.error(inp), None);
+    let per_node = (both - base) / 2.0;
+    eprintln!(
+        "Share Out + Share In: {both:.1} allocations per frame, {base:.1} for the source alone, {per_node:.1} per node-cook"
+    );
+    assert!(
+        per_node <= 2.0 * BOUND,
+        "{per_node:.1} allocations per node-cook (bound {})",
+        2.0 * BOUND
     );
 }

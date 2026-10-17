@@ -383,6 +383,17 @@ pub trait GpuOp: Send {
     ) -> Option<(u32, u32)> {
         None
     }
+
+    /// Runs once the frame's commands are submitted, for every node that
+    /// cooked this frame: work recorded in [`GpuOp::cook`] is now on the
+    /// queue, so textures it wrote may be handed to a worker thread.
+    fn after_submit(&mut self) {}
+
+    /// A short status line for the parameter panel (for example the name
+    /// a sender was published under), or `None`.
+    fn status(&self) -> Option<&str> {
+        None
+    }
 }
 
 /// SIG inputs of a node, by input index. Does not allocate.
@@ -1149,6 +1160,8 @@ impl Engine {
         for id in plan.iter() {
             if let Some(op) = analysis_ops.get_mut(id) {
                 op.after_submit();
+            } else if let Some(op) = gpu_ops.get_mut(id) {
+                op.after_submit();
             }
         }
         for t in released.drain(..) {
@@ -1218,6 +1231,12 @@ impl Engine {
     /// The last cook error of `node`, if any.
     pub fn error(&self, node: NodeId) -> Option<&str> {
         self.errors.get(&node).map(String::as_str)
+    }
+
+    /// The status line of an IMG node's operator, if it reports one
+    /// ([`GpuOp::status`]).
+    pub fn status(&self, node: NodeId) -> Option<&str> {
+        self.gpu_ops.get(&node)?.status()
     }
 
     pub fn stat(&self, node: NodeId) -> Option<&CookStat> {

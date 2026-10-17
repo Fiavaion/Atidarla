@@ -23,6 +23,7 @@ every IMG and SIG operator (CLAUDE.md rule 7); each operator's page in
 | [signal-scope](signal-scope.atidarla/) | Audio and control signals drawn as images, and image analysis |
 | [shaders](shaders.atidarla/) | A project-local ISF shader, inline WGSL and projection |
 | [live-control](live-control.atidarla/) | Mouse, OSC, MIDI, DMX, timecode and audio output |
+| [texture-sharing](texture-sharing.atidarla/) | Share Out and Share In: publishing to other applications and a loopback (Spout on Windows) |
 
 Checks (CI runs both on Windows and macOS):
 

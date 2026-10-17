@@ -35,3 +35,4 @@ All platforms.
 - [Image processing](../../../examples/image-processing.atidarla/) — `move`
 - [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `hue_swing`
 - [Simulations](../../../examples/simulations.atidarla/) — `orbit`
+- [Texture sharing](../../../examples/texture-sharing.atidarla/) — `drift`

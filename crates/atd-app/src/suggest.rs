@@ -34,6 +34,7 @@ fn enumerate(key: &str) -> Vec<String> {
             v.extend(atd_io::midi::ports().1);
             v
         }
+        atd_ops_img::SHARE_SENDERS_KEY => atd_ops_img::share_senders(),
         _ => Vec::new(),
     }
 }

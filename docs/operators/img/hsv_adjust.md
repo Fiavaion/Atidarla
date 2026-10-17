@@ -31,3 +31,4 @@ All platforms.
 ## Examples
 
 - [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `colour`
+- [Texture sharing](../../../examples/texture-sharing.atidarla/) — `tint`

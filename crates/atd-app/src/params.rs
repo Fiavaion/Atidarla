@@ -6,7 +6,9 @@
 //!
 //! Number and toggle parameters can follow an expression (`=` button,
 //! PRD A22): the native subset runs every frame on the cook path, anything
-//! else in Python a frame late. Errors show at the top of the panel.
+//! else in Python a frame late. Errors show at the top of the panel, with
+//! the operator's status line if it has one (e.g. Share Out's published
+//! name).
 
 use atd_core::graph::{ChannelRef, Edit, NodeId, Param};
 use atd_core::registry::WireType;
@@ -34,6 +36,9 @@ pub fn ui(ui: &mut Ui, engine: &mut Engine, node: NodeId) -> Option<String> {
     ui.label(&schema.summary);
     if let Some(e) = engine.error(node) {
         ui.colored_label(egui::Color32::from_rgb(230, 80, 80), e);
+    }
+    if let Some(status) = engine.status(node) {
+        ui.label(status);
     }
     if let Some(st) = engine.stat(node) {
         ui.weak(format!(

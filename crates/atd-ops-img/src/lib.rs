@@ -16,6 +16,7 @@ mod movie;
 mod ops;
 mod ops2;
 mod resolution;
+mod share;
 mod stateful;
 mod text;
 mod time_machine;
@@ -27,6 +28,7 @@ use atd_gpu::fullscreen::{FullscreenPass, MAX_PARAM_VEC4};
 
 pub use ops::DEFS;
 pub use ops2::DEFS2;
+pub use share::{SENDERS_KEY as SHARE_SENDERS_KEY, senders as share_senders};
 pub use stateful::STATEFUL;
 
 /// Every declarative (single-pass) operator definition.
@@ -128,6 +130,8 @@ pub fn register(registry: &mut Registry) {
             text::schema(),
             analyze::schema(),
             wgsl::schema(),
+            share::out_schema(),
+            share::in_schema(),
         ]);
     for schema in schemas {
         registry
@@ -142,6 +146,8 @@ pub fn library(library: &mut OpLibrary) {
     library.add(movie::schema().type_id, movie::create);
     library.add(text::schema().type_id, text::create);
     library.add(wgsl::schema().type_id, wgsl::create);
+    library.add(share::out_schema().type_id, share::create_out);
+    library.add(share::in_schema().type_id, share::create_in);
     library.add_img_to_sig(analyze::schema().type_id, analyze::create);
     for (schema, factory) in STATEFUL {
         library.add(schema().type_id, factory);
@@ -172,7 +178,7 @@ mod tests {
         register(&mut registry);
         assert_eq!(
             registry.len(),
-            DEFS.len() + DEFS2.len() + STATEFUL.len() + 5
+            DEFS.len() + DEFS2.len() + STATEFUL.len() + 7
         );
         for op in registry.iter() {
             assert!(op.cook_budget_us > 0, "{} has a cook budget", op.type_id);
@@ -210,5 +216,7 @@ mod tests {
         assert!(lib.contains(&text::schema().type_id));
         assert!(lib.contains(&analyze::schema().type_id));
         assert!(lib.contains(&wgsl::schema().type_id));
+        assert!(lib.contains(&share::out_schema().type_id));
+        assert!(lib.contains(&share::in_schema().type_id));
     }
 }

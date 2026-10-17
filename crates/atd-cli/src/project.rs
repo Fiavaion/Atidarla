@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use atd_core::graph::NodeId;
+use atd_core::registry::{Availability, Registry};
 use atd_gpu::engine::{Engine, EngineConfig, OpLibrary};
 
 /// What `check` verifies beyond loading.
@@ -127,11 +128,33 @@ fn check_one(dir: &Path, gpu: Option<&atd_gpu::GpuContext>, opts: CheckOptions) 
         std::thread::sleep(frame_time);
     }
     let _ = engine.device().poll(wgpu::PollType::wait_indefinitely());
-    let errors: Vec<String> = engine
-        .network()
-        .nodes()
-        .filter_map(|n| engine.error(n.id).map(|e| format!("{}: {e}", n.name)))
-        .collect();
+    // Operators this platform does not run (capability flags, PRD A19)
+    // report their fallback as a node error; that is expected here.
+    let platform = gpu.platform_info();
+    let mut errors = Vec::new();
+    let mut unavailable = Vec::new();
+    for n in engine.network().nodes() {
+        let Some(e) = engine.error(n.id) else {
+            continue;
+        };
+        let fallback = engine.registry().get(&n.type_id).is_some_and(|s| {
+            matches!(
+                Registry::availability(s, &platform),
+                Availability::Fallback { .. }
+            )
+        });
+        if fallback {
+            unavailable.push(n.name.as_str());
+        } else {
+            errors.push(format!("{}: {e}", n.name));
+        }
+    }
+    if !unavailable.is_empty() {
+        summary += &format!(
+            ", not available on this platform: {}",
+            unavailable.join(", ")
+        );
+    }
     if !errors.is_empty() {
         bail!("node errors: {}", errors.join("; "));
     }

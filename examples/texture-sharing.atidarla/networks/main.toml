@@ -1,0 +1,42 @@
+# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 5
+
+[[node]]
+id = 0
+name = "drift"
+type = "sig.lfo"
+pos = [0.0, 0.0]
+params.frequency = 0.1
+
+[[node]]
+id = 1
+name = "pattern"
+type = "img.noise"
+pos = [0.0, 140.0]
+params.monochrome = false
+params.scale = 6.0
+params.z = { value = 0.0, bind = { node = 0, channel = "lfo" } }
+
+[[node]]
+id = 2
+name = "share_out1"
+type = "img.share_out"
+pos = [220.0, 140.0]
+inputs.in = { node = 1, output = "out" }
+params.name = "Atidarla Example"
+
+[[node]]
+id = 3
+name = "share_in1"
+type = "img.share_in"
+pos = [440.0, 140.0]
+params.name = "Atidarla Example"
+
+[[node]]
+id = 4
+name = "tint"
+type = "img.hsv_adjust"
+pos = [660.0, 140.0]
+inputs.in = { node = 3, output = "out" }
+params.hue = 120.0
