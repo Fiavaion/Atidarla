@@ -34,3 +34,4 @@ All platforms.
 ## Examples
 
 - [PNT Fountain](../../../examples/pnt-fountain.atidarla/) — `stir`
+- [PNT Solver](../../../examples/pnt-solver.atidarla/) — `churn`

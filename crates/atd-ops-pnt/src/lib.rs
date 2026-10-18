@@ -3,16 +3,27 @@
 //! (design: `docs/design/geometry-attributes.md`).
 //!
 //! Every operator ships complete (CLAUDE.md rule 7): schema with a cook-time
-//! budget, a generated docs page (`atidarla docs`), a runnable example
-//! (`examples/points.atidarla`, `examples/particles.atidarla`), GPU unit tests
-//! (`tests/`) and an offline-render class (`atd-cli` `classify`).
+//! budget, a generated docs page (`atidarla docs`), a runnable example (a
+//! test checks every operator is used in `examples/`), GPU unit tests
+//! (`tests/`) and an offline-render class (`atd-cli` `classify`). The M2
+//! batch is described in `docs/milestones/m2/pnt-batch.md`.
 //!
 //! | Operator | Reads | Writes |
 //! |---|---|---|
-//! | `pnt.points` | — | `P`, `Cd`, `id` |
+//! | `pnt.points`, `pnt.scatter` | — | `P`, `id` (`Cd`; `N` on surfaces) |
 //! | `pnt.noise` | `P` (and `v` in velocity mode) | `P` or `v` |
 //! | `pnt.particles` | its previous state (`prev` feedback or itself) | `P`, `v`, `age`, `life`, `id`, `Cd` (GPU count) |
-//! | `img.render_points` (IMG) | `P`, `Cd` | an image |
+//! | `pnt.emitter` | a state, a source's `P` (`N`, `v`) | appends `P`, `v`, `age`, `life`, `id` (`Cd`) |
+//! | forces: `pnt.attract`, `vortex`, `drag`, `gravity`, `wind`, `turbulence` | `P`, `v` | `v` |
+//! | `pnt.collide`, `pnt.integrate` | `P`, `v` | `P`, `v` |
+//! | deformers: `pnt.bend`, `twist`, `taper`, `wave`, `transform` | `P` (`v`, `N`) | `P` (`v`, `N`) |
+//! | `pnt.delete`, `subset`, `age` | rule attributes | every attribute (compacted, GPU count) |
+//! | `pnt.group` | rule attributes | `group` |
+//! | `pnt.merge`, `copy`, `sort` | every attribute | every attribute (`copynum`) |
+//! | `pnt.attribute`, `attribute_math`, `randomize`, `colour` | any attribute | any attribute (`Cd`) |
+//! | `pnt.normals`, `smooth`, `connect` (grid hash) | `P` (any) | `N`; the attribute; lines, `near`, `neardist` |
+//! | `pnt.solver`, `pnt.piece` | `init`, `prev`; an attribute or `P` | the state; `piece` |
+//! | `img.render_points` (IMG) | `P`, `Cd`, polylines | an image |
 
 mod attr;
 mod emitter;
@@ -24,6 +35,7 @@ mod particles;
 mod points;
 mod render;
 mod select;
+mod solver;
 mod sort;
 mod sources;
 mod transform;
@@ -89,6 +101,8 @@ const OPS: &[(Schema, Factory)] = &[
     (neighbours::normals_schema, neighbours::create_normals),
     (neighbours::smooth_schema, neighbours::create_smooth),
     (neighbours::connect_schema, neighbours::create_connect),
+    (solver::solver_schema, solver::create_solver),
+    (solver::piece_schema, solver::create_piece),
 ];
 
 /// Every schema this crate registers (PNT operators and Render Points).
@@ -150,5 +164,30 @@ mod tests {
                     .unwrap_or_else(|e| panic!("{}: {e}", op.type_id));
             }
         }
+    }
+
+    /// CLAUDE.md rule 7: every operator of this crate is used by an example
+    /// project (`examples/*.atidarla/networks/*.toml`).
+    #[test]
+    fn every_operator_has_an_example() {
+        let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+        let mut text = String::new();
+        for project in std::fs::read_dir(&examples).unwrap().flatten() {
+            let Ok(networks) = std::fs::read_dir(project.path().join("networks")) else {
+                continue;
+            };
+            for file in networks.flatten() {
+                text.push_str(&std::fs::read_to_string(file.path()).unwrap_or_default());
+            }
+        }
+        let missing: Vec<String> = schemas()
+            .into_iter()
+            .map(|s| s.type_id)
+            .filter(|t| !text.contains(&format!("type = \"{t}\"")))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "operators without an example: {missing:?}"
+        );
     }
 }

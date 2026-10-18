@@ -27,6 +27,7 @@ Sets a point attribute to seeded random values: uniform between Min and Max per 
 | `max` | Max | vec4 | `[1.0,1.0,1.0,1.0]` |  | uniform: highest values; normal: deviations; direction: lengths. |
 | `seed` | Seed | int | `0` | ≥ 0 | Selects different values. |
 | `by_id` | By ID | toggle | `true` |  | Seeds each point from its `id` attribute when it has one (values follow points that move in the list, such as particles), else from its number. |
+| `key` | Key Attribute | string | `""` |  | Seeds each point from this one-component attribute instead (for example `piece` from Piece, or `copynum` from Copy to Points): points with the same key get the same values, so each piece gets its own (For-Each). |
 
 ## Platforms
 
@@ -36,3 +37,4 @@ All platforms.
 
 - [PNT Constellation](../../../examples/pnt-constellation.atidarla/) — `tints`
 - [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `sizes`, `colours`
+- [PNT Solver](../../../examples/pnt-solver.atidarla/) — `cell_colours`

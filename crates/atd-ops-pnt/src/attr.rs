@@ -408,6 +408,7 @@ pub fn randomize_schema() -> OperatorSchema {
             ParamSchema::vec("max", "Max", &[1.0, 1.0, 1.0, 1.0]).help("uniform: highest values; normal: deviations; direction: lengths."),
             ParamSchema::int("seed", "Seed", 0, Some(0), None).help("Selects different values."),
             ParamSchema::toggle("by_id", "By ID", true).help("Seeds each point from its `id` attribute when it has one (values follow points that move in the list, such as particles), else from its number."),
+            ParamSchema::string("key", "Key Attribute", "").help("Seeds each point from this one-component attribute instead (for example `piece` from Piece, or `copynum` from Copy to Points): points with the same key get the same values, so each piece gets its own (For-Each)."),
         ],
         60,
     )
@@ -495,7 +496,18 @@ impl GeoOp for Randomize {
         let p = ctx.params;
         let name = attr_name(&p, "name")?;
         let ty = type_named(p.str("type"));
-        let id = if p.bool("by_id") && name != names::ID {
+        // The per-point seed: a key attribute, else `id`, else the number.
+        let key = p.str("key");
+        let id = if !key.is_empty() {
+            if key == name {
+                return Err(format!("`{key}` cannot key its own values"));
+            }
+            let (b, kt) = kit::readable_any(ctx, &g, key)?;
+            if kt.stride() != 4 {
+                return Err(format!("the key `{key}` must have one component, not {kt}"));
+            }
+            Some(b)
+        } else if p.bool("by_id") && name != names::ID {
             g.point_typed(names::ID, AttrType::U32)
                 .map(|a| a.ensure_gpu(ctx.queue, ctx.buffers).clone())
         } else {

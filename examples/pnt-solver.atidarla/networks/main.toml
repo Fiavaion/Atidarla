@@ -1,0 +1,119 @@
+# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 13
+
+[[node]]
+id = 0
+name = "disk"
+type = "pnt.scatter"
+pos = [0.0, 0.0]
+params.count = 40000
+params.radius = 0.9
+
+[[node]]
+id = 1
+name = "kick"
+type = "pnt.attribute"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+params.amplitude = 1.2
+params.frequency = 1.2
+params.name = "v"
+params.source = "noise"
+params.type = "vec3"
+params.value = [0.0, 0.0, 0.0, 0.0]
+
+[[node]]
+id = 2
+name = "cells"
+type = "pnt.piece"
+pos = [440.0, 0.0]
+inputs.in = { node = 1, output = "out" }
+params.cell = 0.3
+params.rule = "grid"
+
+[[node]]
+id = 3
+name = "cell_colours"
+type = "pnt.randomize"
+pos = [660.0, 0.0]
+inputs.in = { node = 2, output = "out" }
+params.key = "piece"
+params.min = [0.1, 0.2, 0.5, 1.0]
+
+[[node]]
+id = 4
+name = "sim"
+type = "pnt.solver"
+pos = [880.0, 0.0]
+inputs.init = { node = 3, output = "out" }
+inputs.prev = { node = 9, output = "out" }
+
+[[node]]
+id = 5
+name = "pull"
+type = "pnt.attract"
+pos = [1100.0, 0.0]
+inputs.in = { node = 4, output = "out" }
+params.strength = 2.0
+
+[[node]]
+id = 6
+name = "churn"
+type = "pnt.turbulence"
+pos = [1320.0, 0.0]
+inputs.in = { node = 5, output = "out" }
+params.amplitude = 0.6
+params.evolution = { value = 0.0, expr = "time * 0.25" }
+
+[[node]]
+id = 7
+name = "damp"
+type = "pnt.drag"
+pos = [1540.0, 0.0]
+inputs.in = { node = 6, output = "out" }
+params.amount = 0.4
+
+[[node]]
+id = 8
+name = "move"
+type = "pnt.integrate"
+pos = [1760.0, 0.0]
+inputs.in = { node = 7, output = "out" }
+
+[[node]]
+id = 9
+name = "lifetime"
+type = "pnt.age"
+pos = [1980.0, 0.0]
+inputs.in = { node = 8, output = "out" }
+params.kill_dead = false
+params.radius = 3.0
+params.region = "outside_sphere"
+
+[[node]]
+id = 10
+name = "warm"
+type = "pnt.attribute_math"
+pos = [2200.0, 0.0]
+inputs.in = { node = 9, output = "out" }
+params.a = "Cd"
+params.constant = [1.4, 1.15, 0.9, 1.0]
+
+[[node]]
+id = 11
+name = "draw"
+type = "img.render_points"
+pos = [2420.0, 0.0]
+inputs.geo = { node = 10, output = "out" }
+params.height = 2.4
+params.intensity = 0.5
+
+[[node]]
+id = 12
+name = "glow"
+type = "img.bloom"
+pos = [2640.0, 0.0]
+inputs.in = { node = 11, output = "out" }
+params.intensity = 0.5
+params.threshold = 0.5

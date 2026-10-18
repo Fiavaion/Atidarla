@@ -30,3 +30,4 @@ All platforms.
 ## Examples
 
 - [PNT Fountain](../../../examples/pnt-fountain.atidarla/) — `air`
+- [PNT Solver](../../../examples/pnt-solver.atidarla/) — `damp`

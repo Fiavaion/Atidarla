@@ -19,8 +19,9 @@ smallest correct versions, and what is left for a decision.
 ## Solver Block
 
 **Built: `pnt.solver`, the loop's entry.** Inputs `init` and `prev` (feedback). It outputs
-`init` on its first cook, while Reset is on, until Start Frame, or when `prev` is empty;
-otherwise `prev`. Wire the end of a body (for example Gravity → Collide → Integrate → Age)
+`init` on its first cook, while Reset is on, until Start Frame, or when `prev` has no geometry;
+otherwise `prev`. (A state whose live count dropped to zero on the GPU is not seen as empty:
+that would need a readback.) Wire the end of a body (for example Gravity → Collide → Integrate → Age)
 into `prev`. This is design §3.2's data contract; the body is ordinary operators.
 
 **A Solver Block as a nested network** is then a Pack whose network is `pnt.solver` plus a
