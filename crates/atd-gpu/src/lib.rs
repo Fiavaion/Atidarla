@@ -11,6 +11,7 @@ pub mod expr;
 pub mod fullscreen;
 pub mod geo;
 pub mod isf;
+pub mod mat;
 pub mod pool;
 pub mod timer;
 

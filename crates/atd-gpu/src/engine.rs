@@ -17,9 +17,13 @@
 //! A GEO result moves to its consumer instead of being shared when nothing
 //! else can read it ([`GeoCtx::take_input`]).
 //!
-//! **Status:** IMG, SIG and GEO wires (M2 pre-work for GEO). DAT results
-//! arrive with their family. Operators are created per node from an
-//! [`OpLibrary`] of factories registered by the `atd-ops-*` crates.
+//! MAT operators ([`MatOp`]) cook on the CPU into a [`Material`], plain data
+//! a renderer reads through [`CookCtx::mat_inputs`] (contract in
+//! [`crate::mat`]).
+//!
+//! **Status:** IMG, SIG, GEO and MAT wires (M2 pre-work for GEO and MAT).
+//! DAT results arrive with their family. Operators are created per node
+//! from an [`OpLibrary`] of factories registered by the `atd-ops-*` crates.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -35,6 +39,7 @@ use serde_json::Value;
 use crate::expr::ExprTable;
 
 use crate::geo::{AttrType, Attribute, BufferPool, Geometry};
+use crate::mat::Material;
 use crate::pool::{TexKey, TexturePool};
 
 /// Usage of every engine texture: render target, sampled, copyable.
@@ -422,6 +427,8 @@ pub struct CookCtx<'a> {
     pub sig_inputs: SigInputs<'a>,
     /// GEO inputs by input index, for operators that render geometry.
     pub geo_inputs: GeoInputs<'a>,
+    /// MAT inputs by input index, for operators that render geometry.
+    pub mat_inputs: MatInputs<'a>,
     /// The engine's attribute buffer pool (for uploading CPU-only inputs).
     pub buffers: &'a BufferPool,
     /// A 1×1 transparent black texture, for unconnected inputs.
@@ -536,6 +543,75 @@ impl<'a> GeoInputs<'a> {
         self.sources.is_empty()
     }
 }
+
+/// MAT inputs of a node, by input index. Does not allocate.
+#[derive(Debug, Clone, Copy)]
+pub struct MatInputs<'a> {
+    sources: &'a [Option<NodeId>],
+    mat: &'a HashMap<NodeId, Material>,
+    images: &'a HashMap<NodeId, wgpu::Texture>,
+}
+
+impl<'a> MatInputs<'a> {
+    /// Inputs given by source node per input index (for tests and tools).
+    pub fn new(
+        sources: &'a [Option<NodeId>],
+        mat: &'a HashMap<NodeId, Material>,
+        images: &'a HashMap<NodeId, wgpu::Texture>,
+    ) -> Self {
+        Self {
+            sources,
+            mat,
+            images,
+        }
+    }
+
+    /// The material on input `i`, if connected and cooked.
+    pub fn get(&self, i: usize) -> Option<&'a Material> {
+        self.sources
+            .get(i)
+            .copied()
+            .flatten()
+            .and_then(|n| self.mat.get(&n))
+    }
+
+    /// A material's texture: the current image of its texture source, if
+    /// it has one that cooked (looked up now, so never a stale image).
+    pub fn texture(&self, material: &Material) -> Option<&'a wgpu::Texture> {
+        self.images.get(&material.texture_source?)
+    }
+
+    pub fn len(&self) -> usize {
+        self.sources.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.sources.is_empty()
+    }
+}
+
+/// Everything a MAT operator needs to cook one frame. Its texture (its
+/// first IMG input) is wired by the engine, not by the operator.
+#[derive(Debug)]
+pub struct MatCtx<'a> {
+    /// This node's material from its previous cook, to overwrite.
+    pub output: &'a mut Material,
+    pub params: Params<'a>,
+    /// Whether the texture input is connected to an image.
+    pub has_texture: bool,
+    /// Seconds since the engine's time origin.
+    pub time: f64,
+    pub frame: u64,
+}
+
+/// A live MAT operator instance (one per node): fills a [`Material`] from
+/// its parameters on the CPU.
+pub trait MatOp: Send {
+    fn cook(&mut self, ctx: &mut MatCtx<'_>) -> Result<(), String>;
+}
+
+/// Creates a MAT operator instance.
+pub type MatFactory = Box<dyn Fn() -> Box<dyn MatOp> + Send + Sync>;
 
 /// Everything a GEO operator needs to cook one frame. Work goes into the
 /// frame's command encoder; buffers come from [`GeoCtx::buffers`].
@@ -715,6 +791,7 @@ pub struct OpLibrary {
     sig_factories: HashMap<String, SigFactory>,
     analysis_factories: HashMap<String, ImgToSigFactory>,
     geo_factories: HashMap<String, GeoFactory>,
+    mat_factories: HashMap<String, MatFactory>,
 }
 
 impl std::fmt::Debug for OpLibrary {
@@ -725,6 +802,7 @@ impl std::fmt::Debug for OpLibrary {
             .chain(self.sig_factories.keys())
             .chain(self.analysis_factories.keys())
             .chain(self.geo_factories.keys())
+            .chain(self.mat_factories.keys())
             .collect();
         ids.sort();
         f.debug_struct("OpLibrary").field("types", &ids).finish()
@@ -770,11 +848,22 @@ impl OpLibrary {
         self.geo_factories.insert(type_id.into(), Box::new(factory));
     }
 
+    /// Registers a MAT operator implementation (an operator whose first
+    /// output is a `MAT` socket).
+    pub fn add_mat(
+        &mut self,
+        type_id: impl Into<String>,
+        factory: impl Fn() -> Box<dyn MatOp> + Send + Sync + 'static,
+    ) {
+        self.mat_factories.insert(type_id.into(), Box::new(factory));
+    }
+
     pub fn contains(&self, type_id: &str) -> bool {
         self.factories.contains_key(type_id)
             || self.sig_factories.contains_key(type_id)
             || self.analysis_factories.contains_key(type_id)
             || self.geo_factories.contains_key(type_id)
+            || self.mat_factories.contains_key(type_id)
     }
 }
 
@@ -817,9 +906,11 @@ pub struct Engine {
     sig_ops: HashMap<NodeId, Box<dyn SigOp>>,
     analysis_ops: HashMap<NodeId, Box<dyn ImgToSigOp>>,
     geo_ops: HashMap<NodeId, Box<dyn GeoOp>>,
+    mat_ops: HashMap<NodeId, Box<dyn MatOp>>,
     results: HashMap<NodeId, wgpu::Texture>,
     sig: HashMap<NodeId, Channels>,
     geo: HashMap<NodeId, Geometry>,
+    mat: HashMap<NodeId, Material>,
     errors: HashMap<NodeId, String>,
     pool: TexturePool,
     buffers: BufferPool,
@@ -835,6 +926,7 @@ pub struct Engine {
     inputs: Vec<Option<wgpu::Texture>>,
     sig_sources: Vec<Option<NodeId>>,
     geo_sources: Vec<Option<NodeId>>,
+    mat_sources: Vec<Option<NodeId>>,
     handover: Vec<bool>,
     /// Nodes that asked to cook again next frame ([`CookCtx::cook_again`]).
     again: Vec<NodeId>,
@@ -897,9 +989,11 @@ impl Engine {
             sig_ops: HashMap::new(),
             analysis_ops: HashMap::new(),
             geo_ops: HashMap::new(),
+            mat_ops: HashMap::new(),
             results: HashMap::new(),
             sig: HashMap::new(),
             geo: HashMap::new(),
+            mat: HashMap::new(),
             errors: HashMap::new(),
             pool,
             buffers,
@@ -912,6 +1006,7 @@ impl Engine {
             inputs: Vec::new(),
             sig_sources: Vec::new(),
             geo_sources: Vec::new(),
+            mat_sources: Vec::new(),
             handover: Vec::new(),
             again: Vec::new(),
             released: Vec::new(),
@@ -1093,9 +1188,11 @@ impl Engine {
             .chain(self.sig_ops.keys())
             .chain(self.analysis_ops.keys())
             .chain(self.geo_ops.keys())
+            .chain(self.mat_ops.keys())
             .chain(self.results.keys())
             .chain(self.sig.keys())
             .chain(self.geo.keys())
+            .chain(self.mat.keys())
             .copied()
             .filter(|id| !alive(id))
             .collect();
@@ -1104,6 +1201,8 @@ impl Engine {
             self.sig_ops.remove(&id);
             self.analysis_ops.remove(&id);
             self.geo_ops.remove(&id);
+            self.mat_ops.remove(&id);
+            self.mat.remove(&id);
             self.sig.remove(&id);
             // Its buffers return to the pool, reusable after the next submit.
             self.geo.remove(&id);
@@ -1149,9 +1248,11 @@ impl Engine {
             sig_ops,
             analysis_ops,
             geo_ops,
+            mat_ops,
             results,
             sig,
             geo,
+            mat,
             errors,
             pool,
             buffers,
@@ -1163,6 +1264,7 @@ impl Engine {
             inputs,
             sig_sources,
             geo_sources,
+            mat_sources,
             handover,
             released,
             again,
@@ -1226,6 +1328,67 @@ impl Engine {
                 .outputs
                 .first()
                 .is_some_and(|o| o.wire == WireType::Geo);
+            let is_mat = schema
+                .outputs
+                .first()
+                .is_some_and(|o| o.wire == WireType::Mat);
+
+            if is_mat {
+                if let std::collections::hash_map::Entry::Vacant(slot) = mat_ops.entry(id) {
+                    match library.mat_factories.get(&node.type_id) {
+                        Some(f) => {
+                            slot.insert(f());
+                        }
+                        None => {
+                            errors.insert(
+                                id,
+                                format!("no MAT implementation for `{}`", node.type_id),
+                            );
+                            mat.remove(&id);
+                            scheduler.record(id, start.elapsed());
+                            continue;
+                        }
+                    }
+                }
+                // The texture is the first IMG input; the renderer looks its
+                // image up when it draws.
+                let texture_source = schema
+                    .inputs
+                    .iter()
+                    .find(|s| s.wire == WireType::Img)
+                    .and_then(|socket| {
+                        net.inputs_of(id)
+                            .find(|(name, _)| *name == socket.name)
+                            .map(|(_, src)| src.node)
+                    });
+                let mut out = mat.remove(&id).unwrap_or_default();
+                let mut ctx = MatCtx {
+                    output: &mut out,
+                    params: Params {
+                        net,
+                        registry,
+                        sig,
+                        node: id,
+                        project_dir: project_dir.as_deref(),
+                        exprs: Some(exprs),
+                        mode,
+                    },
+                    has_texture: texture_source.is_some_and(|s| results.contains_key(&s)),
+                    time,
+                    frame: *frame,
+                };
+                let op = mat_ops.get_mut(&id).expect("instance created above");
+                match op.cook(&mut ctx) {
+                    Ok(()) => settle(errors, exprs, id),
+                    Err(e) => {
+                        errors.insert(id, e);
+                    }
+                }
+                out.texture_source = texture_source;
+                mat.insert(id, out);
+                scheduler.record(id, start.elapsed());
+                continue;
+            }
 
             if is_geo {
                 if let std::collections::hash_map::Entry::Vacant(slot) = geo_ops.entry(id) {
@@ -1450,6 +1613,7 @@ impl Engine {
             inputs.clear();
             sig_sources.clear();
             geo_sources.clear();
+            mat_sources.clear();
             // Size of the first connected IMG input (feedback inputs carry
             // last frame's image and do not set the size).
             let mut input_size = None;
@@ -1469,6 +1633,7 @@ impl Engine {
                 inputs.push(tex);
                 sig_sources.push(src.filter(|_| socket.wire == WireType::Sig));
                 geo_sources.push(src.filter(|_| socket.wire == WireType::Geo));
+                mat_sources.push(src.filter(|_| socket.wire == WireType::Mat));
             }
 
             let project = (config.width, config.height);
@@ -1515,6 +1680,11 @@ impl Engine {
                 geo_inputs: GeoInputs {
                     sources: geo_sources,
                     geo,
+                },
+                mat_inputs: MatInputs {
+                    sources: mat_sources,
+                    mat,
+                    images: results,
                 },
                 buffers,
                 black,
@@ -1602,7 +1772,9 @@ impl Engine {
         self.sig_ops.clear();
         self.analysis_ops.clear();
         self.geo_ops.clear();
+        self.mat_ops.clear();
         self.sig.clear();
+        self.mat.clear();
         // Buffers return to the pool, reusable after the next submit.
         self.geo.clear();
         self.errors.clear();
@@ -1655,6 +1827,11 @@ impl Engine {
     /// (request the node to keep its result, as a viewer does).
     pub fn geometry(&self, node: NodeId) -> Option<&Geometry> {
         self.geo.get(&node)
+    }
+
+    /// The latest material of a MAT node.
+    pub fn material(&self, node: NodeId) -> Option<&Material> {
+        self.mat.get(&node)
     }
 
     /// The last cook error of `node`, if any.
