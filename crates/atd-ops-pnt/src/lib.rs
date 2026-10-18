@@ -15,6 +15,7 @@
 //! | `img.render_points` (IMG) | `P`, `Cd` | an image |
 
 mod attr;
+mod emitter;
 mod field;
 mod kit;
 mod noise;
@@ -22,6 +23,8 @@ mod particles;
 mod points;
 mod render;
 mod select;
+mod sort;
+mod sources;
 mod transform;
 
 use atd_core::registry::{OpFamily, OperatorSchema, ParamSchema, Registry, SocketSchema, WireType};
@@ -77,6 +80,11 @@ const OPS: &[(Schema, Factory)] = &[
     (attr::math_schema, attr::create_math),
     (attr::randomize_schema, attr::create_randomize),
     (attr::colour_schema, attr::create_colour),
+    (sources::scatter_schema, sources::create_scatter),
+    (sources::merge_schema, sources::create_merge),
+    (sources::copy_schema, sources::create_copy),
+    (emitter::schema, emitter::create),
+    (sort::schema, sort::create),
 ];
 
 /// Every schema this crate registers (PNT operators and Render Points).

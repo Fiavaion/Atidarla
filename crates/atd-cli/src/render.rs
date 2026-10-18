@@ -461,10 +461,11 @@ pub fn classify(type_id: &str) -> Option<Class> {
         "img.render_points" | "pnt.points" | "pnt.noise" => Pure,
         // The M2 PNT batch (`docs/milestones/m2/pnt-batch.md`).
         "pnt.age" | "pnt.attract" | "pnt.attribute" | "pnt.attribute_math" | "pnt.bend"
-        | "pnt.collide" | "pnt.colour" | "pnt.delete" | "pnt.drag" | "pnt.gravity"
-        | "pnt.group" | "pnt.integrate" | "pnt.randomize" | "pnt.subset" | "pnt.taper"
-        | "pnt.transform" | "pnt.turbulence" | "pnt.twist" | "pnt.vortex" | "pnt.wave"
-        | "pnt.wind" => Pure,
+        | "pnt.collide" | "pnt.colour" | "pnt.copy" | "pnt.delete" | "pnt.drag" | "pnt.gravity"
+        | "pnt.group" | "pnt.integrate" | "pnt.merge" | "pnt.randomize" | "pnt.scatter"
+        | "pnt.sort" | "pnt.subset" | "pnt.taper" | "pnt.transform" | "pnt.turbulence"
+        | "pnt.twist" | "pnt.vortex" | "pnt.wave" | "pnt.wind" => Pure,
+        "pnt.emitter" => Stateful,
         "pnt.particles" => Stateful,
         "img.render" | "msh.platonic" => Pure,
         "mat.line" | "mat.matcap" | "mat.pbr" | "mat.point_sprite" | "mat.toon" | "mat.unlit" => {

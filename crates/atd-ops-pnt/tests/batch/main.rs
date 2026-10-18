@@ -6,6 +6,7 @@ mod attributes;
 mod fields;
 mod neighbours;
 mod shaping;
+mod sources;
 
 use std::sync::{Mutex, MutexGuard};
 
