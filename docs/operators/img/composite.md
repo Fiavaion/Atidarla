@@ -34,6 +34,7 @@ All platforms.
 - [Compute Shaders](../../../examples/compute-shaders.atidarla/) — `glow`, `screen`
 - [Image processing](../../../examples/image-processing.atidarla/) — `outlined`, `masked`
 - [Keying](../../../examples/keying.atidarla/) — `over`
+- [Scatter to Iso Surface](../../../examples/mesh-scatter-iso.atidarla/) — `mix`, `out`
 - [Neural Growth](../../../examples/neural-growth.atidarla/) — `screen`
 - [Pack: Kaleidoscope Tunnel](../../../examples/pack-kaleido-tunnel.atidarla/) — `together`
 - [Points](../../../examples/points.atidarla/) — `mix`
