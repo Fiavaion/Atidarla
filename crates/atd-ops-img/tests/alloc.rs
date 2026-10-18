@@ -287,6 +287,11 @@ fn every_img_operator_steady_state_allocations() {
         // 2.1 on WARP, depending on how often the worker is busy. See also
         // the Spout test below.
         "img.share_out" | "img.share_in" => 3.0,
+        // Several dispatches a frame, each recorded by wgpu with about 3.6
+        // allocations on NVIDIA DX12 (compute 3.8x typical, neural CA 8x) and
+        // more on the CI adapters (compute 3.3x on WARP, 5.1x on Metal).
+        "img.compute" => 8.0,
+        "img.nca" => 24.0,
         _ => 2.5,
     };
     let mut over = Vec::new();
@@ -422,8 +427,9 @@ fn compute_and_nca_steady_state_allocations() {
     // wgpu allocates while recording each pass and each dispatch (about 3.6
     // per dispatch on NVIDIA DX12, where one pass is 15, compute 57 and the
     // neural CA 119); creating bind groups or views per frame would add far
-    // more. Bound: two passes plus half a pass per dispatch.
-    let bound = |dispatches: f64| one_pass * (2.0 + 0.5 * dispatches);
+    // more. Bound: two passes plus 1.2 passes per dispatch: Metal on the CI
+    // runner measured compute at 88 where half a pass per dispatch allowed 78.
+    let bound = |dispatches: f64| one_pass * (2.0 + 1.2 * dispatches);
     assert!(
         compute_n <= bound(5.0),
         "compute: {compute_n:.1} > {:.1}",
