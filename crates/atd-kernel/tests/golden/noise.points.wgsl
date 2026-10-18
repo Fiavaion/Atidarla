@@ -217,27 +217,27 @@ fn atd_simplex3(p: vec3f) -> f32 {
     let x3 = x0 - vec3f(0.5f);
     let c = vec3i(i);
     var n = 0.0f;
-    let t0 = 0.6f - dot(x0, x0);
+    let t0 = 0.5f - dot(x0, x0);
     if (t0 > 0.0f) {
         let q = t0 * t0;
         n = n + q * q * dot(atd_grad3(atd_hash3(c)), x0);
     }
-    let t1 = 0.6f - dot(x1, x1);
+    let t1 = 0.5f - dot(x1, x1);
     if (t1 > 0.0f) {
         let q = t1 * t1;
         n = n + q * q * dot(atd_grad3(atd_hash3(c + vec3i(i1))), x1);
     }
-    let t2 = 0.6f - dot(x2, x2);
+    let t2 = 0.5f - dot(x2, x2);
     if (t2 > 0.0f) {
         let q = t2 * t2;
         n = n + q * q * dot(atd_grad3(atd_hash3(c + vec3i(i2))), x2);
     }
-    let t3 = 0.6f - dot(x3, x3);
+    let t3 = 0.5f - dot(x3, x3);
     if (t3 > 0.0f) {
         let q = t3 * t3;
         n = n + q * q * dot(atd_grad3(atd_hash3(c + vec3i(1i, 1i, 1i))), x3);
     }
-    return 32.0f * n;
+    return 76.0f * n;
 }
 
 // Distance to the nearest feature point (F1), one point per cell.

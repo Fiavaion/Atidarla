@@ -278,7 +278,7 @@ compares them on a grid):
 | Helper | Arguments | Result | Range |
 |---|---|---|---|
 | `perlin(p)` | `vec2` or `vec3` | `float` | about −1..1 (gradient noise, quintic fade) |
-| `simplex(p)` | `vec2` or `vec3` | `float` | about −1..1 |
+| `simplex(p)` | `vec2` or `vec3` | `float` | about −1..1 (Gustavson, kernel radius 0.5, so continuous across simplex edges) |
 | `worley(p)` | `vec2` or `vec3` | `float` | distance to the nearest feature point (F1), 0..~1.5 |
 | `curlnoise(p)` | `vec3` | `vec3` | curl of a Perlin vector potential (divergence-free) |
 | `rand(x)` | `int`, `float`, `vec2`, `vec3` | `float` | 0 ≤ r < 1, a hash of the bits of `x` |

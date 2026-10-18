@@ -243,7 +243,7 @@ pub fn simplex3(p: V3) -> f32 {
     let corners = [(x0, [0, 0, 0]), (x1, ii(i1)), (x2, ii(i2)), (x3, [1, 1, 1])];
     let mut n = 0.0f32;
     for (x, d) in corners {
-        let t = 0.6 - dot3(x, x);
+        let t = 0.5 - dot3(x, x);
         if t > 0.0 {
             let q = t * t;
             let h = hash3([
@@ -254,7 +254,7 @@ pub fn simplex3(p: V3) -> f32 {
             n += q * q * dot3(grad3(h), x);
         }
     }
-    32.0 * n
+    76.0 * n
 }
 
 fn u01v3(h: [u32; 3]) -> V3 {
