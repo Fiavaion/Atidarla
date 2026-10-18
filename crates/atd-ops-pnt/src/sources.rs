@@ -272,10 +272,9 @@ fn main() {
 fn place_source(ty: &str) -> String {
     format!(
         "{}
-@group(0) @binding(0) var<storage, read> src_hdr: GeoHeader;
-@group(0) @binding(1) var<storage, read> slot: vec4u;
-@group(0) @binding(2) var<storage, read> src: array<{ty}>;
-@group(0) @binding(3) var<storage, read_write> dst: array<{ty}>;
+@group(0) @binding(0) var<storage, read> slot: vec4u;
+@group(0) @binding(1) var<storage, read> src: array<{ty}>;
+@group(0) @binding(2) var<storage, read_write> dst: array<{ty}>;
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3u) {{
     let i = gid.x;
@@ -295,6 +294,8 @@ pub struct Merge {
     slots: wgpu::Buffer,
     slot_views: [wgpu::Buffer; MERGE_INPUTS],
     empty: wgpu::Buffer,
+    /// Bound by the header kernel; copied into the pooled output header.
+    work: wgpu::Buffer,
 }
 
 pub fn create_merge(device: &wgpu::Device) -> Box<dyn GeoOp> {
@@ -305,7 +306,7 @@ pub fn create_merge(device: &wgpu::Device) -> Box<dyn GeoOp> {
             label,
             &place_source(ty),
             "main",
-            &[Read, Read, Read, ReadWrite],
+            &[Read, Read, ReadWrite],
         )
     };
     let slots = storage(device, "pnt.merge.slots", 64);
@@ -326,6 +327,7 @@ pub fn create_merge(device: &wgpu::Device) -> Box<dyn GeoOp> {
         slot_views: std::array::from_fn(|_| storage(device, "pnt.merge.slot", 16)),
         slots,
         empty: empty_header(device),
+        work: kit::work_header(device),
     })
 }
 
@@ -379,7 +381,7 @@ impl GeoOp for Merge {
         });
         let gpu_counted = inputs.iter().flatten().any(Geometry::is_gpu_counted);
         let header = kit::new_header(ctx);
-        let hdr = header.buffer().clone();
+        let hdr = self.work.clone();
         self.caps
             .write(ctx.queue, &atd_gpu::geo::kernels::words(caps));
         // The result's attributes (zeroed where an input lacks one).
@@ -420,6 +422,8 @@ impl GeoOp for Merge {
             ctx.encoder
                 .copy_buffer_to_buffer(&self.slots, k as u64 * 16, view, 0, 16);
         }
+        ctx.encoder
+            .copy_buffer_to_buffer(&hdr, 0, header.buffer(), 0, header::BYTES);
         let mut p = pass(ctx.encoder);
         for (k, g) in inputs.iter().enumerate() {
             let Some(g) = g else { continue };
@@ -435,7 +439,7 @@ impl GeoOp for Merge {
                 self.place[place_index(ty.stride())].dispatch_in(
                     device,
                     &mut p,
-                    &[&headers[k], &self.slot_views[k], src, dst],
+                    &[&self.slot_views[k], src, dst],
                     Work::Elements(caps[k]),
                 );
             }
@@ -576,6 +580,8 @@ pub struct Copy {
     pos: PointKernel,
     extra: PointKernel,
     dummy: wgpu::Buffer,
+    /// Bound by the kernels; copied into the pooled output header.
+    work: wgpu::Buffer,
     names: [Arc<str>; 3],
 }
 
@@ -619,6 +625,7 @@ pub fn create_copy(device: &wgpu::Device) -> Box<dyn GeoOp> {
             16,
         ),
         dummy: storage(device, "pnt.copy.unused", 256),
+        work: kit::work_header(device),
         names: [names::P, "copynum", names::CD].map(Arc::from),
     })
 }
@@ -660,7 +667,8 @@ impl GeoOp for Copy {
             return Err(format!("more than {MAX_ATTRS} point attributes"));
         }
         let header = kit::new_header(ctx);
-        let hdr = header.buffer().clone();
+        let hdr = self.work.clone();
+        let out_hdr = header.buffer().clone();
         let mut out = Geometry::new();
         if src.is_gpu_counted() || tmpl.is_gpu_counted() {
             out.set_gpu_counted(total, header);
@@ -760,6 +768,8 @@ impl GeoOp for Copy {
             &[&src_hdr, &copynum_buf, &cd_buf, tc.as_ref().unwrap_or(d)],
         );
         drop(ps);
+        ctx.encoder
+            .copy_buffer_to_buffer(&hdr, 0, &out_hdr, 0, header::BYTES);
         *ctx.output = out;
         Ok(())
     }

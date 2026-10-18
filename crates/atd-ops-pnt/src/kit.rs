@@ -343,6 +343,21 @@ pub fn typed_access(name: &str, d: &str, read_only: bool) -> String {
     s
 }
 
+/// An operator's own header-sized buffer for a kernel to write each frame
+/// and bind (a fixed buffer keeps bind groups cached), copied into the
+/// pooled output header afterwards. Usable for indirect dispatches.
+pub fn work_header(device: &wgpu::Device) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("pnt.work_header"),
+        size: atd_core::geo::align_up(header::BYTES),
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::INDIRECT,
+        mapped_at_creation: false,
+    })
+}
+
 /// A fresh header from the pool (written by a kernel this frame).
 pub fn new_header(ctx: &GeoCtx<'_>) -> Arc<GeoBuffer> {
     Arc::new(ctx.buffers.attr(header::BYTES))

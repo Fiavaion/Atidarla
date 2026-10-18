@@ -128,6 +128,8 @@ pub struct Emitter {
     motion: PointKernel,
     life: PointKernel,
     dummy: wgpu::Buffer,
+    /// Bound by the kernels; copied into the pooled output header.
+    work: wgpu::Buffer,
     carry: f64,
     emitted: u32,
     started: bool,
@@ -165,6 +167,7 @@ pub fn create(device: &wgpu::Device) -> Box<dyn GeoOp> {
             usage: wgpu::BufferUsages::STORAGE,
             mapped_at_creation: false,
         }),
+        work: kit::work_header(device),
         carry: 0.0,
         emitted: 0,
         started: false,
@@ -225,7 +228,7 @@ impl GeoOp for Emitter {
             None
         };
         let header = kit::new_header(ctx);
-        let hdr = header.buffer().clone();
+        let hdr = self.work.clone();
         self.append.write(
             ctx.queue,
             &atd_gpu::geo::kernels::words([append, capacity, 0, 0]),
@@ -289,6 +292,8 @@ impl GeoOp for Emitter {
         self.life
             .run_in(device, &mut ps, &hdr, &[&hs, &age, &life, &id, cd]);
         drop(ps);
+        ctx.encoder
+            .copy_buffer_to_buffer(&hdr, 0, header.buffer(), 0, header::BYTES);
         g.set_gpu_counted(capacity, header);
         *ctx.output = g;
         Ok(())

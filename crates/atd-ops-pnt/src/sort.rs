@@ -321,6 +321,8 @@ pub struct Sort {
     mapped: Kernel,
     gather: Gather,
     dummy: wgpu::Buffer,
+    /// Bound by the kernels; copied into the pooled output header.
+    work: wgpu::Buffer,
 }
 
 pub fn create(device: &wgpu::Device) -> Box<dyn GeoOp> {
@@ -343,6 +345,7 @@ pub fn create(device: &wgpu::Device) -> Box<dyn GeoOp> {
             usage: wgpu::BufferUsages::STORAGE,
             mapped_at_creation: false,
         }),
+        work: kit::work_header(device),
     })
 }
 
@@ -408,7 +411,7 @@ impl GeoOp for Sort {
             g.set_point(out);
         }
         let header = kit::new_header(ctx);
-        let hdr = header.buffer().clone();
+        let hdr = self.work.clone();
         let d = &self.dummy;
         let id_b = id.as_ref().unwrap_or(d);
         let device = ctx.device;
@@ -431,6 +434,8 @@ impl GeoOp for Sort {
             self.gather.record(device, &mut ps, m, *stride, src, dst);
         }
         drop(ps);
+        ctx.encoder
+            .copy_buffer_to_buffer(&hdr, 0, header.buffer(), 0, header::BYTES);
         if g.is_gpu_counted() {
             g.set_gpu_counted(n, header);
         } else {

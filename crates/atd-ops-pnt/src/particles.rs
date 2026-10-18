@@ -219,6 +219,10 @@ pub struct Particles {
     emit_params: Uniforms,
     integrate_params: Uniforms,
     sized: Option<Sized>,
+    /// The frame's header as the kernels write and bind it (a fixed buffer,
+    /// so their bind groups stay cached however the pool hands out headers);
+    /// copied into the pooled output header at the end.
+    work: wgpu::Buffer,
     /// Fractional emissions carried to the next frame.
     carry: f64,
     /// Emission number of the next particle (wraps; ids are unique among
@@ -265,6 +269,7 @@ pub fn create(device: &wgpu::Device) -> Box<dyn GeoOp> {
         emit_params: Uniforms::new(device, "pnt.particles.emit", 64),
         integrate_params: Uniforms::new(device, "pnt.particles.integrate", 96),
         sized: None,
+        work: crate::kit::work_header(device),
         carry: 0.0,
         emitted: 0,
         restart: true,
@@ -361,7 +366,7 @@ impl GeoOp for Particles {
         let sized = self.sized.as_ref().expect("sized above");
         let flags = &sized.flags;
         let new_header = Arc::new(ctx.buffers.attr(header::BYTES));
-        let hdr = new_header.buffer().clone();
+        let hdr = self.work.clone();
 
         // The new generation, from the pool (cleared offline).
         let mut attrs: [Option<Attribute>; 5] = Default::default();
@@ -476,6 +481,8 @@ impl GeoOp for Particles {
             Work::Header(&hdr),
         );
         drop(pass);
+        ctx.encoder
+            .copy_buffer_to_buffer(&hdr, 0, new_header.buffer(), 0, header::BYTES);
 
         // The new generation replaces the old, whose buffers return to the
         // pool once this frame is submitted.

@@ -219,6 +219,10 @@ fn dummy(device: &wgpu::Device) -> wgpu::Buffer {
 pub(crate) struct Compact {
     sized: Option<(u32, Compactor, wgpu::Buffer)>,
     gather: Gather,
+    /// The compaction's header: the kernels bind this fixed buffer (so their
+    /// bind groups do not change with the pooled output header, which gets a
+    /// copy).
+    work: wgpu::Buffer,
 }
 
 impl Compact {
@@ -226,6 +230,7 @@ impl Compact {
         Self {
             sized: None,
             gather: Gather::new(device),
+            work: kit::work_header(device),
         }
     }
 
@@ -270,15 +275,17 @@ impl Compact {
         }
         let device = ctx.device;
         let mut p = pass(ctx.encoder);
-        compactor.record(device, ctx.queue, &mut p, flags, 0, &hdr);
+        compactor.record(device, ctx.queue, &mut p, flags, 0, &self.work);
         let map = GatherMap {
-            header: &hdr,
+            header: &self.work,
             map: compactor.map(),
         };
         for (src, dst, stride) in moves.iter().flatten() {
             self.gather.record(device, &mut p, map, *stride, src, dst);
         }
         drop(p);
+        ctx.encoder
+            .copy_buffer_to_buffer(&self.work, 0, &hdr, 0, atd_core::geo::header::BYTES);
         g.set_gpu_counted(capacity, header);
         drop_prims(g);
         Ok(())
