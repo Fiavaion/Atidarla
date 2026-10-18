@@ -51,6 +51,88 @@ fn lcg(n: usize, seed: u32) -> Vec<u32> {
         .collect()
 }
 
+/// The shared noise library: `atd_gnoise`'s analytic gradient matches
+/// central differences of its value, and `atd_curl` is divergence-free.
+#[test]
+fn gradient_noise_derivatives_and_curl_are_right() {
+    use atd_gpu::geo::kernels::{Bind, Kernel, Work};
+    let Some((device, queue)) = gpu() else { return };
+    // Per sample: value, gradient, the value at ±h along each axis, and the
+    // divergence of the curl by central differences.
+    let src = format!(
+        "{}{}
+@group(0) @binding(0) var<storage, read> pts: array<vec4f>;
+@group(0) @binding(1) var<storage, read_write> out: array<array<vec4f, 3>>;
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3u) {{
+    let i = gid.x;
+    if (i >= arrayLength(&pts)) {{ return; }}
+    let p = pts[i].xyz;
+    let h = 1e-3;
+    let n = atd_gnoise(p, 7u);
+    let dx = (atd_gnoise(p + vec3f(h, 0.0, 0.0), 7u).x - atd_gnoise(p - vec3f(h, 0.0, 0.0), 7u).x) / (2.0 * h);
+    let dy = (atd_gnoise(p + vec3f(0.0, h, 0.0), 7u).x - atd_gnoise(p - vec3f(0.0, h, 0.0), 7u).x) / (2.0 * h);
+    let dz = (atd_gnoise(p + vec3f(0.0, 0.0, h), 7u).x - atd_gnoise(p - vec3f(0.0, 0.0, h), 7u).x) / (2.0 * h);
+    let div = (atd_curl(p + vec3f(h, 0.0, 0.0), 3u).x - atd_curl(p - vec3f(h, 0.0, 0.0), 3u).x
+        + atd_curl(p + vec3f(0.0, h, 0.0), 3u).y - atd_curl(p - vec3f(0.0, h, 0.0), 3u).y
+        + atd_curl(p + vec3f(0.0, 0.0, h), 3u).z - atd_curl(p - vec3f(0.0, 0.0, h), 3u).z) / (2.0 * h);
+    out[i][0] = n;
+    out[i][1] = vec4f(dx, dy, dz, div);
+    out[i][2] = vec4f(atd_curl(p, 3u), 0.0);
+}}
+",
+        atd_gpu::geo::wgsl::HASH,
+        atd_gpu::geo::wgsl::NOISE
+    );
+    let kernel = Kernel::new(
+        &device,
+        "noise-test",
+        &src,
+        "main",
+        &[Bind::Read, Bind::ReadWrite],
+    );
+    let n = 512;
+    let pts: Vec<u32> = lcg(n * 4, 5)
+        .chunks_exact(4)
+        .flat_map(|c| {
+            // Points in [-4, 4)³, avoiding exact lattice planes.
+            let f = |v: u32| (v % 80_000) as f32 / 10_000.0 - 4.0 + 0.000_37;
+            [f(c[0]), f(c[1]), f(c[2]), 0.0].map(f32::to_bits)
+        })
+        .collect();
+    let pts_buf = buffer(&device, &pts);
+    let out = buffer(&device, &vec![0; n * 12]);
+    let mut encoder = device.create_command_encoder(&Default::default());
+    kernel.dispatch(
+        &device,
+        &mut encoder,
+        &[&pts_buf, &out],
+        Work::Groups(n as u32 / 64),
+    );
+    queue.submit([encoder.finish()]);
+    let r: Vec<f32> = read(&device, &queue, &out, n * 12)
+        .into_iter()
+        .map(f32::from_bits)
+        .collect();
+    let (mut worst_grad, mut worst_div, mut range, mut curl_max) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+    for s in r.chunks_exact(12) {
+        let (value, grad, fd, div) = (s[0], &s[1..4], &s[4..7], s[7]);
+        for (g, f) in grad.iter().zip(fd) {
+            worst_grad = worst_grad.max((g - f).abs());
+        }
+        worst_div = worst_div.max(div.abs());
+        range = range.max(value.abs());
+        curl_max = curl_max.max(s[8..11].iter().map(|c| c * c).sum::<f32>().sqrt());
+    }
+    eprintln!(
+        "noise: |value| ≤ {range}, gradient error ≤ {worst_grad}, |div curl| ≤ {worst_div}, |curl| ≤ {curl_max}"
+    );
+    assert!(range > 0.1 && range < 1.5, "value range {range}");
+    assert!(worst_grad < 2e-2, "analytic gradient off by {worst_grad}");
+    assert!(worst_div < 2e-2, "curl divergence {worst_div}");
+    assert!(curl_max > 0.1, "the curl field is not zero");
+}
+
 #[test]
 fn scan_matches_the_cpu_at_every_level_count() {
     let Some((device, queue)) = gpu() else { return };
@@ -60,7 +142,9 @@ fn scan_matches_the_cpu_at_every_level_count() {
         let dst = buffer(&device, &vec![0; n]);
         let scan = Scan::new(&device, n as u32);
         let mut encoder = device.create_command_encoder(&Default::default());
-        let total = scan.record(&device, &mut encoder, &src, &dst).clone();
+        let mut pass = atd_gpu::geo::kernels::pass(&mut encoder);
+        let total = scan.record(&device, &mut pass, &src, &dst).clone();
+        drop(pass);
         queue.submit([encoder.finish()]);
         let mut expected = Vec::with_capacity(n);
         let mut sum = 0u32;
@@ -99,14 +183,16 @@ fn compaction_keeps_order_and_gather_moves_values() {
     );
     let append = 1000;
     let mut encoder = device.create_command_encoder(&Default::default());
-    compactor.record(&device, &queue, &mut encoder, &flag_buf, append, &hdr);
+    let mut pass = atd_gpu::geo::kernels::pass(&mut encoder);
+    compactor.record(&device, &queue, &mut pass, &flag_buf, append, &hdr);
     let map = GatherMap {
         header: &hdr,
         map: compactor.map(),
     };
-    gather.record(&device, &mut encoder, map, 4, &s4, &d4);
-    gather.record(&device, &mut encoder, map, 8, &s8, &d8);
-    gather.record(&device, &mut encoder, map, 16, &s16, &d16);
+    gather.record(&device, &mut pass, map, 4, &s4, &d4);
+    gather.record(&device, &mut pass, map, 8, &s8, &d8);
+    gather.record(&device, &mut pass, map, 16, &s16, &d16);
+    drop(pass);
     queue.submit([encoder.finish()]);
 
     let h = read(&device, &queue, &hdr, 12);
@@ -139,7 +225,9 @@ fn compaction_keeps_order_and_gather_moves_values() {
     // Appending past the capacity is clamped.
     let all = buffer(&device, &vec![1; n]);
     let mut encoder = device.create_command_encoder(&Default::default());
-    compactor.record(&device, &queue, &mut encoder, &all, 5, &hdr);
+    let mut pass = atd_gpu::geo::kernels::pass(&mut encoder);
+    compactor.record(&device, &queue, &mut pass, &all, 5, &hdr);
+    drop(pass);
     queue.submit([encoder.finish()]);
     let h = read(&device, &queue, &hdr, 3);
     assert_eq!(h, [n as u32, n as u32, n as u32]);

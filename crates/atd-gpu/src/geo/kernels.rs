@@ -20,12 +20,75 @@ const CACHE: usize = 32;
 /// buffers alive).
 const STALE: u64 = 4 * CACHE as u64;
 
+static CREATED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Bind groups every [`BindGroupCache`] in the process has created (a
+/// steady-state frame must not raise it; spikes and benches check it).
+pub fn bind_groups_created_total() -> usize {
+    CREATED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Bind groups of whole buffers, keyed by buffer identity (an LRU like
+/// `FullscreenPass`'s): pooled buffers cycle among a few generations, so a
+/// steady state finds its bind groups here and creates none.
 #[derive(Debug, Default)]
-struct BindCache {
+pub struct BindGroupCache {
     /// (buffers, bind group, last use), most recently used last.
     entries: Vec<(Vec<wgpu::Buffer>, wgpu::BindGroup, u64)>,
     uses: u64,
     created: usize,
+}
+
+impl BindGroupCache {
+    /// The bind group of `buffers` (bindings 0, 1, … in order) for `layout`,
+    /// created on a miss. All lookups must use the same layout.
+    pub fn get(
+        &mut self,
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        buffers: &[&wgpu::Buffer],
+    ) -> wgpu::BindGroup {
+        self.uses += 1;
+        let now = self.uses;
+        self.entries.retain(|e| now - e.2 <= STALE);
+        if let Some(i) = self
+            .entries
+            .iter()
+            .position(|(key, _, _)| key.iter().eq(buffers.iter().copied()))
+        {
+            let mut hit = self.entries.remove(i);
+            hit.2 = now;
+            let bind = hit.1.clone();
+            self.entries.push(hit);
+            return bind;
+        }
+        let entries: Vec<wgpu::BindGroupEntry<'_>> = buffers
+            .iter()
+            .enumerate()
+            .map(|(i, b)| wgpu::BindGroupEntry {
+                binding: i as u32,
+                resource: b.as_entire_binding(),
+            })
+            .collect();
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout,
+            entries: &entries,
+        });
+        self.created += 1;
+        CREATED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if self.entries.len() == CACHE {
+            self.entries.remove(0);
+        }
+        let key = buffers.iter().map(|b| (*b).clone()).collect();
+        self.entries.push((key, bind.clone(), now));
+        bind
+    }
+
+    /// Bind groups created so far.
+    pub fn created(&self) -> usize {
+        self.created
+    }
 }
 
 /// How many workgroups a dispatch runs.
@@ -57,7 +120,33 @@ pub enum Bind {
 pub struct Kernel {
     pipeline: wgpu::ComputePipeline,
     layout: wgpu::BindGroupLayout,
-    cache: Mutex<BindCache>,
+    cache: Mutex<BindGroupCache>,
+}
+
+/// Bind-group layout entries for `binds` (bindings 0, 1, … in order),
+/// visible to `stages`.
+pub fn layout_entries(
+    binds: &[Bind],
+    stages: wgpu::ShaderStages,
+) -> Vec<wgpu::BindGroupLayoutEntry> {
+    binds
+        .iter()
+        .enumerate()
+        .map(|(i, b)| wgpu::BindGroupLayoutEntry {
+            binding: i as u32,
+            visibility: stages,
+            ty: wgpu::BindingType::Buffer {
+                ty: match b {
+                    Bind::Uniform => wgpu::BufferBindingType::Uniform,
+                    Bind::Read => wgpu::BufferBindingType::Storage { read_only: true },
+                    Bind::ReadWrite => wgpu::BufferBindingType::Storage { read_only: false },
+                },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        })
+        .collect()
 }
 
 impl Kernel {
@@ -74,24 +163,7 @@ impl Kernel {
             label: Some(label),
             source: wgpu::ShaderSource::Wgsl(source.into()),
         });
-        let entries: Vec<wgpu::BindGroupLayoutEntry> = binds
-            .iter()
-            .enumerate()
-            .map(|(i, b)| wgpu::BindGroupLayoutEntry {
-                binding: i as u32,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: match b {
-                        Bind::Uniform => wgpu::BufferBindingType::Uniform,
-                        Bind::Read => wgpu::BufferBindingType::Storage { read_only: true },
-                        Bind::ReadWrite => wgpu::BufferBindingType::Storage { read_only: false },
-                    },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            })
-            .collect();
+        let entries = layout_entries(binds, wgpu::ShaderStages::COMPUTE);
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some(label),
             entries: &entries,
@@ -118,10 +190,16 @@ impl Kernel {
 
     /// Bind groups created so far (a steady-state frame must not raise it).
     pub fn bind_groups_created(&self) -> usize {
-        self.cache.lock().unwrap_or_else(|e| e.into_inner()).created
+        self.cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .created()
     }
 
-    /// Records one dispatch with `buffers` bound to group 0, bindings 0, 1, ….
+    /// Records one dispatch in a compute pass of its own, with `buffers`
+    /// bound to group 0, bindings 0, 1, …. Several dispatches in a row are
+    /// cheaper in one pass ([`Kernel::dispatch_in`], [`pass`]): wgpu
+    /// allocates per pass.
     pub fn dispatch(
         &self,
         device: &wgpu::Device,
@@ -129,57 +207,40 @@ impl Kernel {
         buffers: &[&wgpu::Buffer],
         work: Work<'_>,
     ) {
-        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
-        let cache = &mut *cache;
-        cache.uses += 1;
-        let now = cache.uses;
-        cache.entries.retain(|e| now - e.2 <= STALE);
-        let bind = match cache
-            .entries
-            .iter()
-            .position(|(key, _, _)| key.iter().eq(buffers.iter().copied()))
-        {
-            Some(i) => {
-                let mut hit = cache.entries.remove(i);
-                hit.2 = now;
-                cache.entries.push(hit);
-                &cache.entries.last().expect("pushed").1
-            }
-            None => {
-                let entries: Vec<wgpu::BindGroupEntry<'_>> = buffers
-                    .iter()
-                    .enumerate()
-                    .map(|(i, b)| wgpu::BindGroupEntry {
-                        binding: i as u32,
-                        resource: b.as_entire_binding(),
-                    })
-                    .collect();
-                let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: None,
-                    layout: &self.layout,
-                    entries: &entries,
-                });
-                cache.created += 1;
-                if cache.entries.len() == CACHE {
-                    cache.entries.remove(0);
-                }
-                let key = buffers.iter().map(|b| (*b).clone()).collect();
-                cache.entries.push((key, bind, now));
-                &cache.entries.last().expect("pushed").1
-            }
-        };
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: None,
-            timestamp_writes: None,
-        });
+        let mut pass = pass(encoder);
+        self.dispatch_in(device, &mut pass, buffers, work);
+    }
+
+    /// Records one dispatch into an open compute pass (wgpu orders the
+    /// dispatches of a pass and synchronises the buffers between them).
+    pub fn dispatch_in(
+        &self,
+        device: &wgpu::Device,
+        pass: &mut wgpu::ComputePass<'_>,
+        buffers: &[&wgpu::Buffer],
+        work: Work<'_>,
+    ) {
+        let bind =
+            self.cache
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(device, &self.layout, buffers);
         pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, bind, &[]);
+        pass.set_bind_group(0, &bind, &[]);
         match work {
             Work::Groups(n) => pass.dispatch_workgroups(n.max(1), 1, 1),
             Work::Elements(n) => pass.dispatch_workgroups(workgroups(n).max(1), 1, 1),
             Work::Header(h) => pass.dispatch_workgroups_indirect(h, header::DISPATCH_OFFSET),
         }
     }
+}
+
+/// Opens a compute pass on `encoder` for a sequence of dispatches.
+pub fn pass(encoder: &mut wgpu::CommandEncoder) -> wgpu::ComputePass<'_> {
+    encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+        label: None,
+        timestamp_writes: None,
+    })
 }
 
 /// A small uniform buffer of `u32` words, written only when they change.
@@ -401,12 +462,12 @@ impl Scan {
         self.capacity
     }
 
-    /// Records `dst[i] = src[0] + … + src[i - 1]` for `i < capacity`; returns
-    /// the buffer whose first word becomes the total.
+    /// Records `dst[i] = src[0] + … + src[i - 1]` for `i < capacity` into a
+    /// compute pass; returns the buffer whose first word becomes the total.
     pub fn record(
         &self,
         device: &wgpu::Device,
-        encoder: &mut wgpu::CommandEncoder,
+        pass: &mut wgpu::ComputePass<'_>,
         src: &wgpu::Buffer,
         dst: &wgpu::Buffer,
     ) -> &wgpu::Buffer {
@@ -417,9 +478,9 @@ impl Scan {
                 &self.levels[k - 1].sums
             };
             let output = level.out.as_ref().unwrap_or(dst);
-            self.block.dispatch(
+            self.block.dispatch_in(
                 device,
-                encoder,
+                pass,
                 &[&level.params, input, output, &level.sums],
                 Work::Elements(level.n),
             );
@@ -431,9 +492,9 @@ impl Scan {
                 .out
                 .as_ref()
                 .expect("levels above 0 have outputs");
-            self.add.dispatch(
+            self.add.dispatch_in(
                 device,
-                encoder,
+                pass,
                 &[&level.params, output, scanned],
                 Work::Elements(level.n),
             );
@@ -537,29 +598,31 @@ impl Compactor {
     }
 
     /// Records the compaction of `flags[..capacity]` into the map and
-    /// `header` (a header-sized buffer, typically from the pool).
+    /// `header` (a header-sized buffer, typically from the pool), into a
+    /// compute pass. The parameters are written with `queue` (once per frame
+    /// at most: one compaction per frame per compactor).
     pub fn record(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        encoder: &mut wgpu::CommandEncoder,
+        pass: &mut wgpu::ComputePass<'_>,
         flags: &wgpu::Buffer,
         append: u32,
         header: &wgpu::Buffer,
     ) {
         let cap = self.capacity();
-        let total = self.scan.record(device, encoder, flags, &self.scanned);
+        let total = self.scan.record(device, pass, flags, &self.scanned);
         self.build_params.write(queue, &words([cap, 0, 0, 0]));
-        self.build.dispatch(
+        self.build.dispatch_in(
             device,
-            encoder,
+            pass,
             &[self.build_params.buffer(), flags, &self.scanned, &self.map],
             Work::Elements(cap),
         );
         self.finish_params.write(queue, &words([cap, append, 0, 0]));
-        self.finish.dispatch(
+        self.finish.dispatch_in(
             device,
-            encoder,
+            pass,
             &[self.finish_params.buffer(), total, header],
             Work::Groups(1),
         );
@@ -572,16 +635,19 @@ impl Compactor {
 /// The operator supplies WGSL declarations (`decl`: a `struct Params` and
 /// helper functions; the shared library [`super::wgsl`] is prepended) and
 /// the body of `fn deform(i: u32, value: vec4f) -> vec4f`, which may read
-/// the uniform `params: Params` and `hdr: GeoHeader`. [`Deformer::apply`]
-/// writes in place when the attribute is held uniquely (the engine handed
-/// the geometry over), else copy-on-write into a pooled buffer; both
-/// variants run the same `deform`, so they give identical results. Elements
-/// at or beyond the header's count are not touched.
+/// the uniform `params: Params`, `hdr: GeoHeader` and, when made with
+/// `aux`, a second 16-byte attribute `aux: array<vec4f>` (read-only; for
+/// example `P` while deforming `v`). [`Deformer::apply`] writes in place
+/// when the attribute is held uniquely (the engine handed the geometry
+/// over), else copy-on-write into a pooled buffer; both variants run the
+/// same `deform`, so they give identical results. Elements at or beyond the
+/// header's count are not touched.
 #[derive(Debug)]
 pub struct Deformer {
     in_place: Kernel,
     copy: Kernel,
     params: Uniforms,
+    aux: bool,
 }
 
 /// Whether [`Deformer::apply`] wrote in place or into a new buffer.
@@ -592,61 +658,74 @@ pub enum Wrote {
 }
 
 impl Deformer {
-    /// `params_bytes`: size of `struct Params` (at least 16).
+    /// `params_bytes`: size of `struct Params` (at least 16); `aux`: whether
+    /// `deform` reads a second attribute (see [`Deformer::apply`]).
     pub fn new(
         device: &wgpu::Device,
         label: &str,
         decl: &str,
         body: &str,
         params_bytes: u64,
+        aux: bool,
     ) -> Self {
+        // The aux binding comes last: binding 3 in place, 4 when copying.
+        let aux_decl = |binding: u32| {
+            if aux {
+                format!("@group(0) @binding({binding}) var<storage, read> aux: array<vec4f>;\n")
+            } else {
+                String::new()
+            }
+        };
         let common = format!(
             "{}{}{}{decl}\n@group(0) @binding(0) var<uniform> params: Params;
 @group(0) @binding(1) var<storage, read> hdr: GeoHeader;
-fn deform(i: u32, value: vec4f) -> vec4f {{
-{body}
-}}
 ",
             super::wgsl::HASH,
             super::wgsl::NOISE,
             header::WGSL,
         );
+        let deform = format!("fn deform(i: u32, value: vec4f) -> vec4f {{\n{body}\n}}\n");
         let in_place = format!(
             "{common}@group(0) @binding(2) var<storage, read_write> a: array<vec4f>;
+{}{deform}
 @compute @workgroup_size({WORKGROUP})
 fn main(@builtin(global_invocation_id) gid: vec3u) {{
     let i = gid.x;
     if (i < hdr.count) {{ a[i] = deform(i, a[i]); }}
 }}
-"
+",
+            aux_decl(3)
         );
         let copy = format!(
             "{common}@group(0) @binding(2) var<storage, read> src: array<vec4f>;
 @group(0) @binding(3) var<storage, read_write> dst: array<vec4f>;
+{}{deform}
 @compute @workgroup_size({WORKGROUP})
 fn main(@builtin(global_invocation_id) gid: vec3u) {{
     let i = gid.x;
     if (i < hdr.count) {{ dst[i] = deform(i, src[i]); }}
 }}
-"
+",
+            aux_decl(4)
         );
         use Bind::*;
+        let mut in_binds = vec![Uniform, Read, ReadWrite];
+        let mut copy_binds = vec![Uniform, Read, Read, ReadWrite];
+        if aux {
+            in_binds.push(Read);
+            copy_binds.push(Read);
+        }
         Self {
             in_place: Kernel::new(
                 device,
                 &format!("{label}-in-place"),
                 &in_place,
                 "main",
-                &[Uniform, Read, ReadWrite],
+                &in_binds,
             ),
-            copy: Kernel::new(
-                device,
-                &format!("{label}-copy"),
-                &copy,
-                "main",
-                &[Uniform, Read, Read, ReadWrite],
-            ),
+            copy: Kernel::new(device, &format!("{label}-copy"), &copy, "main", &copy_binds),
             params: Uniforms::new(device, label, params_bytes.max(16)),
+            aux,
         }
     }
 
@@ -656,48 +735,75 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {{
     }
 
     /// Runs `deform` over point attribute `name` of `geo` with `params`
-    /// (the bytes of `struct Params`). The geometry must have a header and
-    /// the attribute must be a 16-byte float type.
+    /// (the bytes of `struct Params`), reading point attribute `aux` too when
+    /// the deformer was made with `aux` (it must differ from `name`). The
+    /// geometry must have a header; both attributes must be 16-byte float
+    /// types.
     pub fn apply(
         &self,
         ctx: &mut crate::engine::GeoCtx<'_>,
         geo: &mut super::Geometry,
         name: &str,
+        aux: Option<&str>,
         params: &[u8],
     ) -> Result<Wrote, String> {
+        let check = |a: &super::Attribute| {
+            let ty = a.ty();
+            if ty.scalar != super::Scalar::F32 || ty.stride() != 16 {
+                return Err(format!("`{}` is {ty}; expected vec3f or vec4f", a.name()));
+            }
+            Ok(())
+        };
         let header = geo
             .header_handle()
             .cloned()
             .ok_or("the input geometry has no GPU header")?;
+        let aux_buffer = match (self.aux, aux) {
+            (true, Some(aux)) => {
+                assert_ne!(aux, name, "aux must be another attribute");
+                let a = geo
+                    .point(aux)
+                    .ok_or_else(|| format!("the input has no point attribute `{aux}`"))?;
+                check(a)?;
+                Some(a.ensure_gpu(ctx.queue, ctx.buffers).clone())
+            }
+            (false, None) => None,
+            _ => panic!("pass an aux attribute exactly when the deformer reads one"),
+        };
         let attr = geo
             .attr_mut(super::AttrClass::Point, name)
             .ok_or_else(|| format!("the input has no point attribute `{name}`"))?;
+        check(attr)?;
         let ty = attr.ty();
-        if ty.scalar != super::Scalar::F32 || ty.stride() != 16 {
-            return Err(format!("`{name}` is {ty}; expected vec3f or vec4f"));
-        }
         self.params.write(ctx.queue, params);
         let hdr = header.buffer();
+        let p = self.params.buffer();
+        let work = Work::Header(hdr);
         if let Some(buffer) = attr.unique_gpu() {
             let buffer = buffer.clone();
-            self.in_place.dispatch(
-                ctx.device,
-                ctx.encoder,
-                &[self.params.buffer(), hdr, &buffer],
-                Work::Header(hdr),
-            );
+            match &aux_buffer {
+                Some(x) => {
+                    self.in_place
+                        .dispatch(ctx.device, ctx.encoder, &[p, hdr, &buffer, x], work)
+                }
+                None => self
+                    .in_place
+                    .dispatch(ctx.device, ctx.encoder, &[p, hdr, &buffer], work),
+            }
             return Ok(Wrote::InPlace);
         }
         let src = attr.ensure_gpu(ctx.queue, ctx.buffers).clone();
         let (len, name) = (attr.len(), attr.name_arc().clone());
         let out = ctx.alloc(name, ty, len);
         let dst = out.gpu_buffer().expect("allocated on the GPU").clone();
-        self.copy.dispatch(
-            ctx.device,
-            ctx.encoder,
-            &[self.params.buffer(), hdr, &src, &dst],
-            Work::Header(hdr),
-        );
+        match &aux_buffer {
+            Some(x) => self
+                .copy
+                .dispatch(ctx.device, ctx.encoder, &[p, hdr, &src, &dst, x], work),
+            None => self
+                .copy
+                .dispatch(ctx.device, ctx.encoder, &[p, hdr, &src, &dst], work),
+        }
         geo.set_point(out);
         Ok(Wrote::Copy)
     }
@@ -754,11 +860,11 @@ fn gather(@builtin(global_invocation_id) gid: vec3u) {{
     }
 
     /// Records the gather of one attribute of `stride` bytes (4, 8 or 16)
-    /// from `src` into `dst` through `map`.
+    /// from `src` into `dst` through `map`, into a compute pass.
     pub fn record(
         &self,
         device: &wgpu::Device,
-        encoder: &mut wgpu::CommandEncoder,
+        pass: &mut wgpu::ComputePass<'_>,
         map: GatherMap<'_>,
         stride: u32,
         src: &wgpu::Buffer,
@@ -770,9 +876,9 @@ fn gather(@builtin(global_invocation_id) gid: vec3u) {{
             16 => &self.kernels[2],
             _ => panic!("attribute strides are 4, 8 or 16 bytes"),
         };
-        kernel.dispatch(
+        kernel.dispatch_in(
             device,
-            encoder,
+            pass,
             &[map.header, map.map, src, dst],
             Work::Header(map.header),
         );

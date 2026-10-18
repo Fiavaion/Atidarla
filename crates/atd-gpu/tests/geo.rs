@@ -106,7 +106,7 @@ impl GeoOp for Offset {
         };
         let mut p = Packer::<16>::new();
         p.f32(ctx.params.f32("amount"));
-        let wrote = self.deform.apply(ctx, &mut g, "P", p.bytes())?;
+        let wrote = self.deform.apply(ctx, &mut g, "P", None, p.bytes())?;
         let name = ctx.params.str("tag").to_owned();
         self.log.lock().unwrap().push((name, wrote));
         *ctx.output = g;
@@ -129,7 +129,7 @@ impl GeoOp for Step {
         let mut g = ctx.take_input(1).expect("checked");
         let mut p = Packer::<16>::new();
         p.f32(1.0);
-        self.deform.apply(ctx, &mut g, "P", p.bytes())?;
+        self.deform.apply(ctx, &mut g, "P", None, p.bytes())?;
         *ctx.output = g;
         Ok(())
     }
@@ -211,14 +211,14 @@ fn setup(device: wgpu::Device, queue: wgpu::Queue) -> (Engine, Log) {
         let log = log.clone();
         lib.add_geo(id, move |d| {
             Box::new(Offset {
-                deform: Deformer::new(d, "test-offset", ADD_X, ADD_X_BODY, 16),
+                deform: Deformer::new(d, "test-offset", ADD_X, ADD_X_BODY, 16, false),
                 log: log.clone(),
             })
         });
     }
     lib.add_geo("pnt.step", |d| {
         Box::new(Step {
-            deform: Deformer::new(d, "test-step", ADD_X, ADD_X_BODY, 16),
+            deform: Deformer::new(d, "test-step", ADD_X, ADD_X_BODY, 16, false),
         })
     });
     lib.add("img.count", |_, _| Box::new(CountImg));

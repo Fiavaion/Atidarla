@@ -127,7 +127,17 @@ impl BufferPool {
     /// A buffer of at least `bytes` with `usage`, reused when one of its size
     /// class is free. Its contents are whatever it last held.
     pub fn acquire(&self, bytes: u64, usage: wgpu::BufferUsages) -> GeoBuffer {
-        let class = size_class(bytes, self.device.limits().max_buffer_size);
+        // A storage buffer is bound whole, so its size class must also fit
+        // the binding limit.
+        let limits = self.device.limits();
+        let max = if usage.contains(wgpu::BufferUsages::STORAGE) {
+            limits
+                .max_buffer_size
+                .min(limits.max_storage_buffer_binding_size)
+        } else {
+            limits.max_buffer_size
+        };
+        let class = size_class(bytes, max);
         let mut state = lock(&self.shared.state);
         if let Some((buffer, _)) = state.free.get_mut(&(class, usage)).and_then(Vec::pop) {
             state.free_bytes -= class;
