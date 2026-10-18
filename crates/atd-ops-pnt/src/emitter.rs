@@ -71,7 +71,7 @@ const COMMON: &str = "struct Params {
     velocity: vec4f,
     // normal speed, inherit, spread, jitter
     speeds: vec4f,
-    // life, variance, unused, unused
+    // life, variance, the frame's step, unused
     life: vec4f,
     colour: vec4f,
     base: u32,
@@ -98,7 +98,9 @@ fn point(j: u32) {
     var vel = params.velocity.xyz + atd_in_sphere(params.seed ^ 0x9e3779b9u, e) * params.speeds.z;
     if ((params.flags & 1u) != 0u) { vel = vel + SN[s].xyz * params.speeds.x; }
     if ((params.flags & 2u) != 0u) { vel = vel + SV[s].xyz * params.speeds.y; }
-    let p = SP[s].xyz + atd_in_sphere(params.seed ^ 0x2545f491u, e) * params.speeds.w;
+    // Births are spread over the frame's step (no bands of particles born together).
+    let early = atd_rand(params.seed ^ 0x1b873593u, e) * params.life.z;
+    let p = SP[s].xyz + atd_in_sphere(params.seed ^ 0x2545f491u, e) * params.speeds.w + vel * early;
     P[j] = vec4f(p, 0.0);
     v[j] = vec4f(vel, 0.0);
 }
@@ -249,7 +251,7 @@ impl GeoOp for Emitter {
             .vec4([
                 p.f32("life").max(0.001),
                 p.f32("life_variance").clamp(0.0, 1.0),
-                0.0,
+                ctx.dt as f32,
                 0.0,
             ])
             .vec4(p.vec4("colour"))

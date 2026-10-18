@@ -1,0 +1,129 @@
+# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 14
+
+[[node]]
+id = 0
+name = "sphere"
+type = "pnt.scatter"
+pos = [0.0, 0.0]
+params.count = 5000
+params.radius = 0.8
+params.shape = "sphere"
+
+[[node]]
+id = 1
+name = "flow"
+type = "pnt.noise"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+params.amplitude = 0.12
+params.evolution = { value = 0.0, expr = "time * 0.2" }
+params.frequency = 1.5
+
+[[node]]
+id = 2
+name = "relax"
+type = "pnt.smooth"
+pos = [440.0, 0.0]
+inputs.in = { node = 1, output = "out" }
+params.radius = 0.1
+params.strength = 0.5
+
+[[node]]
+id = 3
+name = "normals"
+type = "pnt.normals"
+pos = [660.0, 0.0]
+inputs.in = { node = 2, output = "out" }
+params.radius = 0.15
+
+[[node]]
+id = 4
+name = "shade"
+type = "pnt.colour"
+pos = [880.0, 0.0]
+inputs.in = { node = 3, output = "out" }
+params.attribute = "N"
+params.measure = "z"
+params.ramp = "ice"
+
+[[node]]
+id = 5
+name = "back_to_front"
+type = "pnt.sort"
+pos = [1100.0, 0.0]
+inputs.in = { node = 4, output = "out" }
+
+[[node]]
+id = 6
+name = "links"
+type = "pnt.connect"
+pos = [1320.0, 0.0]
+inputs.in = { node = 5, output = "out" }
+params.radius = 0.12
+
+[[node]]
+id = 7
+name = "draw"
+type = "img.render_points"
+pos = [1540.0, 0.0]
+inputs.geo = { node = 6, output = "out" }
+params.blend = "over"
+params.draw = "both"
+params.height = 2.0
+params.size = 3.0
+
+[[node]]
+id = 8
+name = "field"
+type = "pnt.scatter"
+pos = [0.0, 200.0]
+params.count = 3000
+params.seed = 5
+params.shape = "box"
+params.size = [3.6, 2.0, 0.1]
+
+[[node]]
+id = 9
+name = "some"
+type = "pnt.subset"
+pos = [220.0, 200.0]
+inputs.in = { node = 8, output = "out" }
+params.fraction = 0.4
+params.rule = "random"
+
+[[node]]
+id = 10
+name = "tints"
+type = "pnt.randomize"
+pos = [440.0, 200.0]
+inputs.in = { node = 9, output = "out" }
+params.max = [0.6, 0.6, 1.0, 1.0]
+params.min = [0.1, 0.1, 0.25, 1.0]
+
+[[node]]
+id = 11
+name = "draw_stars"
+type = "img.render_points"
+pos = [660.0, 200.0]
+inputs.geo = { node = 10, output = "out" }
+params.height = 2.0
+
+[[node]]
+id = 12
+name = "sky"
+type = "img.composite"
+pos = [1760.0, 100.0]
+inputs.a = { node = 11, output = "out" }
+inputs.b = { node = 7, output = "out" }
+params.operation = "add"
+
+[[node]]
+id = 13
+name = "glow"
+type = "img.bloom"
+pos = [1980.0, 100.0]
+inputs.in = { node = 12, output = "out" }
+params.intensity = 0.4
+params.threshold = 0.6

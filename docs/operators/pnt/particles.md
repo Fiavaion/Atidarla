@@ -51,3 +51,4 @@ All platforms.
 ## Examples
 
 - [Particles](../../../examples/particles.atidarla/) — `system`
+- [PNT Fountain](../../../examples/pnt-fountain.atidarla/) — `system`

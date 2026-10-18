@@ -34,4 +34,5 @@ All platforms.
 
 ## Examples
 
-No example project uses it yet.
+- [PNT Constellation](../../../examples/pnt-constellation.atidarla/) — `tints`
+- [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `sizes`, `colours`

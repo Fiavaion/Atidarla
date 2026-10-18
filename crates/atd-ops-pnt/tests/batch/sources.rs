@@ -253,15 +253,20 @@ fn emitter_appends_particles_from_source_points() {
         "in emission order"
     );
     let p = floats(&e, emit, "P");
+    // Born on a source point, up to one step along v = (0, 1, 0) (births
+    // are spread over the frame).
     for q in &p[40..] {
         assert!(
-            q[1] == 0.0 && [-1.0, 0.0, 1.0].contains(&q[0]),
-            "born on a source point: {q:?}"
+            (0.0..DT).contains(&q[1]) && [-1.0, 0.0, 1.0].contains(&q[0]),
+            "{q:?}"
         );
     }
-    // The oldest have moved up for four steps of v = (0, 1, 0).
+    assert!(p[40..].iter().any(|q| q[1] > 0.0), "spread over the step");
+    // The oldest have moved up for four more steps.
     assert!(
-        p[..10].iter().all(|q| (q[1] - 4.0 * DT).abs() < 1e-5),
+        p[..10]
+            .iter()
+            .all(|q| (4.0 * DT - 1e-5..5.0 * DT).contains(&q[1])),
         "{:?}",
         &p[..10]
     );

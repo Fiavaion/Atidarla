@@ -35,4 +35,6 @@ All platforms.
 
 ## Examples
 
-No example project uses it yet.
+- [PNT Constellation](../../../examples/pnt-constellation.atidarla/) — `sphere`, `field`
+- [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `column`, `ring`
+- [PNT Fountain](../../../examples/pnt-fountain.atidarla/) — `ring`

@@ -37,6 +37,7 @@ All platforms.
 - [Scatter to Iso Surface](../../../examples/mesh-scatter-iso.atidarla/) — `mix`, `out`
 - [Neural Growth](../../../examples/neural-growth.atidarla/) — `screen`
 - [Pack: Kaleidoscope Tunnel](../../../examples/pack-kaleido-tunnel.atidarla/) — `together`
+- [PNT Constellation](../../../examples/pnt-constellation.atidarla/) — `sky`
 - [Points](../../../examples/points.atidarla/) — `mix`
 - [Signal scope](../../../examples/signal-scope.atidarla/) — `scopes`, `all`
 - [Simulations](../../../examples/simulations.atidarla/) — `screen`, `all`

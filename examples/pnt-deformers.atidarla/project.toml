@@ -1,0 +1,18 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "PNT Deformers"
+description = '''
+A deformer stack and copies (M2 PNT batch). Left: a column of 150,000 points (Scatter, box)
+is twisted (Twist), gets a window cut through it (Delete, box), and is tapered, bent and
+rippled (Taper, Bend, Wave; the angles and the phase follow time), so the window bends with
+it; Colour by Attribute paints it by height. Right: small rings (Scatter, circle) are copied
+onto a 6 by 6 grid (Copy to Points) whose points got random sizes and colours (Randomize
+pscale and Cd); Group marks the diagonal, Delete removes it, Subset keeps every other point,
+and Transform turns and pulses the lot. Merge joins both halves for one Render Points.
+
+Each deformer writes P in place when the engine hands it the points, so the stack makes no
+copies after the first.
+
+Try: Twist angle 360; Bend angle 180; the window's Invert (only it is kept); a colours seed.
+'''
+resolution = [1280, 720]

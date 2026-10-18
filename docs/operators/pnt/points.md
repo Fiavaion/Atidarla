@@ -32,5 +32,6 @@ All platforms.
 
 ## Examples
 
+- [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `grid`
 - [Points](../../../examples/points.atidarla/) — `cloud`, `grid`
 - [Render Wire and Toon](../../../examples/render-wire-toon.atidarla/) — `cloud`
