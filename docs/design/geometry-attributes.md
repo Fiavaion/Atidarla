@@ -270,3 +270,36 @@ D2–D10 and D12 in the table at the top; u32 wrapping IDs; 32 groups per class;
 - **A12 (Proposed):** only §5's Kernel client, AC2 and AC3. The framework, the PNT/MSH ops and the `pnt.wgsl` route do not depend on it.
 - **A25 (implemented, pending Mark's review):** §2.3 relies on `CookMode` (offline waits, `receive`, pooled outputs cleared) and on `GpuOp::status`.
 - **A9, A13, A14, A20 (Proposed):** no dependency. A13's D7 (Kernel DSL) and D12 (capture pipeline) come later and fit the attribute model without changing it.
+
+## 9. Implementation notes (2026-10-18, M2 pre-work)
+
+What was built follows the design; this section lists only deviations, their reasons and the numbers measured. Details, commands and APIs: `docs/milestones/m2/geometry-core.md`.
+
+### Deviations
+
+| Where | Design | Built | Why |
+|---|---|---|---|
+| §3.1 static level | An `attributes` list in `OperatorSchema` | Not added; attributes are named in each operator's summary and help (and the table in `atd-ops-pnt`'s crate docs) | `OperatorSchema` is built with struct literals in about 40 places across crates other areas are editing now; one coordinated change later (a `Default` plus a builder) avoids breaking them. |
+| §3.1 runtime level | `attributes(params, input schema) → plan` on the GEO trait | `GeoOp::cook` looks attributes up itself (`Geometry::point_typed`); a missing required one is a node error naming it; missing optional ones are created (`pnt.noise` makes `v` at zero) | Nothing consumes a plan yet (no Kernel, no binding generator client); the WGSL declaration generator exists (`atd_core::geo::wgsl_binding`). |
+| §2.2 versions | A version number per attribute | None: both copies of an attribute always hold the same values. A CPU or GPU copy is added once (`OnceLock`); writing in place needs sole ownership and drops the other copy | Same guarantee with less state. |
+| §3.2 hand-over | Scheduler reports why each node is planned (bitset) | `Scheduler::continuous(node)` (a reused set). The engine also hands over through **feedback** inputs (the source cooks again later in the same frame, and this is its only wire) and a node's **own** output on a self-feedback wire | Lets a simulation loop update its state in place instead of copying every frame. |
+| §3.2 Solver | A `pnt.solver` node (`init`, `prev`) | No Solver node: any GEO feedback input carries state; `pnt.particles` has a `prev` feedback input and otherwise uses its own last result | Smallest version that proves state on the wire; a Solver Block (FR-P4) can wrap it later. |
+| §4.2 particle passes | Update, scan, gather + emit, then curl and attract as separate deformers | Flag (`age + dt < life` on the previous state), compact (scan, index map, header), gather `P v age life id` (generic gather), emit, integrate (curl noise, attraction, gravity, drag) and `Cd` from age, **in one compute pass**; `pnt.noise` in velocity mode can be put in the loop | Fewer passes (wgpu allocates per pass, below) and less traffic: `Cd` is computed, not carried. |
+| §4.1 header | "A GPU-side count" | A fixed 48-byte header on every geometry with points: count, capacity, `mapped`, `draw_indirect` and `dispatch_workgroups_indirect` arguments (`atd_core::geo::header`); a CPU count is written once with `write_buffer` | Kernels read the count the same way whoever produced the geometry. |
+| §2.1 kernels | Bind groups cached by buffer identity | Explicit bind-group layouts (`Kernel`, `Bind`) instead of shader-derived ones, so a binding a shader does not use is still bound; `BindGroupCache` shared by compute and render operators | Shader-derived layouts silently drop unused bindings. |
+| §2.3 readback | Copies arrive as CPU data | `Readback::receive` (copy on this thread) and `Readback::take_mapped` (hand the mapped buffers to a worker, which copies) | Copying 2 × 1.6 MB on the render thread cost about 0.4 ms (S3 round trip). |
+| §2.4 rule 2 | No allocation on the render thread after warm-up | No buffer, bind-group or texture creation after warm-up (asserted). Heap allocations are bounded per node-cook, as for IMG: 34 measured, bound 45 | wgpu allocates about 16-24 times per compute or render pass at submit and 4 per `write_buffer`; the GEO code adds about 10 per frame over six nodes (an `Arc` per new attribute generation, a `Vec` per copy-on-write clone). Recycling those is a follow-up. |
+| §4.4 Render IMG | Camera unspecified | `img.render_points`: orthographic view of the XY plane (centre, height), sprite size in pixels, `Cd` or constant, add or over | "Simple orthographic/2D to start." |
+
+### Measured (RTX 5070 Ti, DX12 unless noted, 2026-10-18; other agents were using the same GPU, so timings are noisy)
+
+| Item | Result | Target |
+|---|---|---|
+| PT-2 `pt2.particles_2m` (release `atidarla bench`) | frame p50 1.86 ms, p95 2.02 ms; GPU: simulate 0.75 ms, draw ≈ 1.02 ms. Vulkan: p50 1.73 ms, p95 1.80 ms, simulate 0.64 ms, draw ≈ 1.03 ms | p95 ≤ 16.7 ms on RTX 4070 (not measured there) |
+| S1: 2M static sprites at 1920×1080 | GPU p50 1.01 ms, p95 1.88 ms; render-thread cook p50 0.07 ms; 0 buffers, bind groups, textures created after frame 10 | ≤ 3.0 ms, ≤ 0.3 ms, 0 |
+| S2: 2M particles | simulate GPU p50 0.89 ms; simulate + draw 1.90 ms; two offline runs of 300 frames (one with 32 spinning threads): 300/300 frames identical, final `P v age life id` identical | ≤ 4.0 ms, ≤ 7.0 ms, identical |
+| S3: 30 `pnt.noise` deformers over 2M points (1 copy on write, 29 in place) | GPU p50 4.53 ms, p95 5.23 ms | fusion becomes an M2 task if > 3.0 ms: **it is over** |
+| S3: 100k-point GPU → CPU worker → GPU, live at 60 fps | latency exactly 2 frames; render-thread cook p50 0.31 ms, max 0.97 ms (baseline without it 0.23 ms, max 1.06 ms); `Queue::write_buffer` from the worker works | ≤ 2 frames, no stall > 0.5 ms |
+| Noise library | analytic gradient vs central differences: max error 3.8e-4; divergence of the curl: ≤ 4e-3 (finite differences) | |
+
+S3's deformer is curl noise (three gradient noises, 24 hashes per point), so the 4.5 ms is part arithmetic and part bandwidth (30 × 64 MB ≈ 1.9 GB, about 2.4 ms at the 5070 Ti's bandwidth); fusion would remove the bandwidth part. Whether to build fusion in M2 is a question for Mark (`docs/milestones/m2/geometry-core.md`).
