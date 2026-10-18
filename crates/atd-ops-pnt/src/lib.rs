@@ -18,6 +18,7 @@ mod attr;
 mod emitter;
 mod field;
 mod kit;
+mod neighbours;
 mod noise;
 mod particles;
 mod points;
@@ -85,6 +86,9 @@ const OPS: &[(Schema, Factory)] = &[
     (sources::copy_schema, sources::create_copy),
     (emitter::schema, emitter::create),
     (sort::schema, sort::create),
+    (neighbours::normals_schema, neighbours::create_normals),
+    (neighbours::smooth_schema, neighbours::create_smooth),
+    (neighbours::connect_schema, neighbours::create_connect),
 ];
 
 /// Every schema this crate registers (PNT operators and Render Points).

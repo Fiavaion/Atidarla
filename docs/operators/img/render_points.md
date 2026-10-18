@@ -2,7 +2,7 @@
 
 IMG · version 1 · cook budget 150 µs
 
-Draws the points of a geometry as square sprites over a background, looking down the Z axis (orthographic). Colour from the `Cd` attribute or a constant; additive blending makes dense regions glow.
+Draws the points of a geometry as square sprites over a background, looking down the Z axis (orthographic), and optionally its polyline primitives as one-pixel lines (such as Connect's). Colour from the `Cd` attribute or a constant; additive blending makes dense regions glow.
 
 ## Inputs
 
@@ -20,6 +20,7 @@ Draws the points of a geometry as square sprites over a background, looking down
 
 | Name | Label | Type | Default | Range / options | Description |
 |---|---|---|---|---|---|
+| `draw` | Draw | menu | `"points"` | `points`, `lines`, `both` | points: sprites; lines: the polyline primitives' segments, one pixel wide, coloured from their points (polygons are left to the mesh renderer); both: lines under sprites. |
 | `size` | Size | float | `2.0` | 0.5 – 64 | Sprite size in pixels. |
 | `colour_from` | Colour From | menu | `"attribute"` | `attribute`, `constant` | attribute: each point's `Cd` times Colour (Colour alone when `Cd` is missing); constant: Colour. |
 | `colour` | Colour | colour | `[1.0,1.0,1.0,1.0]` |  | Sprite colour, or the multiplier of `Cd`. |
