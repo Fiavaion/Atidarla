@@ -255,6 +255,7 @@ impl eframe::App for AtidarlaApp {
     fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
         self.shortcuts(ui);
         self.project_frame(ui.ctx());
+        self.python_frame(ui.ctx());
         egui::Panel::top("menu_bar").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| self.file_menu(ui));
@@ -367,6 +368,18 @@ impl AtidarlaApp {
         if item(ui, "Save As…", &SAVE_AS) {
             self.project.save_as();
         }
+        let blocked = self
+            .project
+            .python
+            .as_ref()
+            .is_some_and(|p| !p.is_allowed());
+        if ui
+            .add_enabled(blocked, egui::Button::new("Allow Python Operators…"))
+            .on_hover_text("Run this project's ops/*.py (docs/python-ops.md)")
+            .clicked()
+        {
+            self.project.python_ask = true;
+        }
         ui.separator();
         if ui.button("Quit").clicked() {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
@@ -472,6 +485,88 @@ impl AtidarlaApp {
         } else if let Some(engine) = &mut self.panels.engine {
             let view = self.project.run(engine, action);
             self.show_loaded(view);
+        }
+    }
+
+    /// The open project's Python operators: hot reload of saved files
+    /// (FR-K4), and asking before they run (docs/python-ops.md).
+    fn python_frame(&mut self, ctx: &egui::Context) {
+        let (Some(engine), Some(python)) = (&mut self.panels.engine, &mut self.project.python)
+        else {
+            return;
+        };
+        // The watcher thread read the files; this applies them (no disk).
+        if let Some(reload) = engine.extend(|r, l| python.poll(r, l)) {
+            let (edits, notes) = atd_py::ops::stale_edits(engine.network(), engine.registry());
+            let mut message = match reload.errors.first() {
+                Some(e) => (e.to_string(), true),
+                None => (format!("Reloaded {}", reload.files.join(", ")), false),
+            };
+            if !edits.is_empty() {
+                match engine.edit("Reload Python operators", edits) {
+                    Ok(()) => message.0 += &format!(" ({})", notes.join("; ")),
+                    Err(e) => message = (format!("Reloading Python operators: {e}"), true),
+                }
+            }
+            self.project.message = Some(message);
+        }
+        if !self.project.python_ask || self.smoke.is_some() {
+            return;
+        }
+        let Some(python) = &mut self.project.python else {
+            return;
+        };
+        let files: Vec<String> = python
+            .files()
+            .map(|f| format!("{}/{}.py", atd_py::ops::OPS_DIR, f.stem))
+            .collect();
+        let mut choice = None;
+        let modal = egui::Modal::new(egui::Id::unique("allow_python_ops")).show(ctx, |ui| {
+            ui.heading("Run this project's Python operators?");
+            ui.label(
+                "This project contains operators written in Python. They are programs: once \
+                 they run they can do anything your user account can (read and change files, \
+                 use the network). Atidarla does not sandbox them. Allow them only if you \
+                 trust where the project came from.",
+            );
+            ui.add_space(4.0);
+            for f in &files {
+                ui.monospace(f);
+            }
+            ui.add_space(4.0);
+            ui.weak(
+                "Until you allow them, their nodes do not cook. \"Remember\" applies to these \
+                 files exactly as they are; any change asks again.",
+            );
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button("Allow and remember").clicked() {
+                    choice = Some(true);
+                }
+                if ui.button("Allow this time").clicked() {
+                    choice = Some(false);
+                }
+                if ui.button("Don't run").clicked() {
+                    self.project.python_ask = false;
+                }
+            });
+        });
+        if modal.should_close() {
+            self.project.python_ask = false;
+        }
+        let Some(remember) = choice else { return };
+        self.project.python_ask = false;
+        python.allow();
+        if remember {
+            let stored = atd_py::ops::TrustStore::user()
+                .ok_or_else(|| "no settings folder".to_owned())
+                .and_then(|s| {
+                    s.remember(python.hash(), python.dir())
+                        .map_err(|e| e.to_string())
+                });
+            if let Err(e) = stored {
+                self.project.message = Some((format!("Could not remember the choice: {e}"), true));
+            }
         }
     }
 
@@ -726,14 +821,13 @@ impl Panels {
         ui.weak("Click to add to the patch (or press Tab over the canvas).");
         let mut add = None;
         egui::ScrollArea::vertical().show(ui, |ui| {
-            for family in OpFamily::ALL {
-                let ops: Vec<_> = engine.registry().family(family).collect();
-                if ops.is_empty() {
-                    continue;
-                }
-                ui.collapsing(format!("{family} ({})", ops.len()), |ui| {
+            for (group, ops) in palette_groups(engine.registry()) {
+                ui.collapsing(format!("{group} ({})", ops.len()), |ui| {
                     for op in ops {
                         let label = match Registry::availability(op, &self.platform) {
+                            Availability::Native if group == PROJECT_GROUP => {
+                                RichText::new(format!("{}  ({})", op.label, op.family))
+                            }
                             Availability::Native => RichText::new(&op.label),
                             Availability::Fallback { flag, .. } => {
                                 RichText::new(format!("{}  [{flag}]", op.label))
@@ -741,7 +835,7 @@ impl Panels {
                         };
                         if ui
                             .selectable_label(false, label)
-                            .on_hover_text(&op.summary)
+                            .on_hover_text(format!("{}\n{}", op.summary, op.type_id))
                             .clicked()
                         {
                             add = Some(op.type_id.clone());
@@ -808,6 +902,34 @@ impl Panels {
     }
 }
 
+/// The palette group of operators the open project defines.
+const PROJECT_GROUP: &str = "Project";
+
+/// The operator palette's groups: built-in operators by family, then the
+/// open project's own operators (Python, docs/python-ops.md) as "Project".
+/// Empty groups are left out.
+fn palette_groups(registry: &Registry) -> Vec<(String, Vec<&atd_core::registry::OperatorSchema>)> {
+    let mut groups: Vec<(String, Vec<_>)> = OpFamily::ALL
+        .iter()
+        .map(|&family| {
+            let ops = registry
+                .family(family)
+                .filter(|op| registry.provenance(&op.type_id).is_none())
+                .collect();
+            (family.to_string(), ops)
+        })
+        .collect();
+    groups.push((
+        PROJECT_GROUP.to_owned(),
+        registry
+            .iter()
+            .filter(|op| registry.provenance(&op.type_id).is_some())
+            .collect(),
+    ));
+    groups.retain(|(_, ops)| !ops.is_empty());
+    groups
+}
+
 fn placeholder(ui: &mut Ui, text: &str) {
     ui.centered_and_justified(|ui| ui.weak(text));
 }
@@ -844,4 +966,38 @@ fn builtin_registry() -> Registry {
     atd_ops_cmp::register(&mut registry);
     atd_ops_ai::register(&mut registry);
     registry
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A project's Python operators show under "Project", not with the
+    /// built-in operators of their family.
+    #[test]
+    fn project_operators_have_their_own_palette_group() {
+        let mut registry = builtin_registry();
+        let builtin: Vec<String> = palette_groups(&registry)
+            .into_iter()
+            .map(|(g, _)| g)
+            .collect();
+        assert!(!builtin.contains(&PROJECT_GROUP.to_owned()));
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/python-ops.atidarla");
+        let mut python = atd_py::ops::PythonOps::open(&dir);
+        python.register(&mut registry, &mut OpLibrary::default());
+        let groups = palette_groups(&registry);
+        let (name, project) = groups.last().unwrap();
+        assert_eq!(name, PROJECT_GROUP);
+        let ids: Vec<&str> = project.iter().map(|s| s.type_id.as_str()).collect();
+        assert_eq!(
+            ids,
+            ["py.motion.counter", "py.motion.wobble", "py.pattern.rings"]
+        );
+        let sig = groups.iter().find(|(g, _)| g == "SIG").unwrap();
+        assert!(sig.1.iter().all(|s| !s.type_id.starts_with("py.")));
+        // The Tab search finds them too (it searches the whole registry).
+        let hits = crate::patch::search(&registry, "rings");
+        assert_eq!(hits[0].type_id, "py.pattern.rings");
+    }
 }

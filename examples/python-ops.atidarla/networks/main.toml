@@ -32,7 +32,9 @@ name = "resolution1"
 type = "img.resolution"
 pos = [440.0, 0.0]
 inputs.in = { node = 2, output = "out" }
-params.fraction = 8.0
+params.height = 512
+params.mode = "pixels"
+params.width = 512
 
 [[node]]
 id = 4

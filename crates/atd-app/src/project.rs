@@ -44,6 +44,10 @@ pub struct ProjectState {
     pub confirm: Option<Action>,
     /// The last result to show the user: (text, is an error).
     pub message: Option<(String, bool)>,
+    /// The open project's Python operators (`ops/*.py`, docs/python-ops.md).
+    pub python: Option<atd_py::ops::PythonOps>,
+    /// Ask whether to run them (they are not allowed yet).
+    pub python_ask: bool,
 }
 
 impl ProjectState {
@@ -56,6 +60,8 @@ impl ProjectState {
             dialog: None,
             confirm: None,
             message: None,
+            python: None,
+            python_ask: false,
         }
     }
 
@@ -94,6 +100,7 @@ impl ProjectState {
                     self.message = Some((e.to_string(), true));
                     return None;
                 }
+                engine.extend(|r, _| atd_py::ops::clear_custom(r));
                 *self = Self::untitled(engine.network());
                 None
             }
@@ -107,9 +114,14 @@ impl ProjectState {
                 None
             }
             Action::OpenDir(dir) => match open(engine, &dir) {
-                Ok((meta, view)) => {
+                Ok((meta, view, python)) => {
                     self.saved = engine.network().clone();
                     self.message = Some((format!("Opened {}", dir.display()), false));
+                    if let Some(e) = python.errors().first() {
+                        self.message = Some((e.to_string(), true));
+                    }
+                    self.python_ask = !python.is_empty() && !python.is_allowed();
+                    self.python = (!python.is_empty()).then_some(python);
                     self.meta = meta;
                     self.dir = Some(dir);
                     view
@@ -251,14 +263,14 @@ pub const PACKS_READ_ONLY: &str = "This project uses Packs. The app plays it wit
      expanded (its nodes are named instance__node) but cannot save it yet: saving would replace \
      the Packs with their insides. Edit the project files, then check them with `atidarla check`.";
 
-/// Loads the project at `dir` into `engine`. Returns its settings and the
-/// node to show first.
-///
-/// Pack instances (FR-P4) are expanded into the nodes inside them before
-/// loading (`docs/packs.md`): the engine cooks the flat network. Editing
-/// Packs in the app is the next step; until then such a project opens to
-/// play and inspect, and saving it is refused ([`PACKS_READ_ONLY`]).
-pub fn open(engine: &mut Engine, dir: &Path) -> Result<(Project, Option<NodeId>), String> {
+/// Loads the project at `dir` into `engine`. Returns its settings, the node
+/// to show first and its Python operators: registered, watched for hot
+/// reload, and allowed to run only if the user allowed exactly these files
+/// before (docs/python-ops.md); nothing in `ops/` runs here otherwise.
+pub fn open(
+    engine: &mut Engine,
+    dir: &Path,
+) -> Result<(Project, Option<NodeId>, atd_py::ops::PythonOps), String> {
     let mut project = atd_format::load(dir).map_err(|e| e.to_string())?;
     let mut net = project
         .networks
@@ -268,12 +280,48 @@ pub fn open(engine: &mut Engine, dir: &Path) -> Result<(Project, Option<NodeId>)
     for (name, e) in failed {
         log::warn!("{}: shader {name} not imported: {e}", dir.display());
     }
+    let mut python = atd_py::ops::PythonOps::open(dir);
+    for e in python.errors() {
+        log::warn!("{}: {e}", dir.display());
+    }
+    // Validate against the new project's operators before replacing the
+    // old project's, so a project that does not open leaves the patch as it was.
+    let mut registry = engine.registry().clone();
+    atd_py::ops::clear_custom(&mut registry);
+    for op in python.ops() {
+        let _ = registry.replace_custom(op.schema.clone(), atd_core::registry::PYTHON_CUSTOM);
+    }
+    // Pack instances are operators of the project's own Packs.
+    let registry = project
+        .packs
+        .register(&registry)
+        .map_err(|e| format!("{}: {e}", dir.display()))?;
+    if let Err(e) = net.clone().validated(&registry) {
+        let why = match &e {
+            atd_core::graph::GraphError::UnknownType(t) => python.explain(t),
+            _ => None,
+        };
+        return Err(match why {
+            Some(why) => format!("{}: {e}: {why}", dir.display()),
+            None => format!("{}: {e}", dir.display()),
+        });
+    }
+    if !python.is_empty()
+        && atd_py::ops::TrustStore::user().is_some_and(|s| s.contains(python.hash()))
+    {
+        python.allow();
+    }
+    engine.extend(|r, l| python.register(r, l));
+    if !python.is_empty()
+        && let Err(e) = python.watch()
+    {
+        log::warn!(
+            "{}: Python operators will not hot-reload: {e}",
+            dir.display()
+        );
+    }
     let mut view = None;
     if !project.packs.is_empty() {
-        let registry = project
-            .packs
-            .register(engine.registry())
-            .map_err(|e| format!("{}: {e}", dir.display()))?;
         let authored = net
             .validated(&registry)
             .map_err(|e| format!("{}: networks/main.toml: {e}", dir.display()))?;
@@ -292,7 +340,7 @@ pub fn open(engine: &mut Engine, dir: &Path) -> Result<(Project, Option<NodeId>)
     }
     engine.set_resolution(project.resolution[0], project.resolution[1]);
     let view = view.or_else(|| output_node(engine));
-    Ok((project, view))
+    Ok((project, view, python))
 }
 
 /// Saves `engine`'s network as the project at `dir`. Paths to files inside
@@ -478,7 +526,8 @@ mod tests {
         assert_eq!(project.resolution, [320, 180]);
 
         // Open: the relative path stays relative and resolves in the folder.
-        let (meta, view) = open(&mut e, &first).unwrap();
+        let (meta, view, python) = open(&mut e, &first).unwrap();
+        assert!(python.is_empty());
         assert_eq!(meta.name, "First");
         assert_eq!(e.config().width, 320);
         assert_eq!(file_param(&e, "inside"), "media/clip.mov");
@@ -497,6 +546,42 @@ mod tests {
         save(&e, &meta, &second).unwrap();
         assert_eq!(Path::new(&saved_file(&second, "inside")), inside);
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// Opening a project with Python operators loads its patch and
+    /// registers them without running them unless they were allowed before
+    /// (then the app asks); a missing file is explained and leaves the
+    /// current patch alone.
+    #[test]
+    fn opening_python_operators_loads_without_running_them() {
+        let Some(mut e) = engine() else { return };
+        let example =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/python-ops.atidarla");
+        let mut state = ProjectState::untitled(&Network::default());
+        let view = state.run(&mut e, Action::OpenDir(example.clone()));
+        assert!(view.is_some(), "{:?}", state.message);
+        let python = state.python.as_ref().unwrap();
+        assert_eq!(python.ops().count(), 3);
+        assert_eq!(state.python_ask, !python.is_allowed());
+        assert!(e.registry().get("py.pattern.rings").is_some());
+        assert!(e.network().node_by_name("rings1").is_some());
+
+        let dir = std::env::temp_dir().join(format!("atd-app-pyops-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        atd_format::save(&dir, &atd_format::load(&example).unwrap()).unwrap();
+        let before = e.network().clone();
+        state.run(&mut e, Action::OpenDir(dir.clone()));
+        let (msg, error) = state.message.clone().unwrap();
+        assert!(
+            error && msg.contains("ops/motion.py does not exist"),
+            "{msg}"
+        );
+        assert_eq!(*e.network(), before, "the open patch is untouched");
+        assert!(
+            e.registry().get("py.pattern.rings").is_some(),
+            "still registered"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
