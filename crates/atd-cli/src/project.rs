@@ -92,6 +92,7 @@ pub(crate) fn library() -> (atd_core::Registry, OpLibrary) {
     let mut library = OpLibrary::default();
     atd_ops_img::library(&mut library);
     atd_ops_sig::library(&mut library);
+    atd_ops_pnt::library(&mut library);
     (registry, library)
 }
 

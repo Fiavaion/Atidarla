@@ -34,6 +34,7 @@ All platforms.
 - [Image processing](../../../examples/image-processing.atidarla/) — `outlined`, `masked`
 - [Keying](../../../examples/keying.atidarla/) — `over`
 - [Pack: Kaleidoscope Tunnel](../../../examples/pack-kaleido-tunnel.atidarla/) — `together`
+- [Points](../../../examples/points.atidarla/) — `mix`
 - [Signal scope](../../../examples/signal-scope.atidarla/) — `scopes`, `all`
 - [Simulations](../../../examples/simulations.atidarla/) — `screen`, `all`
 - [Time effects](../../../examples/time-effects.atidarla/) — `compare`

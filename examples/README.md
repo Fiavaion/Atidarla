@@ -25,6 +25,8 @@ every IMG and SIG operator (CLAUDE.md rule 7); each operator's page in
 | [live-control](live-control.atidarla/) | Mouse, OSC, MIDI, DMX, timecode and audio output |
 | [texture-sharing](texture-sharing.atidarla/) | Share Out and Share In: publishing to other applications and a loopback (Spout on Windows) |
 | [python-ops](python-ops.atidarla/) | Operators written in Python in the project's `ops/` folder: a counter, an LFO and an image generator ([`docs/python-ops.md`](../docs/python-ops.md)) |
+| [points](points.atidarla/) | GPU geometry: point clouds deformed by curl noise and drawn as sprites (M2) |
+| [particles](particles.atidarla/) | A GPU particle system whose state flows through a force on a feedback wire (M2) |
 
 One example per shipped Pack ([`packs/`](../packs/README.md), `docs/packs.md`). Each project
 carries its own copy of the Pack in `packs/<name>/` (a test keeps it equal to the library's):

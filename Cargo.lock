@@ -424,6 +424,11 @@ name = "atd-ops-pnt"
 version = "0.0.1"
 dependencies = [
  "atd-core",
+ "atd-gpu",
+ "atd-interop",
+ "pollster 0.4.0",
+ "serde_json",
+ "wgpu",
 ]
 
 [[package]]

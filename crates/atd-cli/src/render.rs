@@ -450,6 +450,9 @@ pub fn classify(type_id: &str) -> Option<Class> {
         | "img.time_machine" => Stateful,
         "sig.beat" | "sig.count" | "sig.envelope" | "sig.filter" | "sig.lag" | "sig.onset"
         | "sig.spectrum" | "sig.speed" | "sig.timer" | "sig.trail" | "sig.trigger" => Stateful,
+        // Geometry (M2): GPU work in the frame's encoder, nothing waits.
+        "img.render_points" | "pnt.points" | "pnt.noise" => Pure,
+        "pnt.particles" => Stateful,
         "img.movie_in" | "img.text" | "img.wgsl" | "sig.audio_file_in" => Waits,
         "img.analyze" => OneFrameLate,
         "img.share_in" | "sig.audio_in" | "sig.input" | "sig.midi_in" | "sig.osc_in"

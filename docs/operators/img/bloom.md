@@ -31,3 +31,4 @@ All platforms.
 ## Examples
 
 - [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `glow`
+- [Particles](../../../examples/particles.atidarla/) — `glow`

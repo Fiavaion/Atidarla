@@ -114,6 +114,7 @@ impl AtidarlaApp {
             let mut library = OpLibrary::default();
             atd_ops_img::library(&mut library);
             atd_ops_sig::library(&mut library);
+            atd_ops_pnt::library(&mut library);
             let mut registry = builtin_registry();
             load_isf(&mut registry, &mut library);
             let mut engine = Engine::new(
