@@ -117,3 +117,90 @@ fn worker_cook_times() {
     );
     assert_eq!(back.points(), pts.points());
 }
+
+/// The render-thread side of an MSH node that recooks every frame (a
+/// time expression), live at 60 fps over a 130k-point sphere: snapshot,
+/// comparison, hand-over and swap.
+#[test]
+#[ignore = "timings: run with --release --ignored --nocapture"]
+fn render_thread_cost_live() {
+    use atd_core::graph::{Edit, Node, Param};
+    use atd_gpu::engine::{Engine, EngineConfig, OpLibrary};
+    let instance = atd_gpu::primary_instance();
+    let Ok(adapter) =
+        pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+    else {
+        eprintln!("skipping: no GPU adapter");
+        return;
+    };
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        required_limits: atd_gpu::required_limits(&adapter),
+        ..Default::default()
+    }))
+    .unwrap();
+    let mut reg = atd_core::registry::Registry::default();
+    atd_ops_msh::register(&mut reg);
+    let mut lib = OpLibrary::default();
+    atd_ops_msh::library(&mut lib);
+    let config = EngineConfig {
+        width: 64,
+        height: 64,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+    };
+    let mut e = Engine::new(device, queue, reg, lib, config);
+    let (s, t) = (e.alloc_id(), e.alloc_id());
+    let param = |node, name: &str, value: Value, expr: Option<&str>| Edit::SetParam {
+        node,
+        param: name.into(),
+        value: Some(Param {
+            value,
+            expr: expr.map(Into::into),
+            bind: None,
+        }),
+    };
+    e.edit(
+        "build",
+        vec![
+            Edit::AddNode {
+                node: Node::new(s, "msh.sphere", "s"),
+            },
+            Edit::AddNode {
+                node: Node::new(t, "msh.transform", "t"),
+            },
+            param(s, "rows", json!(256), None),
+            param(s, "columns", json!(512), None),
+            param(t, "uniform", json!(1.0), Some("1 + 0.1 * sin(time)")),
+            Edit::Connect {
+                wire: atd_core::graph::Wire::new(
+                    atd_core::graph::Endpoint::new(s, "out"),
+                    atd_core::graph::Endpoint::new(t, "in"),
+                ),
+            },
+        ],
+    )
+    .unwrap();
+    let frame = std::time::Duration::from_secs_f64(1.0 / 60.0);
+    let start = Instant::now();
+    let mut cooks = Vec::new();
+    for i in 0..300u32 {
+        let t0 = Instant::now();
+        e.cook(&[t], f64::from(i) / 60.0).unwrap();
+        cooks.push(t0.elapsed().as_secs_f64() * 1e3);
+        if let Some(w) = (frame * (i + 1)).checked_sub(start.elapsed()) {
+            std::thread::sleep(w);
+        }
+    }
+    let mut tail = cooks[30..].to_vec();
+    tail.sort_by(f64::total_cmp);
+    let pct = |p: f64| tail[((tail.len() - 1) as f64 * p) as usize];
+    let st = e.stat(t).unwrap();
+    eprintln!(
+        "render thread, whole frame (sphere + transform of 130k points every frame): p50 {:.3} ms, p95 {:.3} ms, max {:.3} ms; transform node avg {:.0} us, max {:.0} us; status {:?}",
+        pct(0.5),
+        pct(0.95),
+        pct(1.0),
+        st.avg_us,
+        st.max_us,
+        e.status(t)
+    );
+}
