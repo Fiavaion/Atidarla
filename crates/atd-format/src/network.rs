@@ -237,7 +237,7 @@ pub(crate) fn check_format(root: &Table) -> Result<(), FormatError> {
     }
 }
 
-fn invalid(message: String) -> FormatError {
+pub(crate) fn invalid(message: String) -> FormatError {
     FormatError::Invalid(message)
 }
 
@@ -346,7 +346,7 @@ fn param_from_toml(item: &Item) -> Result<Json, String> {
     Ok(Json::Object(out))
 }
 
-fn json_to_toml(v: &Json) -> Result<Value, String> {
+pub(crate) fn json_to_toml(v: &Json) -> Result<Value, String> {
     Ok(match v {
         Json::Null => return Err("null cannot be written".into()),
         Json::Bool(b) => Value::from(*b),
@@ -373,7 +373,7 @@ fn json_to_toml(v: &Json) -> Result<Value, String> {
     })
 }
 
-fn toml_to_json(v: &Value) -> Result<Json, String> {
+pub(crate) fn toml_to_json(v: &Value) -> Result<Json, String> {
     Ok(match v {
         Value::String(s) => Json::from(s.value().as_str()),
         Value::Integer(i) => Json::from(*i.value()),
@@ -395,7 +395,10 @@ fn toml_to_json(v: &Value) -> Result<Json, String> {
 }
 
 /// `[[name]]` tables, or an array of inline tables.
-fn tables<'a>(item: Option<&'a Item>, name: &str) -> Result<Vec<&'a dyn TableLike>, FormatError> {
+pub(crate) fn tables<'a>(
+    item: Option<&'a Item>,
+    name: &str,
+) -> Result<Vec<&'a dyn TableLike>, FormatError> {
     match item {
         None => Ok(Vec::new()),
         Some(Item::ArrayOfTables(a)) => Ok(a.iter().map(|t| t as &dyn TableLike).collect()),
@@ -413,7 +416,7 @@ fn tables<'a>(item: Option<&'a Item>, name: &str) -> Result<Vec<&'a dyn TableLik
     }
 }
 
-fn table_like<'a>(item: &'a Item, at: &str) -> Result<&'a dyn TableLike, FormatError> {
+pub(crate) fn table_like<'a>(item: &'a Item, at: &str) -> Result<&'a dyn TableLike, FormatError> {
     item.as_table_like()
         .ok_or_else(|| invalid(format!("{at}: expected a table")))
 }
@@ -430,7 +433,7 @@ pub(crate) fn only_keys(t: &dyn TableLike, keys: &[&str], at: &str) -> Result<()
     Ok(())
 }
 
-fn required_u64(t: &dyn TableLike, key: &str, at: &str) -> Result<u64, FormatError> {
+pub(crate) fn required_u64(t: &dyn TableLike, key: &str, at: &str) -> Result<u64, FormatError> {
     t.get(key)
         .and_then(Item::as_integer)
         .and_then(|v| u64::try_from(v).ok())

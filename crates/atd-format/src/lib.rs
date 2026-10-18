@@ -4,6 +4,7 @@
 //! myshow.atidarla/
 //!   project.toml          name, description, output resolution
 //!   networks/main.toml    the patch: nodes, inputs, parameters
+//!   packs/<name>/         the project's copy of each Pack it uses (see [`pack`])
 //!   media/ shaders/ ...   files the patch refers to by relative path
 //!   .cache/               binaries, ignored by Git
 //! ```
@@ -19,14 +20,17 @@
 //! relative to the project folder (`Params::resolve` in `atd-gpu`).
 
 mod network;
+pub mod pack;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use atd_core::graph::Network;
+use atd_core::pack::PackSet;
 use toml_edit::{Array, DocumentMut, Item, Value};
 
 pub use network::{network_from_str, network_to_string};
+pub use pack::{Library, load_pack, pack_from_str, pack_to_string, save_pack};
 
 /// The file format version this build reads and writes.
 pub const FORMAT: i64 = 1;
@@ -73,6 +77,9 @@ pub struct Project {
     pub resolution: [u32; 2],
     /// Networks by ID (file stem in `networks/`). [`MAIN`] is the patch.
     pub networks: BTreeMap<String, Network>,
+    /// The project's Pack definitions (`packs/<name>/`). Check them with
+    /// [`PackSet::register`] before use.
+    pub packs: PackSet,
 }
 
 impl Project {
@@ -83,6 +90,7 @@ impl Project {
             description: String::new(),
             resolution: [1280, 720],
             networks: BTreeMap::from([(MAIN.to_owned(), Network::default())]),
+            packs: PackSet::default(),
         }
     }
 
@@ -165,6 +173,7 @@ pub fn project_from_str(source: &str) -> Result<Project, FormatError> {
         description,
         resolution,
         networks: BTreeMap::new(),
+        packs: PackSet::default(),
     })
 }
 
@@ -211,6 +220,29 @@ pub fn load(dir: &Path) -> Result<Project, FormatError> {
             dir.display()
         )));
     }
+    // Folders without a pack.toml (left-overs, the user's own) are skipped.
+    for path in pack::subdirs(&dir.join("packs"))? {
+        if !path.join("pack.toml").exists() {
+            continue;
+        }
+        let folder = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default()
+            .to_owned();
+        let rel = format!("packs/{folder}");
+        let def = load_pack(&path, &rel)?;
+        if def.name != folder {
+            return Err(FormatError::InFile {
+                file: format!("{rel}/pack.toml"),
+                message: format!(
+                    "Pack `{}` must be in a folder named `{}`",
+                    def.name, def.name
+                ),
+            });
+        }
+        project.packs.insert(def);
+    }
     Ok(project)
 }
 
@@ -249,6 +281,21 @@ pub fn save(dir: &Path, project: &Project) -> Result<(), FormatError> {
             std::fs::remove_file(&path).map_err(io(&path))?;
         }
     }
+    let packs = dir.join("packs");
+    for def in project.packs.iter() {
+        pack::save_pack(&packs.join(&def.name), def)
+            .map_err(|e| e.in_file(&format!("packs/{}", def.name)))?;
+    }
+    // A Pack no longer in the project: its files go, other files stay.
+    for path in pack::subdirs(&packs)? {
+        let stale = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .is_some_and(|name| project.packs.get(name).is_none());
+        if stale {
+            pack::remove_pack(&path)?;
+        }
+    }
     Ok(())
 }
 
@@ -262,3 +309,6 @@ fn write_atomic(path: &Path, text: &str) -> Result<(), FormatError> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod pack_tests;
