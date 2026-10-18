@@ -311,31 +311,46 @@ pub fn desc(ty: AttrType) -> [u32; 4] {
 /// (missing components 0) and, unless `read_only`, `st_<name>(i, v)`
 /// (integers rounded).
 pub fn typed_access(name: &str, d: &str, read_only: bool) -> String {
+    // Components are read and written through constant indices behind a count
+    // check, not `v[c]` in a loop: FXC (Direct3D on WARP, the Windows CI
+    // adapter) cannot take a vector component with a loop index as an l-value
+    // ("unable to unroll loop", X3511).
     let mut s = format!(
-        "fn ld_{name}(i: u32) -> vec4f {{
+        "fn cv_{name}(w: u32, k: u32) -> f32 {{
+    var f = bitcast<f32>(w);
+    if (k == 1u) {{ f = f32(bitcast<i32>(w)); }}
+    if (k == 2u) {{ f = f32(w); }}
+    return f;
+}}
+fn ld_{name}(i: u32) -> vec4f {{
     var v = vec4f(0.0);
     let b = i * {d}.y;
-    for (var c = 0u; c < {d}.x; c = c + 1u) {{
-        let w = {name}[b + c];
-        var f = bitcast<f32>(w);
-        if ({d}.z == 1u) {{ f = f32(bitcast<i32>(w)); }}
-        if ({d}.z == 2u) {{ f = f32(w); }}
-        v[c] = f;
-    }}
+    let n = {d}.x;
+    let k = {d}.z;
+    if (n > 0u) {{ v.x = cv_{name}({name}[b], k); }}
+    if (n > 1u) {{ v.y = cv_{name}({name}[b + 1u], k); }}
+    if (n > 2u) {{ v.z = cv_{name}({name}[b + 2u], k); }}
+    if (n > 3u) {{ v.w = cv_{name}({name}[b + 3u], k); }}
     return v;
 }}
 "
     );
     if !read_only {
         s.push_str(&format!(
-            "fn st_{name}(i: u32, v: vec4f) {{
+            "fn pk_{name}(f: f32, k: u32) -> u32 {{
+    var w = bitcast<u32>(f);
+    if (k == 1u) {{ w = bitcast<u32>(i32(round(f))); }}
+    if (k == 2u) {{ w = u32(max(round(f), 0.0)); }}
+    return w;
+}}
+fn st_{name}(i: u32, v: vec4f) {{
     let b = i * {d}.y;
-    for (var c = 0u; c < {d}.x; c = c + 1u) {{
-        var w = bitcast<u32>(v[c]);
-        if ({d}.z == 1u) {{ w = bitcast<u32>(i32(round(v[c]))); }}
-        if ({d}.z == 2u) {{ w = u32(max(round(v[c]), 0.0)); }}
-        {name}[b + c] = w;
-    }}
+    let n = {d}.x;
+    let k = {d}.z;
+    if (n > 0u) {{ {name}[b] = pk_{name}(v.x, k); }}
+    if (n > 1u) {{ {name}[b + 1u] = pk_{name}(v.y, k); }}
+    if (n > 2u) {{ {name}[b + 2u] = pk_{name}(v.z, k); }}
+    if (n > 3u) {{ {name}[b + 3u] = pk_{name}(v.w, k); }}
 }}
 "
         ));
