@@ -12,11 +12,21 @@
 //! in the node's status line), a generated docs page (`atidarla docs`), an
 //! example project, a unit test and an offline-render class (`Waits`).
 
+// Mesh code walks several parallel per-element arrays by index.
+#![allow(clippy::needless_range_loop)]
+
+pub mod boolean;
 pub mod cook;
 pub mod edit;
+pub mod file;
+pub mod io;
 pub mod mesh;
+pub mod model;
 pub mod normals;
+pub mod points;
 pub mod prims;
+pub mod reduce;
+pub mod sweep;
 
 use atd_core::registry::{OpFamily, OperatorSchema, ParamSchema, Registry, SocketSchema, WireType};
 use atd_gpu::engine::OpLibrary;
@@ -152,6 +162,94 @@ fn defs() -> Vec<Def> {
             inputs: &["in"],
             params: edit::fuse_params,
             run: edit::fuse,
+        },
+        Def {
+            id: "subdivide",
+            label: "Subdivide",
+            summary: "Smooths polygons by Catmull-Clark subdivision: each level splits every polygon into quads and rounds the shape (open borders stay as curves). Attributes are interpolated.",
+            inputs: &["in"],
+            params: model::subdivide_params,
+            run: model::subdivide,
+        },
+        Def {
+            id: "extrude",
+            label: "Extrude",
+            summary: "Pushes polygons out along their normals and adds side walls, each polygon on its own (with an inset) or as connected regions. The moved polygons are the group `extrude_front`, the walls `extrude_side`.",
+            inputs: &["in"],
+            params: model::extrude_params,
+            run: model::extrude,
+        },
+        Def {
+            id: "uv_project",
+            label: "UV Project",
+            summary: "Writes texture coordinates `uv` per point by a planar, cylindrical, spherical or box projection, fitted to the bounds.",
+            inputs: &["in"],
+            params: model::uv_params,
+            run: model::uv_project,
+        },
+        Def {
+            id: "polyreduce",
+            label: "PolyReduce",
+            summary: "Reduces the polygon count while keeping the shape: quadric error edge collapses on triangles, down to a share of the triangles or until the error passes a tolerance. Borders can be kept.",
+            inputs: &["in"],
+            params: reduce::params,
+            run: reduce::run,
+        },
+        Def {
+            id: "boolean",
+            label: "Boolean",
+            summary: "Union, intersection or difference of two closed meshes (BSP trees). The result is welded; pieces from A and B are the groups `from_a` and `from_b`. Up to 200,000 triangles per input; seams may keep T-junctions; normals are not written (add Normals).",
+            inputs: &["a", "b"],
+            params: boolean::params,
+            run: boolean::run,
+        },
+        Def {
+            id: "sweep",
+            label: "Sweep",
+            summary: "Sweeps a profile along a curve: the first primitive of `profile` (drawn in the XY plane) or a circle, along the first primitive of `curve`, with rotation-minimising frames, scale and twist. Writes `N` and `uv`.",
+            inputs: &["curve", "profile"],
+            params: sweep::sweep_params,
+            run: sweep::sweep,
+        },
+        Def {
+            id: "skin",
+            label: "Skin",
+            summary: "Lofts a surface through the input's primitives in order (profiles with equal point counts), optionally as a closed ring and with end caps.",
+            inputs: &["in"],
+            params: sweep::skin_params,
+            run: sweep::skin,
+        },
+        Def {
+            id: "scatter",
+            label: "Scatter",
+            summary: "Seeded random points on the surface, evenly by area, with the surface normal `N`, an `id` and the surface's other attributes interpolated: points for PNT operators or Iso Surface.",
+            inputs: &["in"],
+            params: points::scatter_params,
+            run: points::scatter,
+        },
+        Def {
+            id: "iso_surface",
+            label: "Iso Surface",
+            summary: "Builds a closed mesh where a field crosses zero (marching tetrahedra): blended spheres around the input points (radius × `pscale`), or an analytic sphere, box, torus or gyroid. Writes `N` from the field.",
+            inputs: &["in"],
+            params: points::iso_params,
+            run: points::iso_surface,
+        },
+        Def {
+            id: "file_in",
+            label: "Mesh File In",
+            summary: "Reads a static mesh from an OBJ, PLY or glTF 2.0 (.gltf, .glb) file: positions, polygons and lines, normals, texture coordinates and colours (glTF: the default scene with its node transforms).",
+            inputs: &[],
+            params: file::in_params,
+            run: file::file_in,
+        },
+        Def {
+            id: "file_out",
+            label: "Mesh File Out",
+            summary: "Writes its input to an OBJ, PLY or glTF 2.0 (.gltf, .glb) file whenever it changes, and passes it through. Files are byte-identical for the same geometry.",
+            inputs: &["in"],
+            params: file::out_params,
+            run: file::file_out,
         },
     ]
 }
