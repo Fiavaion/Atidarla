@@ -209,8 +209,9 @@ engine supplies one; the standard names below; otherwise `float` (as in VEX).
 | `id` | `int` | `u32` (converted on read and write) |
 
 Note: VEX's `Cd` and `uv` are 3-vectors. Atidarla's attribute model uses `vec4` colour and
-`vec2` UVs (`docs/design/geometry-attributes.md`). Writing `v@Cd` is an error against that
-table, not a silent conversion.
+`vec2` UVs (`docs/design/geometry-attributes.md`). A sigil wins over this table, so with no
+schema `v@Cd` makes a 3-component `Cd`; when the engine supplies the input's schema, a sigil
+that disagrees with the input's type is an error (no silent conversion).
 
 Writing an attribute that the input does not have creates it (zero-filled before the
 kernel runs). Every element writes only its own attributes, so kernels need no atomics and
@@ -330,16 +331,21 @@ Every error names a line and column (1-based, counted in characters) and a lengt
 message and, when there is an obvious fix, a hint:
 
 ```
-grade.atk:3:12: error: cannot assign `float` to `int`
+grade.atk:2:9: error: expected `int`, found `float`
   int n = @P.x * 4;
           ^^^^^^^^
   hint: convert explicitly with int(...)
 ```
 
 The compiler never panics, whatever the input (a fuzz test feeds it thousands of mutated
-kernels), and reports at most 25 errors. The generated WGSL is validated with naga before it
-is returned; if naga rejects it (for example a constant expression that overflows, such as
-`2147483647 + 1`), the error is mapped back to the kernel source.
+kernels and random text), and reports at most 25 errors, in source order. A syntax error
+stops before type checking; a bad character or number hides the parser's follow-on errors on
+the same line.
+
+The generated WGSL is validated with naga before it is returned. The type checker is meant
+to reject everything naga would, so a naga rejection is a compiler bug; it is still reported
+at the kernel construct that produced the WGSL (`Origin::Wgsl`), with a hint to report it.
+Integer arithmetic wraps, in constant expressions too: `2147483647 + 1` is `-2147483648`.
 
 ## Differences from VEX, at a glance
 

@@ -63,6 +63,13 @@ fn ten_line_curl_noise_kernel() {
         .find(|(_, s, _)| s.contains("curlnoise") && s.contains("attract"))
         .expect("the curl-noise example is in the docs");
     assert_eq!(src.lines().count(), 10, "the AC2 kernel is ten lines");
+    // The GPU tests run the golden copy; keep them the same kernel.
+    let golden = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/golden/curl_particles.points.atk"
+    ))
+    .expect("read golden");
+    assert_eq!(golden.replace("\r\n", "\n"), src);
     let c = compile(&src, &CompileOptions::new(Target::Points)).expect("compiles");
     let names: Vec<&str> = c
         .bindings
