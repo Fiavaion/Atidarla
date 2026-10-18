@@ -427,6 +427,11 @@ pub fn classify(type_id: &str) -> Option<Class> {
         // the nodes inside it, and each of those is classified on its own.
         return Some(Pure);
     }
+    if type_id.starts_with("msh.") {
+        // MSH operators (`docs/design/msh-operators.md`): cooked on worker
+        // threads; offline each frame waits for its own result.
+        return Some(Waits);
+    }
     if type_id.starts_with("py.") {
         // Python operators (`docs/python-ops.md`): cooked on the Python
         // operator worker; offline each frame waits for its own result.
