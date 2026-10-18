@@ -214,6 +214,157 @@ fn pt1(gpu: &GpuContext) -> anyhow::Result<Case> {
     })
 }
 
+/// PT-2 (PRD §8, M2 AC1): 2M particles with curl noise, attraction and age,
+/// drawn as 2-pixel additive sprites at 1920×1080 (the definition proposed
+/// in docs/design/geometry-attributes.md §4, Q1). Frame time includes GPU
+/// completion; with timestamp queries the GPU time is split into simulate
+/// and draw (simulate alone, then both). The target is judged on the RTX
+/// 4070 lab PC.
+fn pt2(gpu: &GpuContext) -> anyhow::Result<Case> {
+    use atd_core::graph::{Edit, Endpoint, Node, Param, Wire};
+    use atd_gpu::engine::{Engine, EngineConfig, OpLibrary};
+    use serde_json::json;
+
+    // Its own device, with timestamps when the adapter has them.
+    let features = atd_gpu::optional_features(&gpu.adapter)
+        | (gpu.adapter.features() & wgpu::Features::TIMESTAMP_QUERY);
+    let (device, queue) = pollster::block_on(gpu.adapter.request_device(&wgpu::DeviceDescriptor {
+        label: Some("atd-bench-pt2"),
+        required_features: features,
+        required_limits: atd_gpu::required_limits(&gpu.adapter),
+        ..Default::default()
+    }))
+    .context("creating the PT-2 device")?;
+    let registry = crate::builtin_registry();
+    let mut library = OpLibrary::default();
+    atd_ops_pnt::library(&mut library);
+    let (w, h) = (1920, 1080);
+    let mut engine = Engine::new(
+        device,
+        queue,
+        registry,
+        library,
+        EngineConfig {
+            width: w,
+            height: h,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+        },
+    );
+    let (sys, draw) = (engine.alloc_id(), engine.alloc_id());
+    let mut edits = vec![
+        Edit::AddNode {
+            node: Node::new(sys, "pnt.particles", "particles1"),
+        },
+        Edit::AddNode {
+            node: Node::new(draw, "img.render_points", "render1"),
+        },
+        Edit::Connect {
+            wire: Wire::new(Endpoint::new(sys, "out"), Endpoint::new(draw, "geo")),
+        },
+    ];
+    let params = [
+        (sys, "capacity", json!(2_000_000)),
+        (sys, "initial", json!(2_000_000)),
+        (sys, "rate", json!(500_000.0)),
+        (sys, "life", json!(4.0)),
+        (sys, "attract", json!(0.5)),
+        (draw, "intensity", json!(0.3)),
+        (draw, "height", json!(3.0)),
+    ];
+    for (node, param, value) in params {
+        edits.push(Edit::SetParam {
+            node,
+            param: param.into(),
+            value: Some(Param::constant(value)),
+        });
+    }
+    engine.edit("pt2", edits).context("building the patch")?;
+
+    let software = gpu.adapter.get_info().device_type == wgpu::DeviceType::Cpu;
+    let mut t = 0.0;
+    for _ in 0..if software { 3 } else { 60 } {
+        engine.cook(&[draw], t)?;
+        let _ = engine.device().poll(wgpu::PollType::wait_indefinitely());
+        t += 1.0 / 60.0;
+    }
+    for id in [sys, draw] {
+        if let Some(e) = engine.error(id) {
+            anyhow::bail!("a node failed: {e}");
+        }
+    }
+    let created = (
+        engine.buffer_pool().created(),
+        atd_gpu::geo::kernels::bind_groups_created_total(),
+        engine.pool().created(),
+    );
+    let pct = |v: &mut Vec<f64>, p: f64| {
+        v.sort_by(f64::total_cmp);
+        v[((v.len() - 1) as f64 * p).round() as usize]
+    };
+    let frames_wanted = if software { 3 } else { 300 };
+    let mut frames = Vec::new();
+    for _ in 0..frames_wanted {
+        let (cooked, ms) = timed(|| {
+            let n = engine.cook(&[draw], t);
+            let _ = engine.device().poll(wgpu::PollType::wait_indefinitely());
+            n
+        });
+        anyhow::ensure!(cooked? == 2, "both nodes cook every frame");
+        frames.push(ms);
+        t += 1.0 / 60.0;
+    }
+    let after = (
+        engine.buffer_pool().created(),
+        atd_gpu::geo::kernels::bind_groups_created_total(),
+        engine.pool().created(),
+    );
+    anyhow::ensure!(
+        after == created,
+        "steady frames created GPU objects: {created:?} → {after:?}"
+    );
+    let (p50, p95, max) = (
+        pct(&mut frames, 0.5),
+        pct(&mut frames, 0.95),
+        frames[frames.len() - 1],
+    );
+    let split = match atd_gpu::timer::GpuTimer::new(engine.device(), engine.queue()) {
+        Some(timer) => {
+            let gpu_time = |engine: &mut Engine, node, t: &mut f64| -> anyhow::Result<f64> {
+                let mut v = Vec::new();
+                for _ in 0..if software { 2 } else { 100 } {
+                    timer.start(engine.device(), engine.queue());
+                    engine.cook(&[node], *t)?;
+                    v.push(
+                        timer
+                            .stop(engine.device(), engine.queue())
+                            .map_err(anyhow::Error::msg)?,
+                    );
+                    *t += 1.0 / 60.0;
+                }
+                Ok(pct(&mut v, 0.5))
+            };
+            let sim = gpu_time(&mut engine, sys, &mut t)?;
+            let both = gpu_time(&mut engine, draw, &mut t)?;
+            format!(
+                "; GPU p50: simulate {sim:.2} ms, simulate + draw {both:.2} ms (draw ≈ {:.2} ms)",
+                both - sim
+            )
+        }
+        None => "; no timestamp queries on this adapter, so no GPU split".into(),
+    };
+    Ok(Case {
+        id: "pt2.particles_2m",
+        status: Status::Ok,
+        ms: Some(p50),
+        note: Some(format!(
+            "2M particles (curl noise, attract, age), 2-px additive sprites at {w}×{h}, {} frames: p50 {p50:.2} ms ({:.1} fps), p95 {p95:.2} ms, max {max:.2} ms{split}; no buffers, bind groups or textures created after warm-up; target p95 ≤ 16.7 ms on RTX 4070{}",
+            frames.len(),
+            1000.0 / p50,
+            if software { " (software adapter)" } else { "" }
+        )),
+    })
+}
+
 pub fn run(out: Option<&Path>, use_gpu: bool) -> anyhow::Result<()> {
     let mut platform = PlatformInfo::host();
     let mut adapter = None;
@@ -243,6 +394,15 @@ pub fn run(out: Option<&Path>, use_gpu: bool) -> anyhow::Result<()> {
                     Ok(case) => case,
                     Err(err) => Case {
                         id: "pt1.img_chain_4k",
+                        status: Status::Error,
+                        ms: None,
+                        note: Some(format!("{err:#}")),
+                    },
+                });
+                cases.push(match pt2(&gpu) {
+                    Ok(case) => case,
+                    Err(err) => Case {
+                        id: "pt2.particles_2m",
                         status: Status::Error,
                         ms: None,
                         note: Some(format!("{err:#}")),

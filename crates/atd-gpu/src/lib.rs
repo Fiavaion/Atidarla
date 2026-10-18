@@ -12,6 +12,7 @@ pub mod fullscreen;
 pub mod geo;
 pub mod isf;
 pub mod pool;
+pub mod timer;
 
 use atd_core::{GpuVendor, PlatformInfo};
 use serde::Serialize;
