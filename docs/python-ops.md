@@ -50,8 +50,8 @@ file stores, so renaming the file or the function renames the operator type.
 
 | Parameter | Panel widget |
 |---|---|
-| `atd.Float(name, label=None, default=0.0, min=None, max=None, help="")` | Number (slider when both limits are set) |
-| `atd.Int(name, label=None, default=0, min=None, max=None, help="")` | Integer |
+| `atd.Float(name, label=None, default=0.0, min=None, max=None, help="")` | Number (dragged, kept within the limits) |
+| `atd.Int(name, label=None, default=0, min=None, max=None, help="")` | Integer (dragged, kept within the limits) |
 | `atd.Toggle(name, label=None, default=False, help="")` | Check box |
 | `atd.Menu(name, label=None, options=("a", "b"), default=None, help="")` | Drop-down (default: first option) |
 | `atd.String(name, label=None, default="", help="")` | Text |
@@ -110,7 +110,8 @@ does not stop expressions and the operators' worker can be restarted on its own)
   Python operator allocates once warm (tested).
 - **Offline** (`atidarla render`): the cook waits for the operator's result for this frame, so
   a deterministic operator gives the same frames on every render (tested). The wait is
-  bounded: past the operator's timeout plus a grace second the frame fails with a node error.
+  bounded: a cook still running at its timeout is stopped as below, and the cook thread never
+  waits longer than the timeout plus 3 s; the frame then fails with the node's error.
 - **Errors** show on the node, with the line in your file: `ZeroDivisionError: division by
   zero (ops/motion.py, line 14, in counter)`. A bad return value is an error too.
 - **Timeouts.** A cook that runs longer than its `timeout` is interrupted (a `TimeoutError`
@@ -186,6 +187,16 @@ module there is never imported.
 **Known gap (not closed by this work):** Python *expressions* in parameters (A22) run as soon
 as a project opens, without asking. Until they go through the same gate, opening an untrusted
 project is not safe even with its Python operators blocked. Raised with Mark.
+
+## Where it lives
+
+`crates/atd-py/src/ops/`: `read.rs` (the `ast` reader, no execution), `host.rs` (worker,
+supervisor, slots), `node.rs` (the engine side: SIG and IMG nodes), `trust.rs` (the remembered
+hashes), `mod.rs` (`PythonOps`: registration, hot reload, `stale_edits`); the Python half is
+`crates/atd-py/src/ops_host.py`. The registry knows these operators by their `py.` type IDs and
+`python.custom` provenance (`Registry::replace_custom`, `Registry::provenance`). Tests:
+`crates/atd-py/tests/ops.rs` and `ops_alloc.rs`, plus `check`/`render` tests in `atd-cli` and
+the open/palette tests in `atd-app`.
 
 ## Commands
 

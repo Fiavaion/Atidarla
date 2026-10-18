@@ -3,7 +3,7 @@ format = 1
 name = "Python operators"
 description = '''
 Operators written in Python, in this project's ops/ folder (docs/python-ops.md). Step
-Counter (ops/motion.py) counts 1 to 8 twice a second and drives the number of rings;
+Counter (ops/motion.py) counts 1 to 8, two steps a second, and sets the number of rings;
 Python LFO (same file) moves them outwards; Rings (ops/pattern.py) draws them in pure
 Python at 64x64, and built-in Resolution and Level scale it up and adjust it.
 

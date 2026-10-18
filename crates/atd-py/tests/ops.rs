@@ -724,6 +724,51 @@ fn hot_reload_keeps_compatible_state() {
     assert_eq!(e.error(c), None);
 }
 
+/// The app's path: a watcher thread notices a saved file and `poll` (which
+/// never blocks) applies it.
+#[test]
+fn the_watcher_picks_up_saved_files() {
+    let p = TempProject::new("watch", &[("counter.py", COUNTER)]);
+    let mut ops = PythonOps::open(&p.0);
+    let mut reg = Registry::default();
+    let mut lib = OpLibrary::default();
+    ops.register(&mut reg, &mut lib);
+    ops.watch().unwrap();
+    assert_eq!(ops.poll(&mut reg, &mut lib), None, "nothing saved yet");
+    let hash = ops.hash().to_owned();
+    // A different length, so the change shows even with coarse file times.
+    p.write(
+        "counter.py",
+        &COUNTER.replace(r#"label="Counter""#, r#"label="Frame Counter""#),
+    );
+    let start = Instant::now();
+    let reload = loop {
+        let f = Instant::now();
+        let r = ops.poll(&mut reg, &mut lib);
+        assert!(f.elapsed() < Duration::from_millis(50), "poll does not block");
+        if let Some(r) = r {
+            break r;
+        }
+        assert!(start.elapsed() < Duration::from_secs(10), "the watcher saw it");
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(reload.files, ["ops/counter.py"]);
+    assert_eq!(reg.get("py.counter.counter").unwrap().label, "Frame Counter");
+    assert_ne!(ops.hash(), hash, "a changed file is a new hash to allow");
+    // A new file registers its operators too.
+    p.write(
+        "extra.py",
+        "import atidarla as atd\n\n@atd.op(family='SIG')\ndef one(ctx):\n    return {'one': 1}\n",
+    );
+    let start = Instant::now();
+    while reg.get("py.extra.one").is_none() {
+        ops.poll(&mut reg, &mut lib);
+        assert!(start.elapsed() < Duration::from_secs(10), "the new file registers");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(lib.contains("py.extra.one"));
+}
+
 /// A reload that removes a parameter a node has set drops the value (and a
 /// wired input's wire) from the patch, so the project still loads.
 #[test]
