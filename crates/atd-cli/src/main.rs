@@ -4,6 +4,7 @@ mod bench;
 mod docs;
 mod isf_import;
 mod project;
+mod render;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -28,8 +29,44 @@ enum Command {
         #[arg(long)]
         no_gpu: bool,
     },
-    /// Deterministic offline render of a project (FR-H1, M2).
-    Render { project: PathBuf },
+    /// Deterministic offline render of a project to a numbered PNG sequence
+    /// (FR-H1).
+    ///
+    /// Frame i is cooked at i/fps seconds, every frame one fixed step after
+    /// the last, with no wall clock: operators that work on worker threads
+    /// (movies, audio files, shader compiles, text, Python expressions,
+    /// Analyze) are waited for, live inputs (audio, MIDI, OSC, input
+    /// devices, timecode, Share In) output their idle value and are named
+    /// in a warning, and sinks (OSC, DMX, MIDI and audio out, Share Out)
+    /// do not emit. Two renders on the same machine (same GPU adapter and
+    /// backend) give byte-identical frames; other machines may differ.
+    ///
+    /// Writes <OUT>/frame_000000.png, frame_000001.png, ... (numbered by
+    /// frame). Writing a movie file (.mov, HAP or FFmpeg) is not
+    /// implemented yet; encode the sequence with another tool. See
+    /// docs/render.md.
+    Render {
+        /// Project folder (`*.atidarla`).
+        project: PathBuf,
+        /// Folder to write the PNG frames into (created if missing).
+        #[arg(long)]
+        out: PathBuf,
+        /// Frames START-END: START inclusive, END exclusive (0-300 is
+        /// frames 0 to 299, five seconds at 60 fps).
+        #[arg(long, default_value = "0-60", value_parser = render::parse_range)]
+        range: std::ops::Range<u64>,
+        /// Frames per second: frame i is at i/fps seconds. Project files
+        /// have no frame rate yet.
+        #[arg(long, default_value_t = render::DEFAULT_FPS, value_parser = render::parse_fps)]
+        fps: f64,
+        /// Fixed time step. Always on: accepted for the PRD's command line.
+        #[arg(long)]
+        fixed_step: bool,
+        /// The node to render, by name; default: the output node the app's
+        /// viewer shows first (the last IMG node nothing reads from).
+        #[arg(long)]
+        node: Option<String>,
+    },
     /// Run a project headless, optionally as a kiosk with watchdog (FR-H2, M3).
     Run { project: PathBuf },
     /// Bake a network to disk (M2).
@@ -142,7 +179,23 @@ fn main() -> ExitCode {
                 compile_timeout: std::time::Duration::from_secs(compile_timeout),
             },
         ),
-        Command::Render { .. } => return not_yet("render", "M2 (FR-H1)"),
+        Command::Render {
+            project,
+            out,
+            range,
+            fps,
+            fixed_step: _,
+            node,
+        } => render::run(
+            &project,
+            &out,
+            &render::RenderOptions {
+                range,
+                fps,
+                node,
+                size: None,
+            },
+        ),
         Command::Run { .. } => return not_yet("run", "M3 (FR-H2)"),
         Command::Bake { .. } => return not_yet("bake", "M2"),
         Command::Serve { .. } => return not_yet("serve", "M5 (FR-H3)"),

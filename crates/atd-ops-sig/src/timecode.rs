@@ -39,8 +39,13 @@ impl TimecodeIn {
 impl SigOp for TimecodeIn {
     fn cook(&mut self, ctx: &mut SigCtx<'_>) -> Result<(), String> {
         let p = ctx.params;
-        let source = p.str("source");
-        let device = if source == "ltc" {
+        // A live input is idle in an offline render (FR-H1): a MIDI port
+        // with no device behind it, so no code arrives (all zero, unlocked).
+        let offline = p.mode().is_offline();
+        let source = if offline { "mtc" } else { p.str("source") };
+        let device = if offline {
+            "virtual"
+        } else if source == "ltc" {
             p.str("audio_device")
         } else {
             p.str("midi_device")

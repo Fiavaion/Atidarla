@@ -67,6 +67,24 @@ jobs:
         # second without errors and every binding finds its channel.
         shell: bash
         run: cargo run -p atd-cli --release -- check ${{ matrix.gpu == '1' && '--gpu' || '' }} examples/*.atidarla
+      - name: Deterministic render (M2 AC4, FR-H1)
+        # Two offline renders of the AC1 example (audio decoded on a worker
+        # thread, spectrum, feedback) give byte-identical PNG frames.
+        if: matrix.gpu == '1'
+        shell: bash
+        run: |
+          for run in 1 2; do
+            cargo run -p atd-cli --release -- render examples/audio-reactive-feedback.atidarla --out render-$run --range 0-30 --fixed-step
+          done
+          n=0
+          for f in render-1/*.png; do
+            cmp "$f" "render-2/$(basename "$f")"
+            n=$((n + 1))
+          done
+          test "$n" -eq 30
+          test "$(ls render-2/*.png | wc -l)" -eq 30
+          if command -v sha256sum > /dev/null; then sum="sha256sum"; else sum="shasum -a 256"; fi
+          echo "$n frames byte-identical; all frames: $(cat render-1/*.png | $sum)"
       - name: ISF import (M1 AC2, FR-K6)
         # Translate, build and cook the public Vidvox ISF collection (MIT) at
         # a pinned commit on the runner's GPU; fail below 90%. Slow compiles

@@ -186,7 +186,8 @@ pub fn create(device: &wgpu::Device) -> Box<dyn ImgToSigOp> {
 impl ImgToSigOp for AnalyzeOp {
     fn cook(&mut self, ctx: &mut ImgToSigCtx<'_>) -> Result<(), String> {
         if let AnalyzeOp::Building(rx) = self {
-            match rx.try_recv() {
+            // Offline the first cook waits for the pipelines (FR-H1).
+            match ctx.params.mode().receive(rx) {
                 Ok(Ok(op)) => *self = AnalyzeOp::Ready(Box::new(op)),
                 Ok(Err(e)) => *self = AnalyzeOp::Failed(e),
                 Err(std::sync::mpsc::TryRecvError::Empty) => {
@@ -301,8 +302,15 @@ fn build(device: &wgpu::Device) -> Analyze {
 
 impl Analyze {
     fn cook(&mut self, ctx: &mut ImgToSigCtx<'_>) -> Result<(), String> {
-        // Let finished maps report, without waiting.
-        let _ = ctx.device.poll(wgpu::PollType::Poll);
+        // Let finished maps report, without waiting. Offline, wait for the
+        // previous frame's readback, so the values are always exactly one
+        // frame late (FR-H1).
+        let poll = if ctx.params.mode().is_offline() {
+            wgpu::PollType::wait_indefinitely()
+        } else {
+            wgpu::PollType::Poll
+        };
+        let _ = ctx.device.poll(poll);
         for slot in &mut self.slots {
             if slot.state.load(Ordering::Acquire) != READY {
                 continue;

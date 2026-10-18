@@ -139,3 +139,51 @@ fn python_expressions_arrive_a_frame_late_without_blocking() {
     }
     assert_eq!(red(&mut e, level, t + 0.1), 64);
 }
+
+/// Offline (FR-H1) the cook waits for the worker: a Python result is
+/// always exactly one frame late, however busy or slow the worker is.
+#[test]
+fn offline_python_results_are_exactly_one_frame_late() {
+    let Some(mut e) = engine() else { return };
+    e.set_python(Box::new(PyExprHost::start().unwrap()));
+    e.set_mode(atd_gpu::engine::CookMode::Offline { fps: 60.0 });
+    let (white, level) = (e.alloc_id(), e.alloc_id());
+    e.edit(
+        "build",
+        [
+            Edit::AddNode {
+                node: Node::new(white, "img.constant", "white"),
+            },
+            Edit::AddNode {
+                node: Node::new(level, "img.level", "level1"),
+            },
+            Edit::SetParam {
+                node: white,
+                param: "colour".into(),
+                value: Some(Param::constant(json!([1.0, 1.0, 1.0, 1.0]))),
+            },
+            Edit::Connect {
+                wire: Wire::new(Endpoint::new(white, "out"), Endpoint::new(level, "in")),
+            },
+            // Python only (a list); slow on purpose, and `frame` shows
+            // which frame the value was computed for: 0.25 after frame 0,
+            // 0.5 after frame 1.
+            Edit::SetParam {
+                node: level,
+                param: "brightness".into(),
+                value: Some(Param {
+                    value: json!(1.0),
+                    expr: Some("[__import__('time').sleep(0.05), 0.25 * (frame + 1)][1]".into()),
+                    bind: None,
+                }),
+            },
+        ],
+    )
+    .unwrap();
+    // Frame 0 has no result yet (the stored value); each later frame has
+    // the previous frame's.
+    assert_eq!(red(&mut e, level, 0.0), 255);
+    assert_eq!(red(&mut e, level, 1.0 / 60.0), 64);
+    assert!(matches!(red(&mut e, level, 2.0 / 60.0), 127 | 128));
+    assert_eq!(e.error(level), None);
+}

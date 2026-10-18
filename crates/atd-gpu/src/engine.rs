@@ -215,8 +215,53 @@ impl Drop for ChannelWriter<'_> {
     }
 }
 
+/// How the engine runs (FR-H1, `docs/render.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum CookMode {
+    /// Real time, as the app runs: work on worker threads (decoding,
+    /// compiling, readbacks, Python) never blocks the cook (rule 1), and
+    /// its results arrive whenever they are ready.
+    #[default]
+    Live,
+    /// Offline render (`atidarla render`): frame `i` is at `i / fps`
+    /// seconds, every frame advances exactly one step, and operators wait
+    /// for their workers so that each frame's result is a function of the
+    /// project and the frame alone. Live inputs output their idle value and
+    /// sinks do not emit.
+    Offline { fps: f64 },
+}
+
+impl CookMode {
+    pub fn is_offline(self) -> bool {
+        matches!(self, Self::Offline { .. })
+    }
+
+    /// Seconds per frame of an offline render; `None` live.
+    pub fn step(self) -> Option<f64> {
+        match self {
+            Self::Live => None,
+            Self::Offline { fps } => Some(1.0 / fps),
+        }
+    }
+
+    /// A worker's result. Live: whatever has arrived, never blocking.
+    /// Offline: waits for it.
+    pub fn receive<T>(
+        self,
+        rx: &std::sync::mpsc::Receiver<T>,
+    ) -> Result<T, std::sync::mpsc::TryRecvError> {
+        match self {
+            Self::Live => rx.try_recv(),
+            Self::Offline { .. } => rx
+                .recv()
+                .map_err(|_| std::sync::mpsc::TryRecvError::Disconnected),
+        }
+    }
+}
+
 /// Read access to a node's parameters, with schema defaults and channel
-/// bindings resolved.
+/// bindings resolved, and the engine settings they are read under (project
+/// folder, expressions, cook mode).
 #[derive(Debug, Clone, Copy)]
 pub struct Params<'a> {
     net: &'a Network,
@@ -227,6 +272,7 @@ pub struct Params<'a> {
     project_dir: Option<&'a Path>,
     /// Expression values this frame (FR-P2).
     exprs: Option<&'a ExprTable>,
+    mode: CookMode,
 }
 
 impl<'a> Params<'a> {
@@ -245,6 +291,7 @@ impl<'a> Params<'a> {
             node,
             project_dir: None,
             exprs: None,
+            mode: CookMode::Live,
         }
     }
 
@@ -252,6 +299,17 @@ impl<'a> Params<'a> {
     pub fn with_project_dir(mut self, dir: Option<&'a Path>) -> Self {
         self.project_dir = dir;
         self
+    }
+
+    /// The same parameters read under `mode` (for tests and tools).
+    pub fn with_mode(mut self, mode: CookMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    /// Whether the engine is cooking live or rendering offline.
+    pub fn mode(&self) -> CookMode {
+        self.mode
     }
 
     /// A path parameter's text as a file path: absolute paths as they are,
@@ -605,6 +663,7 @@ pub struct Engine {
     python: Option<Box<dyn PythonHost>>,
     py_jobs: Vec<PyJob>,
     py_results: Vec<(u64, Result<f64, String>)>,
+    mode: CookMode,
 }
 
 impl std::fmt::Debug for Engine {
@@ -670,7 +729,24 @@ impl Engine {
             python: None,
             py_jobs: Vec::new(),
             py_results: Vec::new(),
+            mode: CookMode::Live,
         }
+    }
+
+    /// Switches between live cooking (the default) and offline rendering
+    /// (FR-H1). Set it before the first cook: operators keep state.
+    pub fn set_mode(&mut self, mode: CookMode) {
+        self.mode = mode;
+    }
+
+    pub fn mode(&self) -> CookMode {
+        self.mode
+    }
+
+    /// Numbers the next cook `frame` (operators see it as their frame
+    /// index); an offline render starting part-way sets its first frame.
+    pub fn set_frame(&mut self, frame: u64) {
+        self.frame = frame;
     }
 
     /// The value `param`'s expression gave on `node`'s last cook (for
@@ -887,9 +963,12 @@ impl Engine {
             python,
             py_jobs,
             py_results,
+            mode,
             ..
         } = self;
-        // Python results computed from the last frame's values.
+        let mode = *mode;
+        // Python results computed from the last frame's values (offline,
+        // every one of them: the previous frame waited for the worker).
         match python.as_mut() {
             Some(py) => {
                 py.collect(py_results);
@@ -899,7 +978,10 @@ impl Engine {
             None => {}
         }
         scheduler.plan(net, registry, requested, plan)?;
-        let dt = last_time.map_or(0.0, |t| (time - t).max(0.0));
+        // Offline every frame is exactly one step long, the first included.
+        let dt = mode
+            .step()
+            .unwrap_or_else(|| last_time.map_or(0.0, |t| (time - t).max(0.0)));
         *last_time = Some(time);
         let key = TexKey {
             width: config.width,
@@ -962,6 +1044,7 @@ impl Engine {
                         node: id,
                         project_dir: project_dir.as_deref(),
                         exprs: Some(exprs),
+                        mode,
                     },
                     time,
                     frame: *frame,
@@ -1018,6 +1101,7 @@ impl Engine {
                         node: id,
                         project_dir: project_dir.as_deref(),
                         exprs: Some(exprs),
+                        mode,
                     },
                     time,
                     dt,
@@ -1085,6 +1169,7 @@ impl Engine {
                             node: id,
                             project_dir: project_dir.as_deref(),
                             exprs: Some(exprs),
+                            mode,
                         },
                         input_size,
                         project,
@@ -1098,6 +1183,12 @@ impl Engine {
                 height: wanted.1.clamp(1, max),
                 ..key
             });
+            if mode.is_offline() {
+                // A pooled texture holds whatever it last held. Operators
+                // overwrite their whole output, and offline this guarantees
+                // it: no frame depends on the pool's history.
+                clear_texture(&mut encoder, &output);
+            }
             let mut ctx = CookCtx {
                 device,
                 queue,
@@ -1116,6 +1207,7 @@ impl Engine {
                     node: id,
                     project_dir: project_dir.as_deref(),
                     exprs: Some(exprs),
+                    mode,
                 },
                 time,
                 frame: *frame,
@@ -1155,7 +1247,11 @@ impl Engine {
                 frame: *frame as f64,
             }
             .update_python_jobs(py_jobs);
-            py.submit(py_jobs);
+            if mode.is_offline() {
+                py.submit_wait(py_jobs);
+            } else {
+                py.submit(py_jobs);
+            }
         }
         for id in plan.iter() {
             if let Some(op) = analysis_ops.get_mut(id) {
@@ -1246,6 +1342,27 @@ impl Engine {
     pub fn frame(&self) -> u64 {
         self.frame
     }
+}
+
+/// Records a clear of `texture` to transparent black.
+fn clear_texture(encoder: &mut wgpu::CommandEncoder, texture: &wgpu::Texture) {
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("atd-offline-clear"),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view: &view,
+            depth_slice: None,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        depth_stencil_attachment: None,
+        timestamp_writes: None,
+        occlusion_query_set: None,
+        multiview_mask: None,
+    });
 }
 
 /// Records a node's state after a successful cook: an expression error if

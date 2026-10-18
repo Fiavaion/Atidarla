@@ -111,8 +111,9 @@ impl SigOp for AudioFileIn {
                 self.loading = Some(rx);
             }
         }
+        // Offline the first cook waits for the decode (FR-H1).
         if let Some(rx) = &self.loading {
-            match rx.try_recv() {
+            match p.mode().receive(rx) {
                 Ok(Ok(clip)) => {
                     self.clip = Some(Arc::new(clip));
                     self.loading = None;
@@ -143,10 +144,23 @@ impl SigOp for AudioFileIn {
             &["left", "right"]
         };
         let frames = clip.frames();
-        let count = if p.bool("play") && frames > 0 {
-            ((ctx.dt * f64::from(clip.rate)).round() as usize).min(MAX_BLOCK)
-        } else {
-            0
+        let play = p.bool("play") && frames > 0;
+        let rate = f64::from(clip.rate);
+        let count = match p.mode().step() {
+            // Offline the playhead is a function of time alone (FR-H1):
+            // each frame plays the samples from one step ago up to now.
+            Some(step) if play => {
+                let end = (ctx.time * rate).round().max(0.0);
+                let start = ((ctx.time - step) * rate).round().max(0.0);
+                self.pos = if p.bool("loop") {
+                    start % frames as f64
+                } else {
+                    start.min(frames as f64)
+                };
+                ((end - start) as usize).min(MAX_BLOCK)
+            }
+            None if play => ((ctx.dt * rate).round() as usize).min(MAX_BLOCK),
+            _ => 0,
         };
         ctx.output.set_block(names, clip.rate as f32, count);
         let gain = p.f32("gain");
@@ -189,6 +203,12 @@ const MULTI_NAMES: [&str; 8] = [
 impl SigOp for AudioIn {
     fn cook(&mut self, ctx: &mut SigCtx<'_>) -> Result<(), String> {
         let p = ctx.params;
+        if p.mode().is_offline() {
+            // A live input is idle in an offline render (FR-H1): no device
+            // is opened and the output is silence, as when inactive.
+            ctx.output.set_block(&[], 0.0, 0);
+            return Ok(());
+        }
         let device = p.str("device");
         let active = p.bool("active");
         let changed = self

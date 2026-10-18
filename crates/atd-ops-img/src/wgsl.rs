@@ -212,8 +212,10 @@ impl GpuOp for Wgsl {
             }
         }
 
+        // Offline the cook waits for the compiler (FR-H1).
+        let mode = p.mode();
         if let Some(rx) = &self.building {
-            match rx.try_recv() {
+            match mode.receive(rx) {
                 Ok(built) => {
                     self.building = None;
                     self.take(built);
@@ -226,15 +228,26 @@ impl GpuOp for Wgsl {
             }
         }
         if let Some(w) = &self.watcher {
-            let mut latest = None;
-            while let Ok(built) = w.rx.try_recv() {
-                latest = Some(built);
+            if mode.is_offline() {
+                // Offline the file is compiled once, as it was when the
+                // render started; later saves are not picked up.
+                if self.pass.is_none() && self.error.is_none() {
+                    let built = mode
+                        .receive(&w.rx)
+                        .unwrap_or_else(|_| Err("shader file watcher stopped".into()));
+                    self.take(built);
+                }
+            } else {
+                let mut latest = None;
+                while let Ok(built) = w.rx.try_recv() {
+                    latest = Some(built);
+                }
+                if let Some(built) = latest {
+                    self.take(built);
+                }
+                // Keep looking for saves.
+                ctx.cook_again = true;
             }
-            if let Some(built) = latest {
-                self.take(built);
-            }
-            // Keep looking for saves.
-            ctx.cook_again = true;
         }
 
         match &self.pass {

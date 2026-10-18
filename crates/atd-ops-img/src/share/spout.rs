@@ -265,6 +265,23 @@ impl ShareOut {
 
 impl GpuOp for ShareOut {
     fn cook(&mut self, ctx: &mut CookCtx<'_>) -> Result<(), String> {
+        if ctx.params.mode().is_offline() {
+            // Sinks do not emit in an offline render (FR-H1): no sender, no
+            // worker; the input passes through.
+            let input = ctx.input_or_black(0).clone();
+            self.pass.draw(
+                ctx.device,
+                ctx.queue,
+                ctx.encoder,
+                &[&input],
+                &[],
+                ctx.output,
+            );
+            if self.status.is_empty() {
+                self.status.push_str("Offline render: not published");
+            }
+            return Ok(());
+        }
         if self.link.is_none() {
             let (device, queue) = (ctx.device.clone(), ctx.queue.clone());
             self.link = Some(spawn("atd-share-out", move |rx, tx| {
@@ -618,6 +635,22 @@ impl GpuOp for ShareIn {
     }
 
     fn cook(&mut self, ctx: &mut CookCtx<'_>) -> Result<(), String> {
+        if ctx.params.mode().is_offline() {
+            // A live input is idle in an offline render (FR-H1): no
+            // receiver, no worker; black, as while there is no sender.
+            self.pass.draw(
+                ctx.device,
+                ctx.queue,
+                ctx.encoder,
+                &[ctx.black],
+                &[],
+                ctx.output,
+            );
+            if self.status.is_empty() {
+                self.status.push_str("Offline render: not received");
+            }
+            return Ok(());
+        }
         if self.link.is_none() {
             let (device, queue) = (ctx.device.clone(), ctx.queue.clone());
             self.link = Some(spawn("atd-share-in", move |rx, tx| {

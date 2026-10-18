@@ -119,6 +119,35 @@ impl MoviePlayer {
             .map(|(_, f)| f.clone())
     }
 
+    /// Blocks until the movie is open or has failed, at most `timeout`. For
+    /// offline renders only (FR-H1), never on the app's render thread.
+    pub fn wait_ready(&self, timeout: Duration) {
+        let deadline = std::time::Instant::now() + timeout;
+        while self.info().is_none()
+            && self.error().is_none()
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    /// Asks for frame `index` and blocks until it is decoded, at most
+    /// `timeout`; `None` if the movie failed or time ran out. For offline
+    /// renders only (FR-H1).
+    pub fn wait_frame(&self, index: usize, timeout: Duration) -> Option<Arc<HapFrame>> {
+        let deadline = std::time::Instant::now() + timeout;
+        self.request(index);
+        loop {
+            if let Some(frame) = self.frame(index) {
+                return Some(frame);
+            }
+            if self.error().is_some() || std::time::Instant::now() >= deadline {
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
     fn poke(&self) {
         if let Ok(mut flag) = self.shared.wake_lock.lock() {
             *flag = true;

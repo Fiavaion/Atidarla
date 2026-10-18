@@ -206,7 +206,9 @@ impl GpuOp for Fluid {
         }
         let dt = self
             .last_time
-            .map_or(1.0 / 60.0, |t| (ctx.time - t).clamp(0.0, 1.0 / 20.0)) as f32;
+            .map_or(1.0 / 60.0, |t| (ctx.time - t).clamp(0.0, 1.0 / 20.0));
+        // Offline every step is the same length (FR-H1).
+        let dt = p.mode().step().map_or(dt, |s| s.min(1.0 / 20.0)) as f32;
         self.last_time = Some(ctx.time);
         let st = self.state.as_mut().expect("created above");
 

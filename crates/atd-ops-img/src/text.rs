@@ -354,7 +354,8 @@ impl GpuOp for Text {
             self.pending = Some((job, rx));
         }
         if let Some((job, rx)) = &self.pending {
-            match rx.try_recv() {
+            // Offline the cook waits for the rasteriser (FR-H1).
+            match p.mode().receive(rx) {
                 Ok(Ok(raster)) => {
                     let job = job.clone();
                     self.upload(ctx, &raster);

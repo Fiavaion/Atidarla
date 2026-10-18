@@ -14,6 +14,10 @@ use atd_io::video::{MoviePlayer, bc};
 
 use crate::stateful::clear;
 
+/// Longest an offline render waits for a movie to open or a frame to
+/// decode before the node reports an error (FR-H1).
+const OFFLINE_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
+
 pub fn schema() -> OperatorSchema {
     OperatorSchema {
         type_id: "img.movie_in".into(),
@@ -211,6 +215,24 @@ impl GpuOp for MovieIn {
         if p.str("size") != "native" {
             return None;
         }
+        if p.mode().is_offline() {
+            // Offline the size is the file's from the first frame on
+            // (FR-H1): wait for the header, opening the file to read it if
+            // the cook has not opened it yet.
+            let file = p.str("file");
+            return match self.player.as_ref().filter(|_| self.path == file) {
+                Some(player) => {
+                    player.wait_ready(OFFLINE_WAIT);
+                    player.info().map(|i| (i.width, i.height))
+                }
+                None if !file.is_empty() => {
+                    let probe = MoviePlayer::open(p.resolve(file));
+                    probe.wait_ready(OFFLINE_WAIT);
+                    probe.info().map(|i| (i.width, i.height))
+                }
+                None => None,
+            };
+        }
         let info = self.player.as_ref()?.info()?;
         Some((info.width, info.height))
     }
@@ -227,23 +249,38 @@ impl GpuOp for MovieIn {
         }
         let dt = self.last_time.map_or(0.0, |t| (ctx.time - t).max(0.0));
         self.last_time = Some(ctx.time);
+        let offline = p.mode().is_offline();
         let Some(player) = &self.player else {
             clear(ctx.encoder, ctx.output);
             return Ok(());
         };
+        if offline {
+            player.wait_ready(OFFLINE_WAIT);
+        }
         if let Some(e) = player.error() {
             clear(ctx.encoder, ctx.output);
             return Err(e.to_owned());
         }
         let Some(info) = player.info() else {
             clear(ctx.encoder, ctx.output);
+            if offline {
+                return Err(format!("the movie did not open within {OFFLINE_WAIT:?}"));
+            }
             return Ok(());
         };
 
         // Playhead: Cue while stopped; advances from Cue when playing.
+        // Offline it is a function of time alone (FR-H1): Cue plus the
+        // time since the start of the render's timeline, times Speed.
         let cue = f64::from(p.f32("cue"));
         let play = p.bool("play");
-        if !play || !self.playing {
+        if offline {
+            self.playhead = if play {
+                cue + ctx.time * f64::from(p.f32("speed"))
+            } else {
+                cue
+            };
+        } else if !play || !self.playing {
             self.playhead = cue;
         } else {
             self.playhead += dt * f64::from(p.f32("speed"));
@@ -258,11 +295,24 @@ impl GpuOp for MovieIn {
         let index = info.frame_at(self.playhead);
         let (w, h) = (info.width, info.height);
         player.request(index);
-        if self.shown != Some(index)
-            && let Some(frame) = player.frame(index)
-        {
-            self.upload(ctx, &frame, w, h)?;
-            self.shown = Some(index);
+        if self.shown != Some(index) {
+            // Offline every frame shows the picture for its own time.
+            let frame = if offline {
+                let Some(frame) = player.wait_frame(index, OFFLINE_WAIT) else {
+                    clear(ctx.encoder, ctx.output);
+                    return Err(player.error().map_or_else(
+                        || format!("movie frame {index} did not decode within {OFFLINE_WAIT:?}"),
+                        str::to_owned,
+                    ));
+                };
+                Some(frame)
+            } else {
+                player.frame(index)
+            };
+            if let Some(frame) = frame {
+                self.upload(ctx, &frame, w, h)?;
+                self.shown = Some(index);
+            }
         }
         let Some(upload) = &self.upload else {
             // First frame still decoding.

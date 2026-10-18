@@ -60,7 +60,13 @@ impl MidiInOp {
 impl SigOp for MidiInOp {
     fn cook(&mut self, ctx: &mut SigCtx<'_>) -> Result<(), String> {
         let p = ctx.params;
-        let device = p.str("device");
+        // A live input is idle in an offline render (FR-H1): a port with no
+        // device behind it, so no channels.
+        let device = if p.mode().is_offline() {
+            VIRTUAL
+        } else {
+            p.str("device")
+        };
         if self.opened.as_deref() != Some(device) {
             self.input = Some(if device == VIRTUAL {
                 MidiIn::detached()
@@ -141,7 +147,13 @@ pub struct MidiOutOp {
 impl SigOp for MidiOutOp {
     fn cook(&mut self, ctx: &mut SigCtx<'_>) -> Result<(), String> {
         let p = ctx.params;
-        let device = p.str("device");
+        // Sinks do not emit in an offline render (FR-H1): a port with no
+        // device behind it.
+        let device = if p.mode().is_offline() {
+            VIRTUAL
+        } else {
+            p.str("device")
+        };
         if self.opened.as_deref() != Some(device) {
             self.output = Some(if device == VIRTUAL {
                 MidiOut::detached()

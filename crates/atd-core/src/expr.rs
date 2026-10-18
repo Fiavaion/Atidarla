@@ -896,6 +896,13 @@ pub trait PythonHost: Send {
     /// Offers this frame's jobs. Never blocks: when the worker is busy they
     /// are skipped, and results arrive a frame later.
     fn submit(&mut self, jobs: &[PyJob]);
+    /// Offline render only (FR-H1): offers this frame's jobs, waiting for a
+    /// busy worker, and returns once they are evaluated, so the next
+    /// [`Self::collect`] has every result (still one frame late, but always
+    /// exactly one). The default suits hosts that evaluate in `submit`.
+    fn submit_wait(&mut self, jobs: &[PyJob]) {
+        self.submit(jobs);
+    }
     /// Moves results that arrived since the last call into `out` (cleared
     /// first): `(key, value or error message)`.
     fn collect(&mut self, out: &mut Vec<(u64, Result<f64, String>)>);

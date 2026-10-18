@@ -5,6 +5,8 @@
 //! finished results without ever waiting: both sides use `try_lock` on
 //! buffers that are swapped or reused, so nothing allocates on the cook
 //! thread once warm. A result is used on the next frame (one frame late).
+//! An offline render (FR-H1) waits for each frame's results instead
+//! (`submit_wait`), so they are always exactly one frame late.
 //!
 //! Expressions see the same names as the native tier (`time`, `frame`,
 //! `me`, `op('name').par.x`, `op('name')['channel']`, the `math` module's
@@ -91,6 +93,8 @@ def evaluate(source, time, frame, me, refs):
 struct Inbox {
     jobs: Vec<PyJob>,
     fresh: bool,
+    /// Batches offered so far; the worker reports the one it finished.
+    batch: u64,
 }
 
 #[derive(Default)]
@@ -99,6 +103,9 @@ struct Shared {
     wake: Condvar,
     results: Mutex<Vec<(u64, Result<f64, String>)>>,
     stop: AtomicBool,
+    /// The last batch whose results are in `results` (offline waits on it).
+    finished: Mutex<u64>,
+    done: Condvar,
 }
 
 /// The Python worker for expressions.
@@ -153,8 +160,33 @@ impl PythonHost for PyExprHost {
         }
         inbox.jobs.extend_from_slice(&jobs[common..]);
         inbox.fresh = true;
+        inbox.batch += 1;
         drop(inbox);
         self.shared.wake.notify_one();
+    }
+
+    fn submit_wait(&mut self, jobs: &[PyJob]) {
+        let batch = {
+            let mut inbox = self.shared.inbox.lock().unwrap_or_else(|e| e.into_inner());
+            inbox.jobs.clear();
+            inbox.jobs.extend_from_slice(jobs);
+            inbox.fresh = true;
+            inbox.batch += 1;
+            inbox.batch
+        };
+        self.shared.wake.notify_one();
+        let mut finished = self
+            .shared
+            .finished
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        while *finished < batch && self.thread.as_ref().is_some_and(|t| !t.is_finished()) {
+            finished = self
+                .shared
+                .done
+                .wait_timeout(finished, std::time::Duration::from_millis(100))
+                .map_or_else(|e| e.into_inner().0, |(g, _)| g);
+        }
     }
 
     fn collect(&mut self, out: &mut Vec<(u64, Result<f64, String>)>) {
@@ -175,7 +207,7 @@ fn run(shared: &Shared) {
             .ok()
     });
     loop {
-        {
+        let batch = {
             let mut inbox = shared.inbox.lock().unwrap_or_else(|e| e.into_inner());
             while !inbox.fresh && !shared.stop.load(Ordering::Relaxed) {
                 inbox = shared.wake.wait(inbox).unwrap_or_else(|e| e.into_inner());
@@ -185,7 +217,8 @@ fn run(shared: &Shared) {
             }
             std::mem::swap(&mut jobs, &mut inbox.jobs);
             inbox.fresh = false;
-        }
+            inbox.batch
+        };
         Python::attach(|py| {
             for job in &jobs {
                 let result = match &helper {
@@ -200,6 +233,9 @@ fn run(shared: &Shared) {
         // collected the previous batch.
         results.retain(|(k, _)| !done.iter().any(|(d, _)| d == k));
         results.append(&mut done);
+        drop(results);
+        *shared.finished.lock().unwrap_or_else(|e| e.into_inner()) = batch;
+        shared.done.notify_all();
     }
 }
 

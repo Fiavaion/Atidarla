@@ -252,6 +252,12 @@ struct OscIn {
 impl SigOp for OscIn {
     fn cook(&mut self, ctx: &mut SigCtx<'_>) -> Result<(), String> {
         let p = ctx.params;
+        if p.mode().is_offline() {
+            // A live input is idle in an offline render (FR-H1): no port is
+            // opened and nothing has arrived.
+            ctx.output.set_single(&[], &[]);
+            return Ok(());
+        }
         let port = p.i64("port").clamp(0, 65_535);
         if self.rx.is_none() || port != self.port {
             self.rx = None;
@@ -291,6 +297,14 @@ struct OscOut {
 impl SigOp for OscOut {
     fn cook(&mut self, ctx: &mut SigCtx<'_>) -> Result<(), String> {
         let p = ctx.params;
+        if p.mode().is_offline() {
+            // Sinks do not emit in an offline render (FR-H1): pass through.
+            match ctx.inputs.get(0) {
+                Some(input) => ctx.output.copy_from(input),
+                None => ctx.output.set_single(&[], &[]),
+            }
+            return Ok(());
+        }
         let (host, port, prefix) = (
             p.str("host"),
             p.i64("port").clamp(1, 65_535),

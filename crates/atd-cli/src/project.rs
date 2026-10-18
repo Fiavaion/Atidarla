@@ -43,7 +43,7 @@ pub fn check(dirs: &[impl AsRef<Path>], opts: CheckOptions) -> Result<()> {
     Ok(())
 }
 
-fn library() -> (atd_core::Registry, OpLibrary) {
+pub(crate) fn library() -> (atd_core::Registry, OpLibrary) {
     let registry = crate::builtin_registry();
     let mut library = OpLibrary::default();
     atd_ops_img::library(&mut library);

@@ -222,7 +222,8 @@ impl GpuOp for Compiling {
     fn cook(&mut self, ctx: &mut CookCtx<'_>) -> Result<(), String> {
         if let Self::Pending(rx) = self {
             use std::sync::mpsc::TryRecvError;
-            *self = match rx.try_recv() {
+            // Offline the first cook waits for the compiler (FR-H1).
+            *self = match ctx.params.mode().receive(rx) {
                 Ok(Ok(op)) => Self::Ready(Box::new(op)),
                 Ok(Err(e)) => Self::Failed(e),
                 Err(TryRecvError::Disconnected) => {
@@ -690,7 +691,13 @@ impl IsfOp {
     /// Writes the uniforms for pass `pass` (render size `size`) into `data`.
     fn pack(&mut self, pass: usize, size: [f32; 2], params: &Params<'_>, time: f64, dt: f64) {
         let base = pass * self.stride as usize;
-        let date = date_now();
+        // Offline (FR-H1) the date is a function of time, not the clock:
+        // the render's timeline starts at 1970-01-01 00:00 UTC.
+        let date = if params.mode().is_offline() {
+            date_at(time)
+        } else {
+            date_now()
+        };
         for field in &self.shader.uniforms.fields {
             let at = base + field.offset as usize;
             let floats: [f32; 4] = match field.name.as_str() {
@@ -775,9 +782,15 @@ fn input_value(shader: &IsfShader, name: &str, ty: UniformType, params: &Params<
 
 /// ISF `DATE`: year, month (1–12), day (1–31), seconds since midnight (UTC).
 fn date_now() -> [f32; 4] {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0.0, |d| d.as_secs_f64());
+    date_at(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0.0, |d| d.as_secs_f64()),
+    )
+}
+
+/// ISF `DATE` at `secs` seconds after 1970-01-01 00:00 UTC.
+fn date_at(secs: f64) -> [f32; 4] {
     let days = (secs / 86_400.0).floor() as i64;
     let (y, m, d) = civil_from_days(days);
     [
@@ -808,6 +821,12 @@ impl GpuOp for IsfOp {
         let (w, h) = (ctx.output.width(), ctx.output.height());
         let dt = self.last_time.map_or(0.0, |t| (ctx.time - t).max(0.0));
         self.last_time = Some(ctx.time);
+        // Offline (FR-H1) TIMEDELTA is the step and FRAMEINDEX the frame's
+        // number in the timeline, wherever the render starts.
+        let dt = ctx.params.mode().step().unwrap_or(dt);
+        if ctx.params.mode().is_offline() {
+            self.frame = ctx.frame as i32;
+        }
         let passes = self.shader.header.passes.len();
         self.cooks += 1;
         let now = self.cooks;

@@ -22,6 +22,14 @@ pub struct DmxOut {
 impl SigOp for DmxOut {
     fn cook(&mut self, ctx: &mut SigCtx<'_>) -> Result<(), String> {
         let p = ctx.params;
+        if p.mode().is_offline() {
+            // Sinks do not emit in an offline render (FR-H1): pass through.
+            match ctx.inputs.get(0) {
+                Some(input) => ctx.output.copy_from(input),
+                None => ctx.output.set_single(&[], &[]),
+            }
+            return Ok(());
+        }
         let (protocol, host) = (p.str("protocol"), p.str("host"));
         let port = p.i64("port").clamp(0, 65_535);
         let universe = p.i64("universe").clamp(0, 63_999);

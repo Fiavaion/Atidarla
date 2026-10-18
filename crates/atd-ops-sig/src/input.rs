@@ -21,7 +21,16 @@ pub struct InputDevices {
 impl SigOp for InputDevices {
     fn cook(&mut self, ctx: &mut SigCtx<'_>) -> Result<(), String> {
         let p = ctx.params;
+        // A live input is idle in an offline render (FR-H1): no key held,
+        // no gamepad, the pointer at rest.
+        let offline = p.mode().is_offline();
         match p.str("device") {
+            "keyboard" if offline => {
+                let mut w = ctx.output.writer();
+                for k in p.str("keys").split_whitespace() {
+                    w.push(k, 0.0);
+                }
+            }
             "keyboard" => {
                 let keys = p.str("keys");
                 let mut w = ctx.output.writer();
@@ -35,9 +44,13 @@ impl SigOp for InputDevices {
             }
             "gamepad" => {
                 let index = p.i64("gamepad").clamp(1, 16) as usize - 1;
-                match atd_io::input::pad(index)? {
-                    Some(pad) => self.pad = Some(pad),
-                    None => self.pad = None,
+                if offline {
+                    self.pad = None;
+                } else {
+                    match atd_io::input::pad(index)? {
+                        Some(pad) => self.pad = Some(pad),
+                        None => self.pad = None,
+                    }
                 }
                 let pad = self.pad.unwrap_or_default();
                 let mut w = ctx.output.writer();
@@ -50,7 +63,9 @@ impl SigOp for InputDevices {
                 w.push("connected", f32::from(u8::from(self.pad.is_some())));
             }
             _ => {
-                if let Some(ptr) = atd_io::input::pointer() {
+                if offline {
+                    self.pointer = atd_io::input::Pointer::default();
+                } else if let Some(ptr) = atd_io::input::pointer() {
                     self.pointer = ptr;
                 }
                 let m = self.pointer;

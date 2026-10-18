@@ -22,6 +22,14 @@ pub struct AudioOut {
 impl SigOp for AudioOut {
     fn cook(&mut self, ctx: &mut SigCtx<'_>) -> Result<(), String> {
         let p = ctx.params;
+        if p.mode().is_offline() {
+            // Sinks do not emit in an offline render (FR-H1): pass through.
+            match ctx.inputs.get(0) {
+                Some(input) => ctx.output.copy_from(input),
+                None => ctx.output.set_single(&[], &[]),
+            }
+            return Ok(());
+        }
         let device = p.str("device");
         let active = p.bool("active");
         let changed = self

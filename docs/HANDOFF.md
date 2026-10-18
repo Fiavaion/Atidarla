@@ -21,6 +21,9 @@ Done on this branch:
 - **Expressions (A22)**: native subset in `crates/atd-core/src/expr.rs`, engine side in
   `crates/atd-gpu/src/expr.rs`, Python worker in `crates/atd-py/src/expr.rs`, `=` button in
   `crates/atd-app/src/params.rs`. Reference: `docs/expressions.md`.
+- **Offline render (M2 pre-work, FR-H1 first slice)**: `atidarla render` writes a deterministic
+  PNG sequence (`crates/atd-cli/src/render.rs`). Reference: `docs/render.md`; evidence in the
+  pre-work log of `docs/milestones/M2.md`.
 
 ## FFmpeg video (A23): done except packaging
 
