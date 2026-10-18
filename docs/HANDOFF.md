@@ -44,10 +44,12 @@ To run it locally on Windows: download BtbN's `ffmpeg-n9.0-latest-win64-lgpl-sha
 - **AC1 by hand**: build the audio-reactive feedback patch in the app on a Windows and a Mac
   machine, save, reload, compare (record in M1.md).
 - **AC3 / PT-1**: `cargo run -p atd-cli --release -- bench` on the RTX 4070 PC.
-- **Share In/Out**: Spout (Windows) and Syphon (macOS) wire-up, on real machines.
+- **Share In/Out**: Spout is done on Windows (operators, example, verified against the official SDK; Windows runs on DX12, A24). Still open: Syphon on a Mac, and trying real apps (Resolume, TouchDesigner, OBS). Known: four or more WARP devices in parallel crash in WARP while D3D11 devices are created, so the Spout GPU tests run one at a time.
 - Check CI for the newest push; the test fixes of 2026-10-16 are described in `M1.md`.
-- **Fixed 2026-10-17**: parallel GPU tests used to hang on NVIDIA/Windows when Vulkan and GL
-  were both enabled; tests now build their instance with `atd_gpu::primary_instance()`. Unfixed:
+- **Mostly fixed 2026-10-17/18**: parallel GPU tests used to hang on NVIDIA/Windows when Vulkan and
+  GL were both enabled; tests now use `atd_gpu::primary_instance()` (DX12 on Windows, A24), and
+  `.cargo/config.toml` caps test threads at 4 because 16 threads still stalled about 1 run in 20.
+  Cause unknown. Unfixed:
   `midi::opening_without_devices_...` missed its deadline twice after long idle periods (not
   reproducible; see the M1 log). Re-run it before suspecting a real regression.
 

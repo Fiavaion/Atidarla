@@ -1,0 +1,6 @@
+[env]
+# Many tests bring up their own GPU device. With 16 test threads on an
+# RTX 5070 Ti (Windows) device creation stalled or crashed in about 1 of 20
+# runs (M1 log, 2026-10-18); with 8 or 4 threads 0 of 40. Not forced, so a
+# RUST_TEST_THREADS you set yourself wins.
+RUST_TEST_THREADS = "4"

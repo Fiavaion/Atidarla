@@ -80,13 +80,26 @@ pub struct GpuContext {
     pub queue: wgpu::Queue,
 }
 
-/// An instance for tests and tools that bring up many devices at once: Vulkan,
-/// DX12 and Metal only, unless `WGPU_BACKEND` says otherwise. With GL enabled
-/// beside Vulkan, concurrent device creation deadlocks on NVIDIA/Windows (M1 log,
-/// 2026-10-17), and Atidarla does not target GL.
-pub fn primary_instance() -> wgpu::Instance {
+/// The instance settings for the app, the CLI and headless runs. `WGPU_BACKEND`
+/// wins when set. Otherwise Windows uses **DX12 only** (PRD A24): Spout and
+/// CUDA external memory share DX12 resources, and DX12 also keeps GL out of the
+/// instance. Other platforms keep wgpu's defaults.
+pub fn instance_descriptor() -> wgpu::InstanceDescriptor {
     let mut desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
-    if std::env::var_os("WGPU_BACKEND").is_none() {
+    if cfg!(windows) && std::env::var_os("WGPU_BACKEND").is_none() {
+        desc.backends = wgpu::Backends::DX12;
+    }
+    desc
+}
+
+/// An instance for tests and tools that bring up many devices at once: the
+/// settings of [`instance_descriptor`], and Vulkan, DX12 and Metal only
+/// elsewhere. With GL enabled beside Vulkan, concurrent device creation
+/// deadlocks on NVIDIA/Windows (M1 log, 2026-10-17), and Atidarla does not
+/// target GL.
+pub fn primary_instance() -> wgpu::Instance {
+    let mut desc = instance_descriptor();
+    if !cfg!(windows) && std::env::var_os("WGPU_BACKEND").is_none() {
         desc.backends = wgpu::Backends::PRIMARY;
     }
     wgpu::Instance::new(desc)
@@ -100,8 +113,7 @@ impl GpuContext {
     }
 
     pub async fn headless_async() -> Result<Self, GpuError> {
-        let instance =
-            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let instance = wgpu::Instance::new(instance_descriptor());
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::from_env()

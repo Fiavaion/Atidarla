@@ -30,6 +30,7 @@ fn main() -> ExitCode {
     };
     // The default egui device plus the optional features the engine uses.
     let mut setup = eframe::egui_wgpu::WgpuSetupCreateNew::without_display_handle();
+    setup.instance_descriptor = atd_gpu::instance_descriptor();
     setup.device_descriptor = std::sync::Arc::new(|adapter| {
         let base = if adapter.get_info().backend == wgpu::Backend::Gl {
             wgpu::Limits::downlevel_webgl2_defaults()
