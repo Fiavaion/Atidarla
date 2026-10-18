@@ -34,7 +34,9 @@ All platforms.
 ## Examples
 
 - [Beat switcher](../../../examples/beat-switcher.atidarla/) — `star`
+- [Compute Shaders](../../../examples/compute-shaders.atidarla/) — `dot`
 - [Live control](../../../examples/live-control.atidarla/) — `shape1`
+- [Neural Growth](../../../examples/neural-growth.atidarla/) — `dot`
 - [Pack: Feedback Trails](../../../examples/pack-feedback-trails.atidarla/) — `triangle`
 - [Pack: Neon Edges](../../../examples/pack-neon-edges.atidarla/) — `pentagon`
 - [Simulations](../../../examples/simulations.atidarla/) — `dot`, `seed`

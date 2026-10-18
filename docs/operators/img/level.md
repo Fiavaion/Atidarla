@@ -35,5 +35,6 @@ All platforms.
 - [Audio-reactive feedback](../../../examples/audio-reactive-feedback.atidarla/) — `level1`
 - [Beat switcher](../../../examples/beat-switcher.atidarla/) — `level1`
 - [Live control](../../../examples/live-control.atidarla/) — `level1`
+- [Neural Growth](../../../examples/neural-growth.atidarla/) — `dim`
 - [Python operators](../../../examples/python-ops.atidarla/) — `level1`
 - [Signal scope](../../../examples/signal-scope.atidarla/) — `meter`

@@ -33,6 +33,8 @@ All platforms.
 ## Examples
 
 - [Audio-reactive feedback](../../../examples/audio-reactive-feedback.atidarla/) — `transform1`
+- [Compute Shaders](../../../examples/compute-shaders.atidarla/) — `orbit`
+- [Neural Growth](../../../examples/neural-growth.atidarla/) — `eraser`
 - [Pack: Beat Flash](../../../examples/pack-beat-flash.atidarla/) — `kick`
 - [Pack: Feedback Trails](../../../examples/pack-feedback-trails.atidarla/) — `orbit`
 - [Simulations](../../../examples/simulations.atidarla/) — `orbiting`

@@ -31,8 +31,10 @@ All platforms.
 ## Examples
 
 - [Audio-reactive feedback](../../../examples/audio-reactive-feedback.atidarla/) — `composite1`
+- [Compute Shaders](../../../examples/compute-shaders.atidarla/) — `glow`, `screen`
 - [Image processing](../../../examples/image-processing.atidarla/) — `outlined`, `masked`
 - [Keying](../../../examples/keying.atidarla/) — `over`
+- [Neural Growth](../../../examples/neural-growth.atidarla/) — `screen`
 - [Pack: Kaleidoscope Tunnel](../../../examples/pack-kaleido-tunnel.atidarla/) — `together`
 - [Points](../../../examples/points.atidarla/) — `mix`
 - [Signal scope](../../../examples/signal-scope.atidarla/) — `scopes`, `all`

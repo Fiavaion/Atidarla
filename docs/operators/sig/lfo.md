@@ -32,8 +32,10 @@ All platforms.
 
 ## Examples
 
+- [Compute Shaders](../../../examples/compute-shaders.atidarla/) — `drift`
 - [Image processing](../../../examples/image-processing.atidarla/) — `move`
 - [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `hue_swing`
+- [Neural Growth](../../../examples/neural-growth.atidarla/) — `sweep`
 - [Pack: Chromatic Aberration](../../../examples/pack-chromatic-aberration.atidarla/) — `wobble`
 - [Pack: Feedback Trails](../../../examples/pack-feedback-trails.atidarla/) — `swing`
 - [Pack: Neon Edges](../../../examples/pack-neon-edges.atidarla/) — `colours`
