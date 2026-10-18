@@ -1,0 +1,18 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "Neural Growth"
+description = '''
+Two neural cellular automata (Neural CA). Every cell perceives its neighbours through fixed
+Sobel and Laplacian filters and updates itself with a tiny neural network, at random but
+repeatable moments.
+
+organism runs the built-in rule grow: it spreads from one centre cell and forms a labyrinth
+inside itself. An orbiting dot is wired to its erase input, so it cuts a path once the organism
+reaches it, and the organism regrows behind it. coral runs the network in nca/coral.json from
+scattered seeds. The weights are hand-built by Atidarla's own generator, not trained and not
+taken from anywhere; nca/coral.json is written by a test (see the operator docs).
+
+Try: pulse Reset; Rule spots; Seed scatter; Display hidden to see the two hidden channels;
+Cell Size 1 for finer detail.
+'''
+resolution = [1280, 720]

@@ -1,0 +1,65 @@
+# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 7
+
+[[node]]
+id = 0
+name = "sweep"
+type = "sig.lfo"
+pos = [0.0, 0.0]
+params.amplitude = 180.0
+params.frequency = 0.05
+params.offset = 180.0
+params.waveform = "ramp"
+
+[[node]]
+id = 1
+name = "dot"
+type = "img.shape"
+pos = [0.0, 140.0]
+params.centre = [0.75, 0.5]
+params.size = [0.06, 0.06]
+
+[[node]]
+id = 2
+name = "eraser"
+type = "img.transform"
+pos = [220.0, 140.0]
+inputs.in = { node = 1, output = "out" }
+params.rotate = { value = 0.0, bind = { node = 0, channel = "lfo" } }
+
+[[node]]
+id = 3
+name = "organism"
+type = "img.nca"
+pos = [440.0, 140.0]
+inputs.erase = { node = 2, output = "out" }
+params.background = [0.0, 0.0, 0.0, 0.0]
+params.steps = 16
+
+[[node]]
+id = 4
+name = "coral"
+type = "img.nca"
+pos = [440.0, 280.0]
+params.density = 0.0003
+params.rule = "file"
+params.seed_mode = "scatter"
+params.steps = 12
+params.weights = "nca/coral.json"
+
+[[node]]
+id = 5
+name = "dim"
+type = "img.level"
+pos = [660.0, 280.0]
+inputs.in = { node = 4, output = "out" }
+params.brightness = 0.3
+
+[[node]]
+id = 6
+name = "screen"
+type = "img.composite"
+pos = [880.0, 210.0]
+inputs.a = { node = 3, output = "out" }
+inputs.b = { node = 5, output = "out" }

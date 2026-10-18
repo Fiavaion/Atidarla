@@ -22,6 +22,8 @@ every IMG and SIG operator (CLAUDE.md rule 7); each operator's page in
 | [time-effects](time-effects.atidarla/) | Frame delay and slit-scan from a HAP movie |
 | [signal-scope](signal-scope.atidarla/) | Audio and control signals drawn as images, and image analysis |
 | [shaders](shaders.atidarla/) | A project-local ISF shader, inline WGSL and projection |
+| [compute-shaders](compute-shaders.atidarla/) | WGSL compute shaders: a blur, an iterated diffusion, and trails with a state image and a buffer from a file |
+| [neural-growth](neural-growth.atidarla/) | Neural cellular automata growing, regrowing where erased, and running a weights file |
 | [live-control](live-control.atidarla/) | Mouse, OSC, MIDI, DMX, timecode and audio output |
 | [texture-sharing](texture-sharing.atidarla/) | Share Out and Share In: publishing to other applications and a loopback (Spout on Windows) |
 | [python-ops](python-ops.atidarla/) | Operators written in Python in the project's `ops/` folder: a counter, an LFO and an image generator ([`docs/python-ops.md`](../docs/python-ops.md)) |
@@ -54,5 +56,6 @@ Python operators are code that runs with your privileges: `check` runs them only
 `--allow-python-ops` (CI passes it for these examples), and the app asks first.
 
 Media in the examples is made for them (`beat.wav` and `greenscreen.png` are generated;
-`testsrc.mov` is FFmpeg's built-in test pattern encoded as HAP), so it carries no
+`testsrc.mov` is FFmpeg's built-in test pattern encoded as HAP; the Neural CA weights
+`nca/coral.json` are hand-built by Atidarla's own generator, not trained), so it carries no
 third-party content.

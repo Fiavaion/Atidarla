@@ -14,6 +14,7 @@ pub mod compute;
 mod fluid;
 pub mod isf;
 mod movie;
+pub mod nca;
 mod ops;
 mod ops2;
 mod resolution;

@@ -303,6 +303,139 @@ fn every_img_operator_steady_state_allocations() {
     );
 }
 
+/// Compute (4 iterations over a ping-ponged state) and Neural CA (8 steps,
+/// 18 dispatches) once their pipelines are built (the test above may catch
+/// them still compiling): allocations per frame against a one-pass
+/// operator's, after a changing source.
+#[test]
+fn compute_and_nca_steady_state_allocations() {
+    let _sharing = SHARING.lock().unwrap_or_else(|e| e.into_inner());
+    let instance = atd_gpu::primary_instance();
+    let Ok(adapter) =
+        pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+    else {
+        return;
+    };
+    let (device, queue) =
+        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
+    let mut reg = Registry::default();
+    atd_ops_img::register(&mut reg);
+    atd_ops_sig::register(&mut reg);
+    let mut lib = OpLibrary::default();
+    atd_ops_img::library(&mut lib);
+    atd_ops_sig::library(&mut lib);
+    let config = EngineConfig {
+        width: 64,
+        height: 32,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+    };
+    let mut e = Engine::new(device, queue, reg, lib, config);
+    let [noise, lfo, level, compute, nca] = [(); 5].map(|()| e.alloc_id());
+    let code = "#bind input in0\n#bind state s rgba16float from=in0\nfn kernel(id: vec2u) {\n    textureStore(s_out, id, textureLoad(s, vec2i(id), 0) * 0.9);\n}\n";
+    e.edit(
+        "patch",
+        [
+            Edit::AddNode {
+                node: Node::new(noise, "img.noise", "noise"),
+            },
+            Edit::AddNode {
+                node: Node::new(lfo, "sig.lfo", "lfo"),
+            },
+            Edit::SetParam {
+                node: noise,
+                param: "z".into(),
+                value: Some(Param::bound(json!(0.0), lfo, "lfo")),
+            },
+            Edit::AddNode {
+                node: Node::new(level, "img.level", "level"),
+            },
+            Edit::Connect {
+                wire: Wire::new(Endpoint::new(noise, "out"), Endpoint::new(level, "in")),
+            },
+            Edit::AddNode {
+                node: Node::new(compute, "img.compute", "compute"),
+            },
+            Edit::SetParam {
+                node: compute,
+                param: "code".into(),
+                value: Some(Param::constant(json!(code))),
+            },
+            Edit::SetParam {
+                node: compute,
+                param: "iterations".into(),
+                value: Some(Param::constant(json!(4))),
+            },
+            Edit::Connect {
+                wire: Wire::new(Endpoint::new(noise, "out"), Endpoint::new(compute, "in0")),
+            },
+            Edit::AddNode {
+                node: Node::new(nca, "img.nca", "nca"),
+            },
+            Edit::Connect {
+                wire: Wire::new(Endpoint::new(noise, "out"), Endpoint::new(nca, "erase")),
+            },
+        ],
+    )
+    .unwrap();
+    let mut t = 0.0;
+    // Until both have compiled.
+    let start = std::time::Instant::now();
+    loop {
+        e.cook(&[level, compute, nca], t).unwrap();
+        t += 1.0 / 60.0;
+        if !e.pending() {
+            break;
+        }
+        assert!(
+            start.elapsed().as_secs() < 60,
+            "compiled (errors {:?}, {:?})",
+            e.error(compute),
+            e.error(nca)
+        );
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert_eq!(e.error(compute), None);
+    assert_eq!(e.error(nca), None);
+    let mut measure = |e: &mut Engine, out: &[NodeId]| {
+        for _ in 0..30 {
+            e.cook(out, t).unwrap();
+            t += 1.0 / 60.0;
+        }
+        let frames = 40;
+        COUNTING.with(|c| c.set(true));
+        let before = allocs();
+        for _ in 0..frames {
+            e.cook(out, t).unwrap();
+            t += 1.0 / 60.0;
+        }
+        let allocs = allocs() - before;
+        COUNTING.with(|c| c.set(false));
+        allocs as f64 / f64::from(frames)
+    };
+    let base = measure(&mut e, &[noise]);
+    let one_pass = (measure(&mut e, &[noise, level]) - base).max(1.0);
+    let compute_n = measure(&mut e, &[noise, compute]) - base;
+    let nca_n = measure(&mut e, &[noise, nca]) - base;
+    eprintln!(
+        "per frame beyond the source: one pass {one_pass:.1}, compute (5 dispatches + copy) {compute_n:.1}, neural CA (18 dispatches + copy) {nca_n:.1}"
+    );
+    // wgpu allocates while recording each pass and each dispatch (about 3.6
+    // per dispatch on NVIDIA DX12, where one pass is 15, compute 57 and the
+    // neural CA 119); creating bind groups or views per frame would add far
+    // more. Bound: two passes plus half a pass per dispatch.
+    let bound = |dispatches: f64| one_pass * (2.0 + 0.5 * dispatches);
+    assert!(
+        compute_n <= bound(5.0),
+        "compute: {compute_n:.1} > {:.1}",
+        bound(5.0)
+    );
+    assert!(
+        nca_n <= bound(18.0),
+        "neural CA: {nca_n:.1} > {:.1}",
+        bound(18.0)
+    );
+}
+
 /// Share Out publishing a changing image to a Share In in the same engine
 /// over Spout (Windows, DX12): what the cook thread allocates per frame.
 /// The workers' Spout calls run on their own threads (not counted here;
