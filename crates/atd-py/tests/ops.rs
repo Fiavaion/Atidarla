@@ -745,15 +745,24 @@ fn the_watcher_picks_up_saved_files() {
     let reload = loop {
         let f = Instant::now();
         let r = ops.poll(&mut reg, &mut lib);
-        assert!(f.elapsed() < Duration::from_millis(50), "poll does not block");
+        assert!(
+            f.elapsed() < Duration::from_millis(50),
+            "poll does not block"
+        );
         if let Some(r) = r {
             break r;
         }
-        assert!(start.elapsed() < Duration::from_secs(10), "the watcher saw it");
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "the watcher saw it"
+        );
         std::thread::sleep(Duration::from_millis(20));
     };
     assert_eq!(reload.files, ["ops/counter.py"]);
-    assert_eq!(reg.get("py.counter.counter").unwrap().label, "Frame Counter");
+    assert_eq!(
+        reg.get("py.counter.counter").unwrap().label,
+        "Frame Counter"
+    );
     assert_ne!(ops.hash(), hash, "a changed file is a new hash to allow");
     // A new file registers its operators too.
     p.write(
@@ -763,7 +772,10 @@ fn the_watcher_picks_up_saved_files() {
     let start = Instant::now();
     while reg.get("py.extra.one").is_none() {
         ops.poll(&mut reg, &mut lib);
-        assert!(start.elapsed() < Duration::from_secs(10), "the new file registers");
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "the new file registers"
+        );
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(lib.contains("py.extra.one"));
