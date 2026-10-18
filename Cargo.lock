@@ -439,6 +439,7 @@ dependencies = [
  "atd-core",
  "atd-gpu",
  "atd-interop",
+ "naga",
  "pollster 0.4.0",
  "serde_json",
  "wgpu",

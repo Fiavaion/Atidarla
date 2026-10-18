@@ -14,13 +14,18 @@
 //! | `pnt.particles` | its previous state (`prev` feedback or itself) | `P`, `v`, `age`, `life`, `id`, `Cd` (GPU count) |
 //! | `img.render_points` (IMG) | `P`, `Cd` | an image |
 
+mod attr;
+mod field;
+mod kit;
 mod noise;
 mod particles;
 mod points;
 mod render;
+mod select;
+mod transform;
 
 use atd_core::registry::{OpFamily, OperatorSchema, ParamSchema, Registry, SocketSchema, WireType};
-use atd_gpu::engine::OpLibrary;
+use atd_gpu::engine::{GeoOp, OpLibrary};
 
 pub use particles::MAX_CAPACITY;
 
@@ -55,14 +60,31 @@ pub(crate) fn pnt(
     }
 }
 
+type Factory = fn(&wgpu::Device) -> Box<dyn GeoOp>;
+type Schema = fn() -> OperatorSchema;
+
+/// The GEO operators with their own module: schema and factory.
+const OPS: &[(Schema, Factory)] = &[
+    (points::schema, points::create),
+    (noise::schema, noise::create),
+    (particles::schema, particles::create),
+    (transform::schema, transform::create),
+    (select::delete_schema, select::create_delete),
+    (select::subset_schema, select::create_subset),
+    (select::group_schema, select::create_group),
+    (select::age_schema, select::create_age),
+    (attr::attribute_schema, attr::create_attribute),
+    (attr::math_schema, attr::create_math),
+    (attr::randomize_schema, attr::create_randomize),
+    (attr::colour_schema, attr::create_colour),
+];
+
 /// Every schema this crate registers (PNT operators and Render Points).
 pub fn schemas() -> Vec<OperatorSchema> {
-    vec![
-        points::schema(),
-        noise::schema(),
-        particles::schema(),
-        render::schema(),
-    ]
+    let mut all: Vec<OperatorSchema> = OPS.iter().map(|(schema, _)| schema()).collect();
+    all.push(render::schema());
+    all.extend(field::schemas());
+    all
 }
 
 /// Registers this family's operators with the registry (and `img.render_points`,
@@ -77,10 +99,13 @@ pub fn register(registry: &mut Registry) {
 
 /// Registers this family's GPU implementations.
 pub fn library(library: &mut OpLibrary) {
-    library.add_geo(points::schema().type_id, points::create);
-    library.add_geo(noise::schema().type_id, noise::create);
-    library.add_geo(particles::schema().type_id, particles::create);
+    for (schema, create) in OPS {
+        library.add_geo(schema().type_id, *create);
+    }
     library.add(render::schema().type_id, render::create);
+    for id in field::ids() {
+        library.add_geo(format!("pnt.{id}"), move |d| field::create(d, id));
+    }
 }
 
 #[cfg(test)]
