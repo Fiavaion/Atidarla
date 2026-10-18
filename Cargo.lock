@@ -398,6 +398,7 @@ dependencies = [
  "epaint_default_fonts",
  "hound",
  "log",
+ "naga",
  "png",
  "pollster 0.4.0",
  "serde_json",

@@ -445,6 +445,8 @@ pub fn classify(type_id: &str) -> Option<Class> {
         "img.cache"
         | "img.feedback"
         | "img.fluid"
+        // Also waits for its pipelines and weights file.
+        | "img.nca"
         | "img.reaction_diffusion"
         | "img.ripple"
         | "img.time_machine" => Stateful,
@@ -454,6 +456,8 @@ pub fn classify(type_id: &str) -> Option<Class> {
         "img.render_points" | "pnt.points" | "pnt.noise" => Pure,
         "pnt.particles" => Stateful,
         "img.movie_in" | "img.text" | "img.wgsl" | "sig.audio_file_in" => Waits,
+        // Compile; persistent `state` images and buffers also make it stateful.
+        "img.compute" => Waits,
         "img.analyze" => OneFrameLate,
         "img.share_in" | "sig.audio_in" | "sig.input" | "sig.midi_in" | "sig.osc_in"
         | "sig.timecode_in" => LiveInput,

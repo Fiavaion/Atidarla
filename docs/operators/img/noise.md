@@ -34,6 +34,7 @@ All platforms.
 ## Examples
 
 - [Audio-reactive feedback](../../../examples/audio-reactive-feedback.atidarla/) — `noise1`
+- [Compute Shaders](../../../examples/compute-shaders.atidarla/) — `texture`
 - [Image processing](../../../examples/image-processing.atidarla/) — `source`
 - [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `clouds`
 - [Pack: Audio Pulse](../../../examples/pack-audio-pulse.atidarla/) — `clouds`
