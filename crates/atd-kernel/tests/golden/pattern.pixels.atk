@@ -1,0 +1,10 @@
+// A generator: checkerboard and animated noise, with a second input mixed in.
+int size = chi("size", 16, 1, 256);
+int cx = @ix / size;
+int cy = @iy / size;
+float check = (cx + cy) % 2 == 0 ? 1.0 : 0.25;
+vec2 p = @P * @res / 64.0;
+float n = simplex(set(p.x, p.y + @Time)) * 0.5 + 0.5;
+vec4 other = texture(1, @P);
+@Cd = lerp(vec4(check * n, n, check, 1), other, ch("mix", 0.0, 0, 1));
+@Cd.a = 1;

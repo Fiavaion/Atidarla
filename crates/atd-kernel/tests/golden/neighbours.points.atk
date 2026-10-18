@@ -1,0 +1,16 @@
+// point(), nearpoint() and nearpoints(): reads the input values of other points.
+float radius = ch("radius", 0.25, 0, 2);
+vec3 sum = 0;
+int count = 0;
+foreach (int j; nearpoints(0, @P, radius, 16)) {
+    if (j == @ptnum) continue;
+    sum += point(0, "P", j);
+    count++;
+}
+if (count > 0) {
+    v@v += (sum / count - @P) * 0.1;
+}
+int nearest = nearpoint(0, @P + {1, 0, 0}, 2.0);
+f@seen = nearest >= 0 ? float(point(0, "id", nearest)) : -1;
+i@id += npoints(0);
+@P += v@v * @TimeInc;

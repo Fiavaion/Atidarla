@@ -1,0 +1,6 @@
+// Sampling input images from a point kernel (Attribute from Image).
+vec2 uv = fit(@P.xz, -1, 1, 0, 1);
+vec4 c = texture(uv);
+vec4 mask = texture(2, uv);
+@Cd = c * mask.a;
+@P.y = c.r * ch("height", 0.5);

@@ -1,0 +1,10 @@
+// Every noise helper, seeded only by position and id.
+vec3 p = v@P * ch("freq", 1.0);
+float a = perlin(p) + perlin(p.xy);
+float b = simplex(p) + simplex(p.xz);
+float c = worley(p) + worley(p.yz);
+v@curl = curlnoise(p);
+float r = rand(i@id) + rand(@ptnum * 0.5) + rand(p.xy) + rand(p);
+float m = fit(a, -1, 1, 0, 1) + fit01(b, 2, 3) + smooth(0, 1, c) + smoothstep(0, 1, r);
+v@N = fit(p, {-1, -1, -1}, {1, 1, 1}, 0, 1) * clamp(m, 0, 1) + lerp(p, -p, 0.5);
+f@d = length2(p) + distance2(p, v@N) + distance(p, v@N) + dot(p, v@N);

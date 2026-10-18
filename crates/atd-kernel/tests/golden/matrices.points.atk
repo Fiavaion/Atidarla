@@ -1,0 +1,19 @@
+// Matrices, quaternions, swizzles and indexing.
+float angle = ch("angle", 0.5, -3.1416, 3.1416);
+vec4 q = quaternion(angle, {0, 1, 0});
+vec4 r = qmultiply(q, quaternion(@Time, set(1, 0, 0)));
+mat3 m = qconvert(r);
+mat3 back = invert(m) * transpose(m);
+mat4 t = ident();
+t[3] = vec4(1, 2, 3, 1);
+mat4 ti = invert(t);
+vec3 p = m * @P;
+p = qrotate(qinvert(q), p) * determinant(back);
+p += (ti * vec4(p, 1)).xyz;
+vec2 swz = p.zx;
+p.y += swz.y - m[1][2] + ident3()[0].x;
+int i = @ptnum % 3;
+p[i] = p[i] * 0.5;
+p@orient = slerp(q, r, 0.25);
+@P = p + p@orient.xyz * 0;
+@Cd = {p.x, p.y, p.z, 1};

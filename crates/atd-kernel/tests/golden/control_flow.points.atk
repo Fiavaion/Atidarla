@@ -1,0 +1,39 @@
+// Functions, loops, conditions and integer arithmetic.
+float wave(float x, int octaves) {
+    float sum = 0;
+    float amp = 1;
+    for (int k = 0; k < octaves; k++) {
+        sum += sin(x * (1 << k)) * amp;
+        amp *= 0.5;
+        if (amp < 0.01) break;
+    }
+    return sum;
+}
+
+int bucket(int n, int size) {
+    if (size <= 0) {
+        return 0;
+    }
+    return n / size + n % size;
+}
+
+void unused() {
+    return;
+}
+
+int n = chi("octaves", 4, 1, 8);
+let b = bucket(@ptnum, 7);
+float h = wave(@P.x + b, n);
+for (int i = 10; i >= 0; i -= 2) {
+    if (i == 4) continue;
+    h += i * 0.001;
+}
+@P.y = @numpt > 0 ? h : -h;
+v@N = normalize(set(0, 1, h));
+if (@ptnum % 2 == 0 && !(h > 1) || false) {
+    @P[2] = float(~@ptnum & 0xFF) / 255.0;
+}
+int j = 3, k = j + 1;
+@P.x += k - j;
+if (@P.x) return;
+@P *= 2;
