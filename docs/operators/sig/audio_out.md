@@ -4,7 +4,7 @@ SIG · version 1 · cook budget 20 µs
 
 Plays audio-rate channels (from Audio In, Audio File In or audio processing) on an output device; mono feeds every speaker, otherwise channels map in order. Converts to the device rate; passes the input through.
 
-Sink: cooked every frame even when nothing downstream is viewed, because it has external side effects.
+Sink: requested every frame even when nothing downstream is viewed, because it has external side effects. Like any node it cooks only when dirty: an input, a parameter or a bound channel changed, it is time-dependent, or it asked to cook again.
 
 ## Inputs
 

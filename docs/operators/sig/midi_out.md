@@ -4,7 +4,7 @@ SIG · version 1 · cook budget 20 µs
 
 Sends each input channel (0–1) as a MIDI control change, numbered from First CC, whenever its value changes; passes the input through.
 
-Sink: cooked every frame even when nothing downstream is viewed, because it has external side effects.
+Sink: requested every frame even when nothing downstream is viewed, because it has external side effects. Like any node it cooks only when dirty: an input, a parameter or a bound channel changed, it is time-dependent, or it asked to cook again.
 
 ## Inputs
 

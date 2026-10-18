@@ -63,7 +63,7 @@ pub fn page(op: &OperatorSchema, examples: &[Example]) -> String {
     if op.sink {
         let _ = writeln!(
             s,
-            "Sink: cooked every frame even when nothing downstream is viewed, because it has external side effects.\n"
+            "Sink: requested every frame even when nothing downstream is viewed, because it has external side effects. Like any node it cooks only when dirty: an input, a parameter or a bound channel changed, it is time-dependent, or it asked to cook again.\n"
         );
     }
 
