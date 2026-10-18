@@ -18,7 +18,10 @@ import copy
 import hashlib
 import json
 import re
+import sys
+import threading
 import traceback
+import types
 
 MAX_SOURCE = 1 << 20
 FAMILIES = ("SIG", "IMG")
@@ -475,7 +478,17 @@ def load(stem, source, filename):
     try:
         code = compile(source, filename, "exec", dont_inherit=True)
         ns = {"__name__": f"atidarla_ops.{stem}", "__file__": filename}
-        exec(code, ns)
+        with _import_lock:
+            saved = sys.modules.get("atidarla")
+            if _api is not None:
+                sys.modules["atidarla"] = _api
+            try:
+                exec(code, ns)
+            finally:
+                if saved is None:
+                    sys.modules.pop("atidarla", None)
+                else:
+                    sys.modules["atidarla"] = saved
         ops = {}
         for value in list(ns.values()):
             kw = getattr(value, "__atidarla_op__", None) if callable(value) else None
@@ -585,8 +598,26 @@ def cook(key, type_id, time, dt, frame, width, height, params, inputs):
         return ("error", _error(e, m["filename"]))
 
 
+# This host's own `atidarla` module, with its declaration API. Every host has
+# its own parameter classes, and `op` checks against them: if two hosts in one
+# process shared the embedded module, the later `install` would replace the
+# classes under the earlier host's project files and `params=` would be
+# rejected. `load` therefore runs project code with this copy as `atidarla`,
+# under a lock, because `sys.modules` is shared by every host in the process.
+_api = None
+_import_lock = threading.RLock()
+
+
 def install(module):
-    """Puts the declaration API on the embedded `atidarla` module."""
+    """Builds this host's `atidarla` module from the embedded one, with the declaration API."""
+    global _api
+    api = types.ModuleType("atidarla")
+    api.__dict__.update({k: v for k, v in vars(module).items() if not k.startswith("__")})
+    for name, value in CONSTRUCTORS.items():
+        setattr(api, name, value)
+    api.op = op
+    _api = api
+    # Also on the embedded module, for code that reads it directly.
     for name, value in CONSTRUCTORS.items():
         setattr(module, name, value)
     module.op = op
