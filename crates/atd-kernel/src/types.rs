@@ -68,7 +68,7 @@ impl Type {
 
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
+        f.pad(match self {
             Type::Void => "void",
             Type::Bool => "bool",
             Type::Int => "int",
@@ -162,9 +162,9 @@ impl fmt::Display for AttrType {
             Scalar::U32 => "u32",
         };
         if self.components == 1 {
-            f.write_str(s)
+            f.pad(s)
         } else {
-            write!(f, "{s}x{}", self.components)
+            f.pad(&format!("{s}x{}", self.components))
         }
     }
 }

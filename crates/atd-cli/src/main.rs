@@ -3,6 +3,7 @@
 mod bench;
 mod docs;
 mod isf_import;
+mod kernel;
 mod project;
 mod render;
 
@@ -142,6 +143,18 @@ enum Command {
         #[arg(long, requires = "gpu")]
         thumbs: Option<PathBuf>,
     },
+    /// Compile a Kernel DSL file (experimental, PRD A12) and print its errors,
+    /// bindings and parameters, or the generated WGSL. See docs/kernel-dsl.md.
+    Kernel {
+        /// The kernel source (`*.atk`).
+        file: PathBuf,
+        /// `points` or `pixels`; default: pixels for `*.pixels.atk`, else points.
+        #[arg(long)]
+        target: Option<String>,
+        /// Print the generated WGSL instead of the summary.
+        #[arg(long)]
+        emit_wgsl: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -216,6 +229,11 @@ fn main() -> ExitCode {
                 allow_python_ops,
             },
         ),
+        Command::Kernel {
+            file,
+            target,
+            emit_wgsl,
+        } => kernel::run(&file, target.as_deref(), emit_wgsl),
         Command::Run { .. } => return not_yet("run", "M3 (FR-H2)"),
         Command::Bake { .. } => return not_yet("bake", "M2"),
         Command::Serve { .. } => return not_yet("serve", "M5 (FR-H3)"),
