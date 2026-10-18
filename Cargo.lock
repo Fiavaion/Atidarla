@@ -355,6 +355,12 @@ dependencies = [
 [[package]]
 name = "atd-kernel"
 version = "0.0.1"
+dependencies = [
+ "atd-gpu",
+ "naga",
+ "pollster 0.4.0",
+ "wgpu",
+]
 
 [[package]]
 name = "atd-ops-ai"
