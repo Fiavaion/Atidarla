@@ -338,6 +338,22 @@ fn refs<'a>(
     }
 }
 
+/// The project file a Pack error is about (`packs/glow/network.toml` for
+/// a problem in the network inside, `packs/glow/pack.toml` otherwise).
+pub fn error_file(e: &atd_core::pack::PackError) -> Option<String> {
+    use atd_core::pack::PackError as E;
+    match e {
+        E::Invalid { pack, .. } | E::Locked(pack) => Some(format!("packs/{pack}/pack.toml")),
+        E::Graph { pack, .. } => Some(format!("packs/{pack}/network.toml")),
+        E::InvalidName(_)
+        | E::InvalidVersion(_)
+        | E::Unknown(_)
+        | E::Cycle(_)
+        | E::TooDeep(_)
+        | E::Network(_) => None,
+    }
+}
+
 /// The text files of one Pack folder: `(file name, contents)`.
 pub fn pack_files(def: &PackDef) -> Result<Vec<(&'static str, String)>, FormatError> {
     let mut files = vec![

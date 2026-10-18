@@ -34,5 +34,8 @@ All platforms.
 
 - [Image processing](../../../examples/image-processing.atidarla/) — `move`
 - [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `hue_swing`
+- [Pack: Chromatic Aberration](../../../examples/pack-chromatic-aberration.atidarla/) — `wobble`
+- [Pack: Feedback Trails](../../../examples/pack-feedback-trails.atidarla/) — `swing`
+- [Pack: Neon Edges](../../../examples/pack-neon-edges.atidarla/) — `colours`
 - [Simulations](../../../examples/simulations.atidarla/) — `orbit`
 - [Texture sharing](../../../examples/texture-sharing.atidarla/) — `drift`

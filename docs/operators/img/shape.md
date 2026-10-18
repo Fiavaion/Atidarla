@@ -35,4 +35,6 @@ All platforms.
 
 - [Beat switcher](../../../examples/beat-switcher.atidarla/) — `star`
 - [Live control](../../../examples/live-control.atidarla/) — `shape1`
+- [Pack: Feedback Trails](../../../examples/pack-feedback-trails.atidarla/) — `triangle`
+- [Pack: Neon Edges](../../../examples/pack-neon-edges.atidarla/) — `pentagon`
 - [Simulations](../../../examples/simulations.atidarla/) — `dot`, `seed`

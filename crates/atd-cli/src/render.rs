@@ -15,7 +15,8 @@ use std::path::Path;
 use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
-use atd_core::graph::NodeId;
+use atd_core::graph::{Network, NodeId};
+use atd_core::pack::Flat;
 use atd_core::platform::PlatformInfo;
 use atd_core::registry::{Availability, Registry, WireType};
 use atd_gpu::engine::{CookMode, Engine, EngineConfig};
@@ -160,6 +161,7 @@ pub struct Renderer {
     engine: Engine,
     platform: PlatformInfo,
     output: NodeId,
+    output_label: String,
     fps: f64,
     /// Nodes already reported as not available on this platform.
     unavailable: BTreeSet<NodeId>,
@@ -177,6 +179,7 @@ impl Renderer {
             engine,
             platform,
             output: NodeId(0),
+            output_label: String::new(),
             fps: DEFAULT_FPS,
             unavailable: BTreeSet::new(),
             warnings: Vec::new(),
@@ -197,15 +200,30 @@ impl Renderer {
         if let Some((name, e)) = failed.first() {
             bail!("shaders/{name}: {e}");
         }
+        // Pack instances are expanded into the nodes inside them
+        // (`docs/packs.md`); the engine cooks the flat network.
+        let registry = project
+            .packs
+            .register(self.engine.registry())
+            .map_err(crate::project::pack_error)?;
+        let net = net
+            .validated(&registry)
+            .with_context(|| format!("{}: networks/main.toml", dir.display()))?;
+        let flat = project
+            .packs
+            .flatten(&net, &registry)
+            .map_err(crate::project::pack_error)?;
+        let (output, label) = output_node(&net, &registry, &flat, opts.node.as_deref())?;
         self.fps = opts.fps;
         self.engine.set_mode(CookMode::Offline { fps: opts.fps });
         self.engine.set_project_dir(Some(dir.to_owned()));
         self.engine
-            .load(net)
+            .load(flat.network)
             .with_context(|| format!("{}", dir.display()))?;
         let [w, h] = opts.size.unwrap_or(project.resolution);
         self.engine.set_resolution(w, h);
-        self.output = output_node(&self.engine, opts.node.as_deref())?;
+        self.output = output;
+        self.output_label = label;
         self.unavailable.clear();
         let net = self.engine.network();
         for node in net.nodes() {
@@ -278,31 +296,46 @@ impl Renderer {
         std::mem::take(&mut self.warnings)
     }
 
+    /// The rendered node's name in the project (`glow1` for a Pack
+    /// instance, `glow1/blur1` for a node inside one).
     pub fn output_name(&self) -> &str {
-        self.engine
-            .network()
-            .node(self.output)
-            .map_or("?", |n| n.name.as_str())
+        &self.output_label
     }
 }
 
-/// The node to render: `name` if given (an IMG node), otherwise the node
-/// the app's viewer shows first: the last IMG node nothing reads from, else
-/// the last IMG node. (The viewer's rule, `atd-app/src/project.rs`, limited
-/// to IMG nodes.)
-fn output_node(engine: &Engine, name: Option<&str>) -> Result<NodeId> {
-    let net = engine.network();
-    let is_img = |id: NodeId| {
+/// The node to render, as a node of the flat network and a name for
+/// people: `name` if given (an IMG node of the project, a Pack instance
+/// with an IMG output, or a node inside one as `glow1/blur1`), otherwise
+/// the node the app's viewer shows first: the last IMG node nothing reads
+/// from, else the last IMG node. (The viewer's rule, `atd-app/src/
+/// project.rs`, limited to IMG nodes.)
+fn output_node(
+    net: &Network,
+    registry: &Registry,
+    flat: &Flat,
+    name: Option<&str>,
+) -> Result<(NodeId, String)> {
+    let is_img = |net: &Network, id: NodeId| {
         net.node(id)
-            .and_then(|n| engine.registry().get(&n.type_id))
+            .and_then(|n| registry.get(&n.type_id))
             .and_then(|s| s.outputs.first())
             .is_some_and(|o| o.wire == WireType::Img)
     };
     if let Some(name) = name {
-        let Some(node) = net.nodes().find(|n| n.name == name) else {
+        let found = net
+            .nodes()
+            .find(|n| n.name == name)
+            .map(|n| (n, net))
+            .or_else(|| {
+                flat.network
+                    .nodes()
+                    .find(|n| n.name == name || flat.display(n.id) == name)
+                    .map(|n| (n, &flat.network))
+            });
+        let Some((node, within)) = found else {
             let names: Vec<&str> = net
                 .nodes()
-                .filter(|n| is_img(n.id))
+                .filter(|n| is_img(net, n.id))
                 .map(|n| n.name.as_str())
                 .collect();
             bail!(
@@ -310,22 +343,35 @@ fn output_node(engine: &Engine, name: Option<&str>) -> Result<NodeId> {
                 names.join(", ")
             );
         };
-        if !is_img(node.id) {
+        if !is_img(within, node.id) {
             bail!(
                 "--node {name}: {} is not an IMG node, so it has no image to render",
                 node.type_id
             );
         }
-        return Ok(node.id);
+        let id = flat
+            .view(node.id)
+            .with_context(|| format!("--node {name}: the Pack has no output to render"))?;
+        return Ok((id, name.to_owned()));
     }
     let read: BTreeSet<NodeId> = net.wires().map(|w| w.from.node).collect();
-    let ids: Vec<NodeId> = net.nodes().map(|n| n.id).filter(|&id| is_img(id)).collect();
-    ids.iter()
+    let ids: Vec<NodeId> = net
+        .nodes()
+        .map(|n| n.id)
+        .filter(|&id| is_img(net, id))
+        .collect();
+    let id = ids
+        .iter()
         .rev()
         .copied()
         .find(|id| !read.contains(id))
         .or_else(|| ids.last().copied())
-        .context("the project has no IMG node to render; add one, or pick one with --node")
+        .context("the project has no IMG node to render; add one, or pick one with --node")?;
+    let label = net.node(id).map(|n| n.name.clone()).unwrap_or_default();
+    let flat_id = flat
+        .view(id)
+        .with_context(|| format!("{label}: the Pack has no output to render"))?;
+    Ok((flat_id, label))
 }
 
 /// How an operator behaves in an offline render (`docs/render.md` has the
@@ -359,6 +405,11 @@ pub fn classify(type_id: &str) -> Option<Class> {
         // Project ISF shaders: compiled on a worker thread. Persistent
         // buffers also make one stateful.
         return Some(Waits);
+    }
+    if type_id.starts_with(atd_core::pack::TYPE_PREFIX) {
+        // A Pack instance never reaches the engine: it is flattened into
+        // the nodes inside it, and each of those is classified on its own.
+        return Some(Pure);
     }
     Some(match type_id {
         "img.blend" | "img.bloom" | "img.blur" | "img.channel_image" | "img.channel_mix"
@@ -768,6 +819,54 @@ mod tests {
         assert_eq!(render(&mut again, 0..3), first);
     }
 
+    /// Packs (FR-P4): projects with Pack instances render to identical
+    /// frames twice; an expression inside a Pack (renamed for the instance)
+    /// and an expression naming a Pack instance's channel both evaluate.
+    #[test]
+    fn projects_with_packs_render_identically_and_their_expressions_work() {
+        let Some(mut a) = renderer() else { return };
+        let mut b = renderer().unwrap();
+        for name in [
+            "pack-chromatic-aberration",
+            "pack-beat-flash",
+            "pack-audio-pulse",
+            "pack-feedback-trails",
+        ] {
+            let dir = example(name);
+            a.load(&dir, &opts(0..12)).unwrap();
+            b.load(&dir, &opts(0..12)).unwrap();
+            let (fa, fb) = (render(&mut a, 0..12), render(&mut b, 0..12));
+            assert_eq!(fa, fb, "{name}");
+            assert_ne!(fa[0].1, fa[11].1, "{name}: the picture changes");
+        }
+        a.load(&example("pack-chromatic-aberration"), &opts(0..3))
+            .unwrap();
+        assert_eq!(a.output_name(), "aberration1");
+        render(&mut a, 0..3);
+        let id = |r: &Renderer, n: &str| r.engine.network().node_by_name(n).unwrap().id;
+        let blue = a
+            .engine
+            .expression_value(id(&a, "aberration1__blue_shift"), "amount")
+            .expect("the expression inside the Pack evaluates");
+        let red = a
+            .engine
+            .channels(id(&a, "wobble"))
+            .and_then(|c| c.value("lfo"))
+            .unwrap();
+        assert!((blue + f64::from(red)).abs() < 1e-6, "{blue} vs {red}");
+        a.load(&example("pack-beat-flash"), &opts(0..3)).unwrap();
+        render(&mut a, 0..3);
+        let kick = a.engine.expression_value(id(&a, "kick"), "rotate");
+        assert!(kick.is_some(), "op('flash1')['trigger'] evaluates");
+        // A node inside a Pack can be rendered by its path.
+        let inner = RenderOptions {
+            node: Some("flash1/flash".into()),
+            ..opts(0..1)
+        };
+        a.load(&example("pack-beat-flash"), &inner).unwrap();
+        assert_eq!(a.output_name(), "flash1/flash");
+        render(&mut a, 0..1);
+    }
     /// Share Out publishes nothing in an offline render (Spout, Windows).
     #[cfg(windows)]
     #[test]

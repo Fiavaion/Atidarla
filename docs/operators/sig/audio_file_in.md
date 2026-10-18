@@ -33,3 +33,4 @@ All platforms.
 
 - [Audio-reactive feedback](../../../examples/audio-reactive-feedback.atidarla/) — `audio1`
 - [Live control](../../../examples/live-control.atidarla/) — `drums`
+- [Pack: Audio Pulse](../../../examples/pack-audio-pulse.atidarla/) — `drums`

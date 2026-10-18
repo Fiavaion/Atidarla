@@ -32,4 +32,5 @@ All platforms.
 - [Beat switcher](../../../examples/beat-switcher.atidarla/) — `gradient`
 - [Image processing](../../../examples/image-processing.atidarla/) — `palette`
 - [Keying](../../../examples/keying.atidarla/) — `backdrop`
+- [Pack: Beat Flash](../../../examples/pack-beat-flash.atidarla/) — `wheel`
 - [Time effects](../../../examples/time-effects.atidarla/) — `columns`

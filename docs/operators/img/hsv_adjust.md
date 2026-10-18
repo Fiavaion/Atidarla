@@ -31,4 +31,5 @@ All platforms.
 ## Examples
 
 - [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `colour`
+- [Pack: Audio Pulse](../../../examples/pack-audio-pulse.atidarla/) — `colour`
 - [Texture sharing](../../../examples/texture-sharing.atidarla/) — `tint`

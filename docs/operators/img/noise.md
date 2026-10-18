@@ -36,4 +36,6 @@ All platforms.
 - [Audio-reactive feedback](../../../examples/audio-reactive-feedback.atidarla/) — `noise1`
 - [Image processing](../../../examples/image-processing.atidarla/) — `source`
 - [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `clouds`
+- [Pack: Audio Pulse](../../../examples/pack-audio-pulse.atidarla/) — `clouds`
+- [Pack: Vignette](../../../examples/pack-vignette.atidarla/) — `clouds`
 - [Texture sharing](../../../examples/texture-sharing.atidarla/) — `pattern`

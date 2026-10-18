@@ -1,0 +1,29 @@
+# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 3
+
+[[node]]
+id = 0
+name = "wobble"
+type = "sig.lfo"
+pos = [0.0, 0.0]
+params.amplitude = 0.006
+params.frequency = 0.5
+params.offset = 0.009
+
+[[node]]
+id = 1
+name = "title"
+type = "img.text"
+pos = [0.0, 160.0]
+params.background = [0.0, 0.0, 0.0, 1.0]
+params.size = 0.22
+params.text = "ATIDARLA"
+
+[[node]]
+id = 2
+name = "aberration1"
+type = "cmp.pack_chromatic_aberration"
+pos = [240.0, 160.0]
+inputs.in = { node = 1, output = "out" }
+params.amount = { value = 0.008, bind = { node = 0, channel = "lfo" } }

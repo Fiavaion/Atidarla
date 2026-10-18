@@ -67,6 +67,11 @@ jobs:
         # second without errors and every binding finds its channel.
         shell: bash
         run: cargo run -p atd-cli --release -- check ${{ matrix.gpu == '1' && '--gpu' || '' }} examples/*.atidarla
+      - name: Shipped Packs (FR-P4)
+        # Every Pack in packs/ is valid and canonical; with a GPU, one
+        # instance of each cooks with nothing connected.
+        shell: bash
+        run: cargo run -p atd-cli --release -- check ${{ matrix.gpu == '1' && '--gpu' || '' }} packs/*/
       - name: Deterministic render (M2 AC4, FR-H1)
         # Two offline renders of the AC1 example (audio decoded on a worker
         # thread, spectrum, feedback) give byte-identical PNG frames.

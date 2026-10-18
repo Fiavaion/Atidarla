@@ -1,0 +1,35 @@
+# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 4
+
+[[node]]
+id = 0
+name = "drums"
+type = "sig.audio_file_in"
+pos = [0.0, 0.0]
+params.file = "media/beat.wav"
+
+[[node]]
+id = 1
+name = "clouds"
+type = "img.noise"
+pos = [0.0, 160.0]
+params.monochrome = false
+params.scale = 3.0
+params.z = { value = 0.0, expr = "time * 0.2" }
+
+[[node]]
+id = 2
+name = "pulse1"
+type = "cmp.pack_audio_pulse"
+pos = [240.0, 80.0]
+inputs.audio = { node = 0, output = "out" }
+inputs.in = { node = 1, output = "out" }
+
+[[node]]
+id = 3
+name = "colour"
+type = "img.hsv_adjust"
+pos = [480.0, 80.0]
+inputs.in = { node = 2, output = "out" }
+params.hue = { value = 0.0, expr = "op('pulse1')['level'] * 60" }

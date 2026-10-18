@@ -1,0 +1,47 @@
+# Atidarla Pack. Its network is network.toml; its help page is help.md.
+format = 1
+name = "vignette"
+version = "1.0.0"
+label = "Vignette"
+summary = "Darkens (or tints) the edges of an image towards a colour, drawing the eye to the centre."
+locked = true
+
+[[param]]
+name = "amount"
+label = "Amount"
+default = 0.8
+help = "How strong the vignette is: 0 leaves the image alone."
+to = [{ node = 2, param = "opacity" }]
+
+[[param]]
+name = "softness"
+label = "Softness"
+default = 0.6
+min = 0.05
+max = 8.0
+help = "Shape of the falloff: low values keep the centre clear and darken near the edges, high values darken from the centre outwards."
+to = [{ node = 1, param = "gamma" }]
+
+[[param]]
+name = "size"
+label = "Size"
+default = 0.0
+min = -1.0
+max = 1.0
+help = "Moves the falloff: negative shrinks the clear area, positive widens it."
+to = [{ node = 0, param = "phase" }]
+
+[[param]]
+name = "colour"
+label = "Edge Colour"
+default = [0.0, 0.0, 0.0, 1.0]
+help = "The colour the edges fade to (it multiplies the image)."
+to = [{ node = 0, param = "colour_b" }]
+
+[[input]]
+name = "in"
+to = [{ node = 2, input = "a" }]
+
+[[output]]
+name = "out"
+from = { node = 2, output = "out" }

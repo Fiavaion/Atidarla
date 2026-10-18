@@ -1,0 +1,68 @@
+# Atidarla Pack. Its network is network.toml; its help page is help.md.
+format = 1
+name = "audio_pulse"
+version = "1.0.0"
+label = "Audio Pulse"
+summary = "Makes an image brighten and glow with the loudness of an audio signal."
+locked = true
+
+[[param]]
+name = "gain"
+label = "Gain"
+default = 4.0
+min = 0.0
+max = 64.0
+help = "Amplifies the audio before measuring it; raise it for quiet sources."
+to = [{ node = 0, param = "gain" }]
+
+[[param]]
+name = "attack"
+label = "Attack"
+default = 0.02
+min = 0.0
+max = 2.0
+help = "Seconds the pulse takes to rise."
+to = [{ node = 2, param = "lag_up" }]
+
+[[param]]
+name = "release"
+label = "Release"
+default = 0.25
+min = 0.0
+max = 4.0
+help = "Seconds the pulse takes to fall back."
+to = [{ node = 2, param = "lag_down" }]
+
+[[param]]
+name = "quiet"
+label = "Quiet Level"
+default = 0.4
+min = 0.0
+max = 4.0
+help = "Brightness (and glow) in silence."
+to = [{ node = 3, param = "to_min" }]
+
+[[param]]
+name = "loud"
+label = "Loud Level"
+default = 1.6
+min = 0.0
+max = 8.0
+help = "Brightness (and glow) at full loudness."
+to = [{ node = 3, param = "to_max" }]
+
+[[input]]
+name = "in"
+to = [{ node = 4, input = "in" }]
+
+[[input]]
+name = "audio"
+to = [{ node = 0, input = "in" }]
+
+[[output]]
+name = "out"
+from = { node = 5, output = "out" }
+
+[[output]]
+name = "pulse"
+from = { node = 3, output = "out" }

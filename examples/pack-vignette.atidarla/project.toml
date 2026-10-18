@@ -1,0 +1,9 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "Pack: Vignette"
+description = '''
+Drifting colour noise with the Vignette Pack tinting its edges deep blue.
+
+Try: set Edge Colour back to black, or Softness to 2 for a darker, rounder frame.
+'''
+resolution = [1280, 720]

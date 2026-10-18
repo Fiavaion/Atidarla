@@ -25,6 +25,19 @@ every IMG and SIG operator (CLAUDE.md rule 7); each operator's page in
 | [live-control](live-control.atidarla/) | Mouse, OSC, MIDI, DMX, timecode and audio output |
 | [texture-sharing](texture-sharing.atidarla/) | Share Out and Share In: publishing to other applications and a loopback (Spout on Windows) |
 
+One example per shipped Pack ([`packs/`](../packs/README.md), `docs/packs.md`). Each project
+carries its own copy of the Pack in `packs/<name>/` (a test keeps it equal to the library's):
+
+| Project | Shows |
+|---|---|
+| [pack-audio-pulse](pack-audio-pulse.atidarla/) | Audio Pulse: a drum loop brightening noise; an expression reads the Pack's `level` channel |
+| [pack-beat-flash](pack-beat-flash.atidarla/) | Beat Flash: flashes and kicks on every beat at 128 BPM |
+| [pack-chromatic-aberration](pack-chromatic-aberration.atidarla/) | Chromatic Aberration: an LFO bound to a promoted parameter |
+| [pack-feedback-trails](pack-feedback-trails.atidarla/) | Feedback Trails: an orbiting triangle leaving a hue-shifting spiral |
+| [pack-kaleido-tunnel](pack-kaleido-tunnel.atidarla/) | Kaleidoscope Tunnel: two instances of one Pack with different settings |
+| [pack-neon-edges](pack-neon-edges.atidarla/) | Neon Edges: glowing outlines around a shape and text |
+| [pack-vignette](pack-vignette.atidarla/) | Vignette: edges tinted towards deep blue |
+
 Checks (CI runs both on Windows and macOS):
 
 ```sh

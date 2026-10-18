@@ -1,10 +1,12 @@
-//! `atidarla check` and `atidarla fmt`: project folders (PRD §5.5, A11).
+//! `atidarla check` and `atidarla fmt`: project folders (PRD §5.5, A11) and
+//! Pack folders (FR-P4, `docs/packs.md`).
 
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result, bail};
-use atd_core::graph::NodeId;
+use anyhow::{Context, Result, anyhow, bail};
+use atd_core::graph::{Edit, Network, Node, NodeId};
+use atd_core::pack::{Flat, PackError, PackSet};
 use atd_core::registry::{Availability, Registry};
 use atd_gpu::engine::{Engine, EngineConfig, OpLibrary};
 
@@ -17,9 +19,9 @@ pub struct CheckOptions {
     pub frames: u32,
 }
 
-/// Loads each project, validates it against the registry (plus its own
-/// shaders), checks the files are in canonical form, and optionally cooks
-/// it. Reports every project before failing.
+/// Loads each project (or Pack folder), validates it against the registry
+/// (plus its own shaders and Packs), checks the files are in canonical
+/// form, and optionally cooks it. Reports every folder before failing.
 pub fn check(dirs: &[impl AsRef<Path>], opts: CheckOptions) -> Result<()> {
     let gpu = if opts.gpu {
         Some(atd_gpu::GpuContext::headless().context("no GPU adapter for --gpu")?)
@@ -29,7 +31,12 @@ pub fn check(dirs: &[impl AsRef<Path>], opts: CheckOptions) -> Result<()> {
     let mut failed = 0;
     for dir in dirs {
         let dir = dir.as_ref();
-        match check_one(dir, gpu.as_ref(), opts) {
+        let result = if is_pack_folder(dir) {
+            check_pack(dir, gpu.as_ref(), opts)
+        } else {
+            check_one(dir, gpu.as_ref(), opts)
+        };
+        match result {
             Ok(summary) => println!("ok    {}  {summary}", dir.display()),
             Err(e) => {
                 failed += 1;
@@ -38,9 +45,14 @@ pub fn check(dirs: &[impl AsRef<Path>], opts: CheckOptions) -> Result<()> {
         }
     }
     if failed > 0 {
-        bail!("{failed} of {} projects failed", dirs.len());
+        bail!("{failed} of {} folders failed", dirs.len());
     }
     Ok(())
+}
+
+/// A Pack folder (`packs/glow/`) rather than a project.
+fn is_pack_folder(dir: &Path) -> bool {
+    dir.join("pack.toml").is_file() && !dir.join("project.toml").exists()
 }
 
 pub(crate) fn library() -> (atd_core::Registry, OpLibrary) {
@@ -51,7 +63,25 @@ pub(crate) fn library() -> (atd_core::Registry, OpLibrary) {
     (registry, library)
 }
 
-fn check_one(dir: &Path, gpu: Option<&atd_gpu::GpuContext>, opts: CheckOptions) -> Result<String> {
+/// A Pack error, prefixed with the file it is about.
+pub(crate) fn pack_error(e: PackError) -> anyhow::Error {
+    match atd_format::pack::error_file(&e) {
+        Some(file) => anyhow!("{file}: {e}"),
+        None => anyhow!("packs: {e}"),
+    }
+}
+
+/// A project loaded and checked against the registry.
+pub(crate) struct Loaded {
+    pub project: atd_format::Project,
+    /// Built-in operators, the project's shaders and its Packs.
+    pub registry: Registry,
+    pub library: OpLibrary,
+    pub shaders: Vec<String>,
+}
+
+/// Loads `dir`, registers its shaders and Packs, and validates every network.
+pub(crate) fn load_checked(dir: &Path) -> Result<Loaded> {
     let project = atd_format::load(dir)?;
     let (mut registry, mut library) = library();
     let (shaders, failed) =
@@ -59,35 +89,144 @@ fn check_one(dir: &Path, gpu: Option<&atd_gpu::GpuContext>, opts: CheckOptions) 
     if let Some((name, e)) = failed.first() {
         bail!("shaders/{name}: {e}");
     }
+    let registry = project.packs.register(&registry).map_err(pack_error)?;
     for (id, net) in &project.networks {
         net.clone()
             .validated(&registry)
             .with_context(|| format!("networks/{id}.toml"))?;
     }
-    // Saving what was loaded must reproduce the files byte for byte.
-    let canonical = |rel: &str, text: String| -> Result<()> {
-        let on_disk = std::fs::read_to_string(dir.join(rel))?;
-        if on_disk != text {
-            bail!("{rel} is not in canonical form (run `atidarla fmt`)");
-        }
-        Ok(())
-    };
-    canonical("project.toml", atd_format::project_to_string(&project))?;
+    Ok(Loaded {
+        project,
+        registry,
+        library,
+        shaders,
+    })
+}
+
+/// Saving what was loaded must reproduce the file byte for byte.
+fn canonical(dir: &Path, rel: &str, text: &str) -> Result<()> {
+    let on_disk = std::fs::read_to_string(dir.join(rel)).with_context(|| rel.to_owned())?;
+    if on_disk != text {
+        bail!("{rel} is not in canonical form (run `atidarla fmt`)");
+    }
+    Ok(())
+}
+
+fn canonical_pack(dir: &Path, prefix: &str, def: &atd_core::pack::PackDef) -> Result<()> {
+    for (file, text) in atd_format::pack::pack_files(def)? {
+        canonical(dir, &format!("{prefix}{file}"), &text)?;
+    }
+    if def.help.is_empty() && dir.join(format!("{prefix}help.md")).exists() {
+        bail!("{prefix}help.md is empty (run `atidarla fmt`)");
+    }
+    Ok(())
+}
+
+fn check_one(dir: &Path, gpu: Option<&atd_gpu::GpuContext>, opts: CheckOptions) -> Result<String> {
+    let Loaded {
+        project,
+        registry,
+        library,
+        shaders,
+    } = load_checked(dir)?;
+    canonical(
+        dir,
+        "project.toml",
+        &atd_format::project_to_string(&project),
+    )?;
     for (id, net) in &project.networks {
         canonical(
+            dir,
             &format!("networks/{id}.toml"),
-            atd_format::network_to_string(net)?,
+            &atd_format::network_to_string(net)?,
         )?;
+    }
+    for def in project.packs.iter() {
+        canonical_pack(dir, &format!("packs/{}/", def.name), def)?;
     }
     let main = project.main().cloned().unwrap_or_default();
     let mut summary = format!("{} nodes", main.len());
     if !shaders.is_empty() {
         summary += &format!(", {} shaders", shaders.len());
     }
+    if !project.packs.is_empty() {
+        let names: Vec<String> = project
+            .packs
+            .iter()
+            .map(|d| d.reference().to_string())
+            .collect();
+        summary += &format!(", Packs {}", names.join(" "));
+    }
     let Some(gpu) = gpu else {
         return Ok(summary);
     };
-    let [w, h] = project.resolution;
+    let flat = project
+        .packs
+        .flatten(&main, &registry)
+        .map_err(pack_error)?;
+    let cooked = cook(
+        gpu,
+        registry,
+        library,
+        &flat,
+        Some(dir),
+        project.resolution,
+        opts,
+    )?;
+    Ok(format!("{summary}{cooked}"))
+}
+
+/// Checks one Pack folder of a library: it loads, is valid (together with
+/// the other Packs of its library, which it may contain) and canonical;
+/// with a GPU, one instance of it cooks with nothing connected.
+fn check_pack(dir: &Path, gpu: Option<&atd_gpu::GpuContext>, opts: CheckOptions) -> Result<String> {
+    let rel = dir.display().to_string();
+    let def = atd_format::load_pack(dir, rel.trim_end_matches(['/', '\\']))?;
+    let mut packs = PackSet::default();
+    if let Some(parent) = dir.parent()
+        && let Ok(lib) = atd_format::Library::open(parent)
+    {
+        for d in lib.latest() {
+            packs.insert(d.clone());
+        }
+    }
+    packs.insert(def.clone());
+    let (base, library) = library();
+    let registry = packs.register(&base).map_err(|e| anyhow!("{e}"))?;
+    canonical_pack(dir, "", &def)?;
+    let summary = format!(
+        "Pack {} ({} nodes, {} parameters)",
+        def.reference(),
+        def.network.len(),
+        def.params.len()
+    );
+    let Some(gpu) = gpu else {
+        return Ok(summary);
+    };
+    let mut net = Network::default();
+    let id = net.alloc_id();
+    net.apply(
+        &registry,
+        Edit::AddNode {
+            node: Node::new(id, def.type_id(), format!("{}1", def.name)),
+        },
+    )?;
+    let flat = packs.flatten(&net, &registry).map_err(|e| anyhow!("{e}"))?;
+    let cooked = cook(gpu, registry, library, &flat, Some(dir), [320, 180], opts)?;
+    Ok(format!("{summary}{cooked}"))
+}
+
+/// Cooks every node of `flat` for `opts.frames` frames in real time and
+/// fails on node errors and on bindings to channels that do not exist.
+fn cook(
+    gpu: &atd_gpu::GpuContext,
+    registry: Registry,
+    library: OpLibrary,
+    flat: &Flat,
+    dir: Option<&Path>,
+    [w, h]: [u32; 2],
+    opts: CheckOptions,
+) -> Result<String> {
     let mut engine = Engine::new(
         gpu.device.clone(),
         gpu.queue.clone(),
@@ -99,9 +238,9 @@ fn check_one(dir: &Path, gpu: Option<&atd_gpu::GpuContext>, opts: CheckOptions) 
             format: wgpu::TextureFormat::Rgba8Unorm,
         },
     );
-    engine.set_project_dir(Some(dir.to_owned()));
+    engine.set_project_dir(dir.map(Path::to_owned));
     engine.set_python(Box::new(atd_py::expr::PyExprHost::start()?));
-    engine.load(main)?;
+    engine.load(flat.network.clone())?;
     let ids: Vec<NodeId> = engine.network().nodes().map(|n| n.id).collect();
     // Cook in real time, as the app would: movies, audio and shaders load
     // on worker threads while frames go by.
@@ -144,11 +283,12 @@ fn check_one(dir: &Path, gpu: Option<&atd_gpu::GpuContext>, opts: CheckOptions) 
             )
         });
         if fallback {
-            unavailable.push(n.name.as_str());
+            unavailable.push(flat.display(n.id));
         } else {
-            errors.push(format!("{}: {e}", n.name));
+            errors.push(format!("{}: {e}", flat.display(n.id)));
         }
     }
+    let mut summary = String::new();
     if !unavailable.is_empty() {
         summary += &format!(
             ", not available on this platform: {}",
@@ -173,14 +313,14 @@ fn check_one(dir: &Path, gpu: Option<&atd_gpu::GpuContext>, opts: CheckOptions) 
                 }
             });
             if !found {
-                let source = net.node(bind.node).map_or("?", |n| n.name.as_str());
+                let source = flat.display(bind.node);
                 let names: Vec<&str> = engine
                     .channels(bind.node)
                     .map(|c| c.names().collect())
                     .unwrap_or_default();
                 missing.push(format!(
                     "{}.{param} is bound to {source}:{} (it has: {})",
-                    node.name,
+                    flat.display(node.id),
                     bind.channel,
                     names.join(", ")
                 ));
@@ -197,12 +337,17 @@ fn check_one(dir: &Path, gpu: Option<&atd_gpu::GpuContext>, opts: CheckOptions) 
     ))
 }
 
-/// Rewrites each project in canonical form.
+/// Rewrites each project (or Pack folder) in canonical form.
 pub fn fmt(dirs: &[impl AsRef<Path>]) -> Result<()> {
     for dir in dirs {
         let dir = dir.as_ref();
-        let project = atd_format::load(dir)?;
-        atd_format::save(dir, &project)?;
+        if is_pack_folder(dir) {
+            let def = atd_format::load_pack(dir, &dir.display().to_string())?;
+            atd_format::save_pack(dir, &def)?;
+        } else {
+            let project = atd_format::load(dir)?;
+            atd_format::save(dir, &project)?;
+        }
         println!("formatted {}", dir.display());
     }
     Ok(())
@@ -213,9 +358,14 @@ mod tests {
     use super::*;
     use atd_core::registry::OpFamily;
 
+    fn repo(rel: &str) -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join(rel)
+    }
+
     fn examples() -> Vec<std::path::PathBuf> {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
-        let mut found: Vec<_> = std::fs::read_dir(dir)
+        let mut found: Vec<_> = std::fs::read_dir(repo("examples"))
             .unwrap()
             .filter_map(|e| e.ok().map(|e| e.path()))
             .filter(|p| p.extension().is_some_and(|x| x == atd_format::EXTENSION))
@@ -242,10 +392,7 @@ mod tests {
     /// CLAUDE.md rule 7: every IMG and SIG operator has a runnable example.
     #[test]
     fn every_img_and_sig_operator_has_an_example() {
-        let used = crate::docs::examples_by_type(
-            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples"),
-        )
-        .unwrap();
+        let used = crate::docs::examples_by_type(&repo("examples")).unwrap();
         let registry = crate::builtin_registry();
         let missing: Vec<&str> = registry
             .iter()
@@ -257,5 +404,103 @@ mod tests {
             missing.is_empty(),
             "operators without an example: {missing:?}"
         );
+    }
+
+    /// Every shipped Pack is valid and canonical, has help, a summary,
+    /// promoted parameters and a version, and an example project that uses
+    /// the library's current version of it.
+    #[test]
+    fn shipped_packs_are_complete_and_their_examples_current() {
+        let lib = atd_format::Library::open(&repo("packs")).unwrap();
+        assert!(lib.latest().count() >= 5, "{} Packs", lib.latest().count());
+        let opts = CheckOptions {
+            gpu: false,
+            frames: 0,
+        };
+        let projects: Vec<atd_format::Project> = examples()
+            .iter()
+            .map(|d| atd_format::load(d).unwrap())
+            .collect();
+        for def in lib.latest() {
+            let dir = lib.path(&def.name, def.version).unwrap();
+            check_pack(dir, None, opts).unwrap_or_else(|e| panic!("{}: {e:#}", def.name));
+            assert!(def.locked, "{}: shipped Packs are locked", def.name);
+            assert!(
+                def.help.starts_with("# "),
+                "{}: help.md starts with a title",
+                def.name
+            );
+            assert!(
+                !def.summary.is_empty() && !def.label.is_empty(),
+                "{}",
+                def.name
+            );
+            assert!(
+                !def.params.is_empty(),
+                "{}: no promoted parameters",
+                def.name
+            );
+            let uses: Vec<&atd_format::Project> = projects
+                .iter()
+                .filter(|p| p.packs.get(&def.name).is_some())
+                .collect();
+            assert!(!uses.is_empty(), "{}: no example project uses it", def.name);
+            for p in uses {
+                assert_eq!(
+                    p.packs.get(&def.name),
+                    Some(def),
+                    "{} in example `{}` differs from packs/{} (copy the library version)",
+                    def.name,
+                    p.name,
+                    def.name
+                );
+                let main = p.main().unwrap();
+                assert!(
+                    main.nodes().any(|n| n.type_id == def.type_id()),
+                    "{}: example `{}` has no instance",
+                    def.name,
+                    p.name
+                );
+            }
+        }
+    }
+
+    /// `check` and `fmt` report Pack errors with the file they are in.
+    #[test]
+    fn pack_errors_name_their_file() {
+        let src = repo("examples/pack-feedback-trails.atidarla");
+        let dir =
+            std::env::temp_dir().join(format!("atd-cli-packs-{}.atidarla", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let project = atd_format::load(&src).unwrap();
+        atd_format::save(&dir, &project).unwrap();
+        let opts = CheckOptions {
+            gpu: false,
+            frames: 0,
+        };
+        check_one(&dir, None, opts).unwrap();
+        let pack = dir.join("packs/feedback_trails/pack.toml");
+        let text = std::fs::read_to_string(&pack).unwrap();
+        std::fs::write(&pack, text.replacen("param = \"", "param = \"nope_", 1)).unwrap();
+        let e = format!("{:#}", check_one(&dir, None, opts).unwrap_err());
+        assert!(
+            e.starts_with("packs/feedback_trails/pack.toml: Pack `feedback_trails`: parameter"),
+            "{e}"
+        );
+        std::fs::write(&pack, text.replace("version = \"", "version = \"x")).unwrap();
+        let e = format!("{:#}", check_one(&dir, None, opts).unwrap_err());
+        assert!(
+            e.starts_with("packs/feedback_trails/pack.toml: invalid version"),
+            "{e}"
+        );
+        std::fs::write(&pack, text.replace("\nlocked", "\n\nlocked")).unwrap();
+        let e = format!("{:#}", check_one(&dir, None, opts).unwrap_err());
+        assert!(
+            e.contains("packs/feedback_trails/pack.toml is not in canonical form"),
+            "{e}"
+        );
+        fmt(&[&dir]).unwrap();
+        check_one(&dir, None, opts).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
