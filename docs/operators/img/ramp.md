@@ -33,4 +33,5 @@ All platforms.
 - [Image processing](../../../examples/image-processing.atidarla/) — `palette`
 - [Keying](../../../examples/keying.atidarla/) — `backdrop`
 - [Pack: Beat Flash](../../../examples/pack-beat-flash.atidarla/) — `wheel`
+- [Render Textures](../../../examples/render-textures.atidarla/) — `sphere_look`
 - [Time effects](../../../examples/time-effects.atidarla/) — `columns`

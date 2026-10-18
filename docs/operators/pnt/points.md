@@ -33,3 +33,4 @@ All platforms.
 ## Examples
 
 - [Points](../../../examples/points.atidarla/) — `cloud`, `grid`
+- [Render Wire and Toon](../../../examples/render-wire-toon.atidarla/) — `cloud`

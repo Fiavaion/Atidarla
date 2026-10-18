@@ -39,4 +39,5 @@ All platforms.
 - [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `clouds`
 - [Pack: Audio Pulse](../../../examples/pack-audio-pulse.atidarla/) — `clouds`
 - [Pack: Vignette](../../../examples/pack-vignette.atidarla/) — `clouds`
+- [Render Textures](../../../examples/render-textures.atidarla/) — `noise`
 - [Texture sharing](../../../examples/texture-sharing.atidarla/) — `pattern`

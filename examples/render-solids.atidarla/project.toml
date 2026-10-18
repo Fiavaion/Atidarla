@@ -1,0 +1,15 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "Render Solids"
+description = '''
+3D rendering (M2): two Platonic solids turning in front of an orbiting camera, lit by one
+directional light, then bloomed.
+
+Platonic Solid makes faceted polygon meshes (P, N, uv, and a colour per face on the
+dodecahedron); Render draws each with the material wired beside it: a glossy PBR surface
+coloured by the faces, and an orange PBR one whose pulsing emission glows through Bloom.
+
+Try: switch the left solid's shape; raise the glossy material's metallic to 1; turn on the
+render's wireframe; set the projection to orthographic.
+'''
+resolution = [1280, 720]

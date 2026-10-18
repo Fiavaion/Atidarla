@@ -32,3 +32,4 @@ All platforms.
 
 - [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `glow`
 - [Particles](../../../examples/particles.atidarla/) — `glow`
+- [Render Solids](../../../examples/render-solids.atidarla/) — `bloom`

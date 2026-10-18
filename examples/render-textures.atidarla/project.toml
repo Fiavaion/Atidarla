@@ -1,0 +1,15 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "Render Textures"
+description = '''
+Textures on 3D shapes (M2): a square showing animated noise through its uv coordinates, and a
+dodecahedron shaded by a matcap made from a radial ramp, under a swaying camera.
+
+Platonic Solid writes uv (the square spans the unit square); Unlit multiplies its colour by
+the map image at uv; Matcap looks its image up by the surface normal as the camera sees it,
+so a lit-sphere picture gives the whole shape its look with no lights.
+
+Try: wire the noise into the matcap too; change the square to a hexagon (sides 6); give the
+ramp other colours.
+'''
+resolution = [1280, 720]
