@@ -444,6 +444,7 @@ name = "atd-py"
 version = "0.0.1"
 dependencies = [
  "atd-core",
+ "atd-format",
  "atd-gpu",
  "atd-interop",
  "atd-ops-img",
@@ -451,6 +452,7 @@ dependencies = [
  "log",
  "pollster 0.4.0",
  "pyo3",
+ "serde",
  "serde_json",
  "wgpu",
 ]
