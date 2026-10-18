@@ -39,6 +39,8 @@ pub struct RenderOptions {
     pub node: Option<String>,
     /// Overrides the project resolution (tests).
     pub size: Option<[u32; 2]>,
+    /// Run the project's Python operators (`--allow-python-ops`).
+    pub allow_python_ops: bool,
 }
 
 /// Parses `A-B` (start inclusive, end exclusive).
@@ -166,6 +168,8 @@ pub struct Renderer {
     /// Nodes already reported as not available on this platform.
     unavailable: BTreeSet<NodeId>,
     warnings: Vec<String>,
+    /// The loaded project's Python operators (their worker).
+    python: Option<atd_py::ops::PythonOps>,
 }
 
 impl Renderer {
@@ -183,6 +187,7 @@ impl Renderer {
             fps: DEFAULT_FPS,
             unavailable: BTreeSet::new(),
             warnings: Vec::new(),
+            python: None,
         })
     }
 
@@ -199,6 +204,12 @@ impl Renderer {
             .extend(|r, l| atd_ops_img::isf::register_project_shaders(dir, r, l));
         if let Some((name, e)) = failed.first() {
             bail!("shaders/{name}: {e}");
+        }
+        let mut python = self
+            .engine
+            .extend(|r, l| crate::project::python_ops(dir, r, l))?;
+        if opts.allow_python_ops {
+            python.allow();
         }
         // Pack instances are expanded into the nodes inside them
         // (`docs/packs.md`); the engine cooks the flat network.
@@ -219,7 +230,12 @@ impl Renderer {
         self.engine.set_project_dir(Some(dir.to_owned()));
         self.engine
             .load(flat.network)
+            .map_err(|e| match e {
+                atd_gpu::engine::EngineError::Graph(g) => crate::project::explain(g, &python),
+                other => other.into(),
+            })
             .with_context(|| format!("{}", dir.display()))?;
+        self.python = Some(python);
         let [w, h] = opts.size.unwrap_or(project.resolution);
         self.engine.set_resolution(w, h);
         self.output = output;
@@ -411,6 +427,12 @@ pub fn classify(type_id: &str) -> Option<Class> {
         // the nodes inside it, and each of those is classified on its own.
         return Some(Pure);
     }
+    if type_id.starts_with("py.") {
+        // Python operators (`docs/python-ops.md`): cooked on the Python
+        // operator worker; offline each frame waits for its own result.
+        // Those with declared state are also stateful.
+        return Some(Waits);
+    }
     Some(match type_id {
         "img.blend" | "img.bloom" | "img.blur" | "img.channel_image" | "img.channel_mix"
         | "img.chroma_key" | "img.composite" | "img.constant" | "img.crop" | "img.displace"
@@ -475,6 +497,7 @@ mod tests {
             fps: 60.0,
             node: None,
             size: Some([96, 54]),
+            allow_python_ops: false,
         }
     }
 
@@ -691,6 +714,29 @@ mod tests {
             .id;
         let level = a.engine.channels(spectrum).and_then(|c| c.value("level"));
         assert!(level.is_some_and(|l| l > 0.0), "{level:?}");
+    }
+
+    /// The Python operators example (`docs/python-ops.md`) renders to the
+    /// same frames twice when allowed; without --allow-python-ops the render
+    /// stops and says why.
+    #[test]
+    fn python_operators_render_deterministically_only_when_allowed() {
+        let Some(mut a) = renderer() else { return };
+        let mut b = renderer().unwrap();
+        assert_eq!(classify("py.motion.counter"), Some(Class::Waits));
+        let dir = example("python-ops");
+        let allowed = RenderOptions {
+            allow_python_ops: true,
+            ..opts(0..8)
+        };
+        a.load(&dir, &allowed).unwrap();
+        b.load(&dir, &allowed).unwrap();
+        let (fa, fb) = (render(&mut a, 0..8), render(&mut b, 0..8));
+        assert_eq!(fa, fb);
+        assert_ne!(fa[0].1, fa[7].1, "the Python operators animate it");
+        a.load(&dir, &opts(0..1)).unwrap();
+        let e = format!("{:#}", a.frame(0).unwrap_err());
+        assert!(e.contains(atd_py::ops::NOT_ALLOWED), "{e}");
     }
 
     /// Worker-thread results do not depend on thread scheduling: the same

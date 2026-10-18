@@ -48,12 +48,20 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// A fresh instance of the helper module under `name`, with the
-/// declaration API installed on the embedded `atidarla` module.
-pub(crate) fn helper_module<'py>(py: Python<'py>, name: &str) -> PyResult<Bound<'py, PyModule>> {
+/// A fresh instance of the helper module (`role` names it in tracebacks),
+/// with the declaration API installed on the embedded `atidarla` module.
+///
+/// Every instance has its own namespace: `PyModule::from_code` re-runs code
+/// in an existing module of the same name, so each gets a unique name, and
+/// it is taken out of `sys.modules` again (nothing imports it by name).
+pub(crate) fn helper_module<'py>(py: Python<'py>, role: &str) -> PyResult<Bound<'py, PyModule>> {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, Ordering::AcqRel);
+    let name = format!("_atd_ops_{role}_{n}");
     let code = CString::new(HELPER).expect("the helper has no NUL");
-    let name = CString::new(name).expect("module names have no NUL");
-    let module = PyModule::from_code(py, &code, c"atd_ops_host.py", &name)?;
+    let cname = CString::new(name.as_str()).expect("module names have no NUL");
+    let module = PyModule::from_code(py, &code, c"atd_ops_host.py", &cname)?;
+    py.import("sys")?.getattr("modules")?.del_item(&name)?;
     module
         .getattr("install")?
         .call1((py.import("atidarla")?,))?;
@@ -428,7 +436,7 @@ fn supervised<R>(
 
 fn worker(shared: &Shared, generation: u64) {
     let host: PyResult<Py<PyModule>> = Python::attach(|py| {
-        let m = helper_module(py, &format!("atd_ops_host_{generation}"))?;
+        let m = helper_module(py, "host")?;
         let ident: u64 = m.getattr("thread_ident")?.call0()?.extract()?;
         let exc = m.getattr("OpTimeout")?.unbind();
         let mut r = lock(&shared.running);

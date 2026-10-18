@@ -34,8 +34,8 @@ enum Command {
     ///
     /// Frame i is cooked at i/fps seconds, every frame one fixed step after
     /// the last, with no wall clock: operators that work on worker threads
-    /// (movies, audio files, shader compiles, text, Python expressions,
-    /// Analyze) are waited for, live inputs (audio, MIDI, OSC, input
+    /// (movies, audio files, shader compiles, text, Python expressions and
+    /// operators, Analyze) are waited for, live inputs (audio, MIDI, OSC, input
     /// devices, timecode, Share In) output their idle value and are named
     /// in a warning, and sinks (OSC, DMX, MIDI and audio out, Share Out)
     /// do not emit. Two renders on the same machine (same GPU adapter and
@@ -66,6 +66,11 @@ enum Command {
         /// viewer shows first (the last IMG node nothing reads from).
         #[arg(long)]
         node: Option<String>,
+        /// Run the project's Python operators (ops/*.py). They are code
+        /// with your user's privileges; without this flag a render that
+        /// needs one fails. See docs/python-ops.md.
+        #[arg(long)]
+        allow_python_ops: bool,
     },
     /// Run a project headless, optionally as a kiosk with watchdog (FR-H2, M3).
     Run { project: PathBuf },
@@ -86,6 +91,11 @@ enum Command {
         /// Frames to cook with --gpu, at 60 per second.
         #[arg(long, default_value_t = 60)]
         frames: u32,
+        /// With --gpu, also run the projects' Python operators (ops/*.py).
+        /// They are code with your user's privileges; without this flag
+        /// their nodes are listed as not run. See docs/python-ops.md.
+        #[arg(long)]
+        allow_python_ops: bool,
     },
     /// Rewrite project folders in canonical form (after editing by hand).
     Fmt {
@@ -156,7 +166,15 @@ fn main() -> ExitCode {
             projects,
             gpu,
             frames,
-        } => project::check(&projects, project::CheckOptions { gpu, frames }),
+            allow_python_ops,
+        } => project::check(
+            &projects,
+            project::CheckOptions {
+                gpu,
+                frames,
+                allow_python_ops,
+            },
+        ),
         Command::Fmt { projects } => project::fmt(&projects),
         Command::IsfImport {
             dir,
@@ -186,6 +204,7 @@ fn main() -> ExitCode {
             fps,
             fixed_step: _,
             node,
+            allow_python_ops,
         } => render::run(
             &project,
             &out,
@@ -194,6 +213,7 @@ fn main() -> ExitCode {
                 fps,
                 node,
                 size: None,
+                allow_python_ops,
             },
         ),
         Command::Run { .. } => return not_yet("run", "M3 (FR-H2)"),

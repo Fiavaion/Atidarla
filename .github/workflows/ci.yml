@@ -64,9 +64,11 @@ jobs:
       - name: Example projects (M1 AC1, AC4; rule 7)
         # Every example loads, validates against the registry and is in
         # canonical form; where the runner has a GPU, every node cooks for a
-        # second without errors and every binding finds its channel.
+        # second without errors and every binding finds its channel. The
+        # examples' own Python operators (ops/*.py) run too: they are ours
+        # (docs/python-ops.md, the trust gate).
         shell: bash
-        run: cargo run -p atd-cli --release -- check ${{ matrix.gpu == '1' && '--gpu' || '' }} examples/*.atidarla
+        run: cargo run -p atd-cli --release -- check ${{ matrix.gpu == '1' && '--gpu' || '' }} --allow-python-ops examples/*.atidarla
       - name: Shipped Packs (FR-P4)
         # Every Pack in packs/ is valid and canonical; with a GPU, one
         # instance of each cooks with nothing connected.

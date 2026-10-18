@@ -460,6 +460,33 @@ fn sig_operators_cook_with_state_parameters_and_inputs() {
     assert_eq!(e.error(l), None);
 }
 
+/// Two projects open at once (two renderers, an app and a tool) each have
+/// their own Python namespace: loading one does not unload the other.
+#[test]
+fn two_projects_do_not_share_python_namespaces() {
+    let _gpu = GPU.lock().unwrap_or_else(|e| e.into_inner());
+    let p = TempProject::new("twins", &[("counter.py", COUNTER)]);
+    let mut first = PythonOps::open(&p.0);
+    first.allow();
+    let Some(mut a) = engine(&mut first) else {
+        return;
+    };
+    a.set_mode(CookMode::Offline { fps: 60.0 });
+    let ca = add(&mut a, "py.counter.counter", "counter1");
+    assert_eq!(offline_value(&mut a, ca, 0, "count"), Some(1.0));
+    let mut second = PythonOps::open(&p.0);
+    second.allow();
+    let mut b = engine(&mut second).unwrap();
+    b.set_mode(CookMode::Offline { fps: 60.0 });
+    let cb = add(&mut b, "py.counter.counter", "counter1");
+    for i in 1..4 {
+        assert_eq!(offline_value(&mut b, cb, i - 1, "count"), Some(i as f32));
+        assert_eq!(offline_value(&mut a, ca, i, "count"), Some((i + 1) as f32));
+    }
+    assert_eq!(a.error(ca), None);
+    assert_eq!(b.error(cb), None);
+}
+
 /// Live, results arrive a frame (or more) late and a slow operator never
 /// slows the cook.
 #[test]

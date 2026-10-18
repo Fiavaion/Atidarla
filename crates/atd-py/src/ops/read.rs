@@ -61,7 +61,7 @@ fn reader(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
     if let Some(m) = READER.get() {
         return Ok(m.bind(py).clone());
     }
-    let m = super::host::helper_module(py, "atd_ops_reader")?;
+    let m = super::host::helper_module(py, "reader")?;
     let _ = READER.set(m.clone().unbind());
     Ok(m)
 }

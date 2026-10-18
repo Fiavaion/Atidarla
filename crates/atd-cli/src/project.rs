@@ -17,6 +17,38 @@ pub struct CheckOptions {
     pub gpu: bool,
     /// Frames to cook with `gpu`.
     pub frames: u32,
+    /// Run the projects' Python operators (`ops/*.py`) when cooking.
+    /// Without it they are reported as not run (`docs/python-ops.md`).
+    pub allow_python_ops: bool,
+}
+
+/// Reads a project's `ops/` declarations (running nothing) and registers
+/// them; the first declaration error is an error.
+pub(crate) fn python_ops(
+    dir: &Path,
+    registry: &mut Registry,
+    library: &mut OpLibrary,
+) -> Result<atd_py::ops::PythonOps> {
+    let mut ops = atd_py::ops::PythonOps::open(dir);
+    if let Some(e) = ops.errors().first() {
+        bail!("{e}");
+    }
+    ops.register(registry, library);
+    Ok(ops)
+}
+
+/// A network that does not validate, with unknown Python operator types
+/// explained (a missing file, an operator not declared).
+pub(crate) fn explain(
+    e: atd_core::graph::GraphError,
+    ops: &atd_py::ops::PythonOps,
+) -> anyhow::Error {
+    if let atd_core::graph::GraphError::UnknownType(t) = &e
+        && let Some(why) = ops.explain(t)
+    {
+        return anyhow::anyhow!("{e}: {why}");
+    }
+    e.into()
 }
 
 /// Loads each project (or Pack folder), validates it against the registry
@@ -89,10 +121,12 @@ pub(crate) fn load_checked(dir: &Path) -> Result<Loaded> {
     if let Some((name, e)) = failed.first() {
         bail!("shaders/{name}: {e}");
     }
+    let mut python = python_ops(dir, &mut registry, &mut library)?;
     let registry = project.packs.register(&registry).map_err(pack_error)?;
     for (id, net) in &project.networks {
         net.clone()
             .validated(&registry)
+            .map_err(|e| explain(e, &python))
             .with_context(|| format!("networks/{id}.toml"))?;
     }
     Ok(Loaded {
@@ -157,9 +191,16 @@ fn check_one(dir: &Path, gpu: Option<&atd_gpu::GpuContext>, opts: CheckOptions) 
             .collect();
         summary += &format!(", Packs {}", names.join(" "));
     }
+    let py_count = python.ops().count();
+    if py_count > 0 {
+        summary += &format!(", {py_count} Python operators");
+    }
     let Some(gpu) = gpu else {
         return Ok(summary);
     };
+    if opts.allow_python_ops {
+        python.allow();
+    }
     let flat = project
         .packs
         .flatten(&main, &registry)
@@ -272,10 +313,17 @@ fn cook(
     let platform = gpu.platform_info();
     let mut errors = Vec::new();
     let mut unavailable = Vec::new();
+    let mut not_run = Vec::new();
     for n in engine.network().nodes() {
         let Some(e) = engine.error(n.id) else {
             continue;
         };
+        // Python operators run only when allowed: not an error of the
+        // project (`docs/python-ops.md`).
+        if e.starts_with(atd_py::ops::NOT_ALLOWED) {
+            not_run.push(n.name.as_str());
+            continue;
+        }
         let fallback = engine.registry().get(&n.type_id).is_some_and(|s| {
             matches!(
                 Registry::availability(s, &platform),
@@ -295,6 +343,12 @@ fn cook(
             unavailable.join(", ")
         );
     }
+    if !not_run.is_empty() {
+        summary += &format!(
+            ", Python operators not run (pass --allow-python-ops to run the project's ops/ code): {}",
+            not_run.join(", ")
+        );
+    }
     if !errors.is_empty() {
         bail!("node errors: {}", errors.join("; "));
     }
@@ -305,6 +359,13 @@ fn cook(
     for node in net.nodes() {
         for (param, p) in &node.params {
             let Some(bind) = &p.bind else { continue };
+            // A Python operator that did not run has no channels yet.
+            if net
+                .node(bind.node)
+                .is_some_and(|s| not_run.contains(&s.name.as_str()))
+            {
+                continue;
+            }
             let found = engine.channels(bind.node).is_some_and(|c| {
                 if bind.channel.is_empty() {
                     !c.is_empty()
@@ -383,10 +444,99 @@ mod tests {
         let opts = CheckOptions {
             gpu: false,
             frames: 0,
+            allow_python_ops: false,
         };
         for dir in &all {
             check_one(dir, None, opts).unwrap_or_else(|e| panic!("{}: {e:#}", dir.display()));
         }
+    }
+
+    /// A copy of the Python operators example in the temp directory.
+    fn python_example(tag: &str) -> std::path::PathBuf {
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/python-ops.atidarla");
+        let dir =
+            std::env::temp_dir().join(format!("atd-check-{tag}-{}.atidarla", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for sub in ["", "networks", "ops"] {
+            std::fs::create_dir_all(dir.join(sub)).unwrap();
+            for e in std::fs::read_dir(src.join(sub)).unwrap() {
+                let p = e.unwrap().path();
+                if p.is_file() {
+                    std::fs::copy(&p, dir.join(sub).join(p.file_name().unwrap())).unwrap();
+                }
+            }
+        }
+        dir
+    }
+
+    /// `check` explains a missing Python file and a bad declaration.
+    #[test]
+    fn check_reports_missing_and_failed_python_operators() {
+        let opts = CheckOptions {
+            gpu: false,
+            frames: 0,
+            allow_python_ops: false,
+        };
+        let dir = python_example("missing");
+        std::fs::remove_file(dir.join("ops/pattern.py")).unwrap();
+        let e = format!("{:#}", check_one(&dir, None, opts).unwrap_err());
+        assert!(
+            e.contains("py.pattern.rings") && e.contains("ops/pattern.py does not exist"),
+            "{e}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+
+        let dir = python_example("bad");
+        let path = dir.join("ops/motion.py");
+        let text = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, text.replace("max=30.0", "max=rate_max")).unwrap();
+        let e = format!("{:#}", check_one(&dir, None, opts).unwrap_err());
+        assert!(e.starts_with("ops/motion.py, line 13:"), "{e}");
+        assert!(e.contains("literals"), "{e}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// With a GPU, `check` cooks a project's Python operators only when
+    /// allowed, and otherwise lists them without failing.
+    #[test]
+    fn check_runs_python_operators_only_when_allowed() {
+        let Ok(gpu) = atd_gpu::GpuContext::headless() else {
+            let required =
+                std::env::var("ATD_REQUIRE_GPU").is_ok_and(|v| !v.is_empty() && v != "0");
+            assert!(
+                !required,
+                "ATD_REQUIRE_GPU is set but there is no GPU adapter"
+            );
+            return;
+        };
+        let dir = python_example("gate");
+        let mut opts = CheckOptions {
+            gpu: true,
+            frames: 20,
+            allow_python_ops: false,
+        };
+        let summary = check_one(&dir, Some(&gpu), opts).unwrap();
+        assert!(
+            summary.contains("Python operators not run") && summary.contains("rings1"),
+            "{summary}"
+        );
+        opts.allow_python_ops = true;
+        let summary = check_one(&dir, Some(&gpu), opts).unwrap();
+        assert!(!summary.contains("not run"), "{summary}");
+        // A cook error in Python fails the check, with its line.
+        let path = dir.join("ops/pattern.py");
+        let text = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(
+            &path,
+            text.replace("n = ctx.par.rings", "n = ctx.par.rings / 0"),
+        )
+        .unwrap();
+        let e = format!("{:#}", check_one(&dir, Some(&gpu), opts).unwrap_err());
+        assert!(
+            e.contains("ZeroDivisionError") && e.contains("ops/pattern.py, line"),
+            "{e}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// CLAUDE.md rule 7: every IMG and SIG operator has a runnable example.

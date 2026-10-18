@@ -24,6 +24,7 @@ every IMG and SIG operator (CLAUDE.md rule 7); each operator's page in
 | [shaders](shaders.atidarla/) | A project-local ISF shader, inline WGSL and projection |
 | [live-control](live-control.atidarla/) | Mouse, OSC, MIDI, DMX, timecode and audio output |
 | [texture-sharing](texture-sharing.atidarla/) | Share Out and Share In: publishing to other applications and a loopback (Spout on Windows) |
+| [python-ops](python-ops.atidarla/) | Operators written in Python in the project's `ops/` folder: a counter, an LFO and an image generator ([`docs/python-ops.md`](../docs/python-ops.md)) |
 
 One example per shipped Pack ([`packs/`](../packs/README.md), `docs/packs.md`). Each project
 carries its own copy of the Pack in `packs/<name>/` (a test keeps it equal to the library's):
@@ -43,8 +44,12 @@ Checks (CI runs both on Windows and macOS):
 ```sh
 cargo run -p atd-cli -- check examples/*.atidarla        # load, validate, canonical form
 cargo run -p atd-cli -- check --gpu examples/*.atidarla  # also cook every node
+cargo run -p atd-cli -- check --gpu --allow-python-ops examples/*.atidarla  # and run ops/*.py
 cargo run -p atd-cli -- fmt my-show.atidarla             # canonical form after hand edits
 ```
+
+Python operators are code that runs with your privileges: `check` runs them only with
+`--allow-python-ops` (CI passes it for these examples), and the app asks first.
 
 Media in the examples is made for them (`beat.wav` and `greenscreen.png` are generated;
 `testsrc.mov` is FFmpeg's built-in test pattern encoded as HAP), so it carries no

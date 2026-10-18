@@ -73,7 +73,10 @@ settings an operator cooks under (project folder, expressions), so every context
    channel wait their own way: Movie In waits for the file header and each frame
    (`MoviePlayer::wait_ready` / `wait_frame`, at most 60 s, then a node error), and Python
    expressions go through `PythonHost::submit_wait`, which returns once the worker has evaluated
-   the frame's batch, so the next frame always has every result.
+   the frame's batch, so the next frame always has every result. That wait is bounded too
+   (`atd_py::expr::OFFLINE_TIMEOUT`, 10 s): expressions still running after it fail on their
+   nodes, so the render stops with a message instead of hanging. Python operators wait on their
+   own slot for this frame's result (bounded by their timeout, `docs/python-ops.md`).
 3. **Fixed latency for readbacks.** Analyze reads back on the GPU asynchronously. Offline it waits
    (`device.poll(wait)`) for the previous frame's readback before reading it, so its channels are
    always the measurement of the frame before: exactly one frame late, as Python expressions.
@@ -110,7 +113,7 @@ through and do not emit offline.
 |---|---|---|
 | Pure | A function of parameters, inputs and the frame's time. | IMG: Blend, Bloom, Blur, Channel Image, Channel Mix, Chroma Key, Composite, Constant, Crop, Displace, Edge, HSV Adjust, Kaleidoscope, Level, Lookup, Luma Key, Mirror, Noise, Normal Map, Projection, Ramp, Remap, Resolution, Shape, Slope, Switch, Threshold, Tile, Transform. SIG: Constant, LFO, Limit, Math, Merge, Noise, Pattern, Select. |
 | Stateful | State from frame to frame, starting with the render: identical across runs of the same range; a range started part-way differs from a longer render. | IMG: Cache, Feedback, Fluid, Reaction-Diffusion, Ripple, Time Machine. SIG: Beat, Count, Envelope, Filter, Lag, Onset, Spectrum, Speed, Timer, Trail, Trigger. |
-| Waits | Work on a worker thread; offline the cook waits for it. | Movie In (opening and every frame; playhead `cue + time * speed`), Audio File In (decode; playhead from time), Text (rasteriser), WGSL (compile; a file once), ISF shaders (compile; persistent buffers also make one stateful). |
+| Waits | Work on a worker thread; offline the cook waits for it. | Movie In (opening and every frame; playhead `cue + time * speed`), Audio File In (decode; playhead from time), Text (rasteriser), WGSL (compile; a file once), ISF shaders (compile; persistent buffers also make one stateful), Python operators (`py.*`, [`docs/python-ops.md`](python-ops.md): each frame waits for its own result, at most the operator's timeout plus 3 s; those with `state` are also stateful; they run only with `--allow-python-ops`). |
 | One frame late | Values are those of the previous frame, always exactly one. | Analyze (GPU readback). Also every Python expression. |
 | Live input | Opens nothing; idle value; `render` warns. | Share In (black), Audio In (no channels), Input Devices (keys up, no gamepad, pointer at rest), MIDI In (no channels), OSC In (no channels), Timecode In (all zero, unlocked). |
 | Sink | Passes its input through; emits nothing; `render` warns. | Share Out, Audio Out, DMX Out, MIDI Out, OSC Out. |

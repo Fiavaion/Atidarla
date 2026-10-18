@@ -32,3 +32,4 @@ All platforms.
 ## Examples
 
 - [Keying](../../../examples/keying.atidarla/) — `half`
+- [Python operators](../../../examples/python-ops.atidarla/) — `resolution1`
