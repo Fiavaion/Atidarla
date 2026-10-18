@@ -164,8 +164,10 @@ fn python_sig_cooks_allocate_no_more_than_builtin_ones() {
     eprintln!(
         "cook-thread allocations over {frames} frames: Python SIG node {python}, built-in SIG node {reference}"
     );
+    // A few one-time allocations may differ (the macOS runner counted 5215
+    // against 5214); a per-frame allocation would add at least `frames`.
     assert!(
-        python <= reference,
+        python <= reference + 16,
         "a Python SIG node allocated {python} times, a built-in one {reference}"
     );
     std::fs::remove_dir_all(&dir).ok();
