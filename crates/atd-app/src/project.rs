@@ -146,6 +146,12 @@ impl ProjectState {
     }
 
     fn save_to(&mut self, engine: &mut Engine, dir: &Path) {
+        if !self.meta.packs.is_empty() {
+            // The patch shows Pack instances expanded (`open`): saving it
+            // would replace them with their insides.
+            self.message = Some((PACKS_READ_ONLY.into(), true));
+            return;
+        }
         match save(engine, &self.meta, dir) {
             Ok(()) => {
                 self.saved = engine.network().clone();
@@ -240,17 +246,43 @@ fn file_stem(name: &str) -> String {
     }
 }
 
+/// Why a project with Packs cannot be saved from the app yet.
+pub const PACKS_READ_ONLY: &str = "This project uses Packs. The app plays it with each Pack shown \
+     expanded (its nodes are named instance__node) but cannot save it yet: saving would replace \
+     the Packs with their insides. Edit the project files, then check them with `atidarla check`.";
+
 /// Loads the project at `dir` into `engine`. Returns its settings and the
 /// node to show first.
+///
+/// Pack instances (FR-P4) are expanded into the nodes inside them before
+/// loading (`docs/packs.md`): the engine cooks the flat network. Editing
+/// Packs in the app is the next step; until then such a project opens to
+/// play and inspect, and saving it is refused ([`PACKS_READ_ONLY`]).
 pub fn open(engine: &mut Engine, dir: &Path) -> Result<(Project, Option<NodeId>), String> {
     let mut project = atd_format::load(dir).map_err(|e| e.to_string())?;
-    let net = project
+    let mut net = project
         .networks
         .remove(atd_format::MAIN)
         .ok_or("the project has no main network")?;
     let (_, failed) = engine.extend(|r, l| atd_ops_img::isf::register_project_shaders(dir, r, l));
     for (name, e) in failed {
         log::warn!("{}: shader {name} not imported: {e}", dir.display());
+    }
+    let mut view = None;
+    if !project.packs.is_empty() {
+        let registry = project
+            .packs
+            .register(engine.registry())
+            .map_err(|e| format!("{}: {e}", dir.display()))?;
+        let authored = net
+            .validated(&registry)
+            .map_err(|e| format!("{}: networks/main.toml: {e}", dir.display()))?;
+        let flat = project
+            .packs
+            .flatten(&authored, &registry)
+            .map_err(|e| format!("{}: {e}", dir.display()))?;
+        view = output_of(&authored, &registry).and_then(|id| flat.view(id));
+        net = flat.network;
     }
     let previous = engine.project_dir().map(Path::to_owned);
     engine.set_project_dir(Some(dir.to_owned()));
@@ -259,7 +291,7 @@ pub fn open(engine: &mut Engine, dir: &Path) -> Result<(Project, Option<NodeId>)
         return Err(format!("{}: {e}", dir.display()));
     }
     engine.set_resolution(project.resolution[0], project.resolution[1]);
-    let view = output_node(engine);
+    let view = view.or_else(|| output_node(engine));
     Ok((project, view))
 }
 
@@ -333,11 +365,14 @@ fn path_edits(engine: &Engine, net: &Network, f: impl Fn(&Path) -> Option<String
 /// The node to show first: the last IMG node nothing reads from, else the
 /// last node.
 fn output_node(engine: &Engine) -> Option<NodeId> {
-    let net = engine.network();
+    output_of(engine.network(), engine.registry())
+}
+
+fn output_of(net: &Network, registry: &atd_core::Registry) -> Option<NodeId> {
     let read: std::collections::BTreeSet<NodeId> = net.wires().map(|w| w.from.node).collect();
     let is_img = |id: &NodeId| {
         net.node(*id)
-            .and_then(|n| engine.registry().get(&n.type_id))
+            .and_then(|n| registry.get(&n.type_id))
             .and_then(|s| s.outputs.first())
             .is_some_and(|o| o.wire == WireType::Img)
     };
@@ -492,6 +527,40 @@ mod tests {
         assert!(error && msg.contains("img.nope"), "{msg}");
         assert_eq!(*e.network(), before, "the open patch is untouched");
         assert!(!state.dirty(&e));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A project with Packs opens with each instance expanded, shows the
+    /// Pack's output, and is not saved over (FR-P4, first step in the app).
+    #[test]
+    fn projects_with_packs_open_expanded_and_refuse_to_save() {
+        let Some(mut e) = engine() else { return };
+        let src = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/pack-chromatic-aberration.atidarla");
+        let dir =
+            std::env::temp_dir().join(format!("atd-app-packs-{}.atidarla", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        atd_format::save(&dir, &atd_format::load(&src).unwrap()).unwrap();
+        let mut state = ProjectState::untitled(&Network::default());
+        let view = state.run(&mut e, Action::OpenDir(dir.clone()));
+        let msg = state.message.clone().unwrap();
+        assert!(!msg.1, "{}", msg.0);
+        let net = e.network();
+        assert!(net.node_by_name("aberration1__blue_shift").is_some());
+        assert_eq!(
+            view.and_then(|v| net.node(v)).map(|n| n.name.as_str()),
+            Some("aberration1__add_blue"),
+            "the viewer shows the Pack's output"
+        );
+        e.cook_frame(view, 0.0).unwrap();
+        let before = std::fs::read(dir.join("networks/main.toml")).unwrap();
+        state.save(&mut e);
+        let (msg, error) = state.message.clone().unwrap();
+        assert!(error && msg.contains("uses Packs"), "{msg}");
+        assert_eq!(
+            std::fs::read(dir.join("networks/main.toml")).unwrap(),
+            before
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }
