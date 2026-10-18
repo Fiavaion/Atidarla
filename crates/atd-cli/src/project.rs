@@ -110,6 +110,8 @@ pub(crate) struct Loaded {
     pub registry: Registry,
     pub library: OpLibrary,
     pub shaders: Vec<String>,
+    /// The project's Python operators: declared, not yet allowed to run.
+    pub python: atd_py::ops::PythonOps,
 }
 
 /// Loads `dir`, registers its shaders and Packs, and validates every network.
@@ -121,7 +123,7 @@ pub(crate) fn load_checked(dir: &Path) -> Result<Loaded> {
     if let Some((name, e)) = failed.first() {
         bail!("shaders/{name}: {e}");
     }
-    let mut python = python_ops(dir, &mut registry, &mut library)?;
+    let python = python_ops(dir, &mut registry, &mut library)?;
     let registry = project.packs.register(&registry).map_err(pack_error)?;
     for (id, net) in &project.networks {
         net.clone()
@@ -134,6 +136,7 @@ pub(crate) fn load_checked(dir: &Path) -> Result<Loaded> {
         registry,
         library,
         shaders,
+        python,
     })
 }
 
@@ -162,6 +165,7 @@ fn check_one(dir: &Path, gpu: Option<&atd_gpu::GpuContext>, opts: CheckOptions) 
         registry,
         library,
         shaders,
+        mut python,
     } = load_checked(dir)?;
     canonical(
         dir,
@@ -566,6 +570,7 @@ mod tests {
         let opts = CheckOptions {
             gpu: false,
             frames: 0,
+            allow_python_ops: false,
         };
         let projects: Vec<atd_format::Project> = examples()
             .iter()
@@ -627,6 +632,7 @@ mod tests {
         let opts = CheckOptions {
             gpu: false,
             frames: 0,
+            allow_python_ops: false,
         };
         check_one(&dir, None, opts).unwrap();
         let pack = dir.join("packs/feedback_trails/pack.toml");
