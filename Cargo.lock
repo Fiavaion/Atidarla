@@ -425,6 +425,7 @@ version = "0.0.1"
 dependencies = [
  "atd-core",
  "atd-gpu",
+ "atd-interop",
  "atd-ops-pnt",
  "pollster 0.4.0",
  "serde_json",

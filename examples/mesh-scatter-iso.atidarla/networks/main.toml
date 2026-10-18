@@ -1,0 +1,112 @@
+# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 12
+
+[[node]]
+id = 0
+name = "base"
+type = "msh.sphere"
+pos = [0.0, 0.0]
+params.radius = 0.55
+
+[[node]]
+id = 1
+name = "seeds"
+type = "msh.scatter"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+params.count = 500
+params.seed = 5
+
+[[node]]
+id = 2
+name = "blob"
+type = "msh.iso_surface"
+pos = [440.0, 0.0]
+inputs.in = { node = 1, output = "out" }
+params.blend = 0.08
+params.radius = 0.09
+params.resolution = 72
+
+[[node]]
+id = 3
+name = "wobble"
+type = "pnt.noise"
+pos = [660.0, 0.0]
+inputs.in = { node = 2, output = "out" }
+params.amplitude = 0.05
+params.evolution = { value = 0.0, expr = "time * 0.4" }
+params.frequency = 2.5
+
+[[node]]
+id = 4
+name = "draw_blob"
+type = "img.render_points"
+pos = [880.0, 0.0]
+inputs.geo = { node = 3, output = "out" }
+params.colour = [0.2, 0.7, 1.0, 1.0]
+params.colour_from = "constant"
+params.intensity = 0.35
+params.size = 1.5
+
+[[node]]
+id = 5
+name = "draw_seeds"
+type = "img.render_points"
+pos = [880.0, 140.0]
+inputs.geo = { node = 1, output = "out" }
+params.size = 3.0
+
+[[node]]
+id = 6
+name = "path"
+type = "msh.circle"
+pos = [220.0, 280.0]
+params.divisions = 128
+params.radius = 0.9
+params.type = "polyline"
+
+[[node]]
+id = 7
+name = "square"
+type = "msh.circle"
+pos = [220.0, 400.0]
+params.divisions = 4
+params.radius = 0.05
+
+[[node]]
+id = 8
+name = "frame"
+type = "msh.sweep"
+pos = [440.0, 340.0]
+inputs.curve = { node = 6, output = "out" }
+inputs.profile = { node = 7, output = "out" }
+params.twist = 720.0
+
+[[node]]
+id = 9
+name = "draw_frame"
+type = "img.render_points"
+pos = [880.0, 280.0]
+inputs.geo = { node = 8, output = "out" }
+params.colour = [1.0, 0.55, 0.15, 1.0]
+params.colour_from = "constant"
+params.size = 2.0
+
+[[node]]
+id = 10
+name = "mix"
+type = "img.composite"
+pos = [1100.0, 70.0]
+inputs.a = { node = 4, output = "out" }
+inputs.b = { node = 5, output = "out" }
+params.operation = "add"
+
+[[node]]
+id = 11
+name = "out"
+type = "img.composite"
+pos = [1320.0, 140.0]
+inputs.a = { node = 10, output = "out" }
+inputs.b = { node = 9, output = "out" }
+params.operation = "add"

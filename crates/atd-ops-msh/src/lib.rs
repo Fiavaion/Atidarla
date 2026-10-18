@@ -251,6 +251,14 @@ fn defs() -> Vec<Def> {
             params: file::out_params,
             run: file::file_out,
         },
+        Def {
+            id: "colour",
+            label: "Colour",
+            summary: "Writes the point colour `Cd`: a constant, or from the normals, texture coordinates, position in the bounds, or a seeded random colour per point or per primitive, times a tint.",
+            inputs: &["in"],
+            params: model::colour_params,
+            run: model::colour,
+        },
     ]
 }
 

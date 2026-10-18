@@ -1,4 +1,5 @@
-//! Modelling operators: Subdivide (Catmull-Clark), Extrude and UV Project.
+//! Modelling operators: Subdivide (Catmull-Clark), Extrude, UV Project and
+//! Colour.
 
 use std::collections::HashMap;
 use std::f64::consts::{PI, TAU};
@@ -499,5 +500,100 @@ pub fn uv_project(s: &Snap, inputs: &[Option<Mesh>], job: &Job) -> Result<Mesh, 
         uv.push((q[1] as f32) * sc[1] + off[1]);
     }
     out.set_point_attr(Column::f32(names::UV, 2, uv));
+    Ok(out)
+}
+
+// ------------------------------------------------------------------ colour --
+
+pub fn colour_params() -> Vec<ParamSchema> {
+    vec![
+        ParamSchema::menu(
+            "mode",
+            "Mode",
+            &["constant", "normal", "uv", "position", "random", "random_prim"],
+            "constant",
+        )
+        .help(
+            "constant: the tint; normal: N mapped to 0-1 (computed when missing); uv: (u, v, 0); position: where each point sits in the bounds; random: a seeded colour per point; random_prim: per primitive (its points are split so each primitive is one colour).",
+        ),
+        ParamSchema::colour("colour", "Tint", [1.0, 1.0, 1.0, 1.0])
+            .help("The colour, or the multiplier of the others."),
+        ParamSchema::int("seed", "Seed", 1, Some(0), None).help("random: the seed."),
+    ]
+}
+
+/// Writes point colours `Cd` (RGBA).
+pub fn colour(s: &Snap, inputs: &[Option<Mesh>], job: &Job) -> Result<Mesh, String> {
+    let Some(m) = first(inputs) else {
+        return Ok(Mesh::new());
+    };
+    let tint = s.vec4("colour");
+    let seed = s.i64("seed").max(0) as u64;
+    let mode = s.str("mode");
+    let mut out = if mode == "random_prim" {
+        // Every primitive gets its own points.
+        crate::normals::run(
+            &Snap::from_values(
+                &crate::schemas()
+                    .into_iter()
+                    .find(|o| o.type_id == "msh.normals")
+                    .expect("registered"),
+                &[("mode", serde_json::json!("flat"))],
+            ),
+            inputs,
+            job,
+        )?
+    } else {
+        m.clone()
+    };
+    let n = out.points();
+    let mut cd = Vec::with_capacity(n * 4);
+    let normals =
+        (mode == "normal").then(|| out.vec3(names::N).unwrap_or_else(|| point_normals(&out)));
+    let uv = out
+        .point_attr(names::UV)
+        .filter(|c| c.comps == 2)
+        .and_then(Column::floats)
+        .map(<[f32]>::to_vec);
+    let (lo, hi) = out.bounds().unwrap_or(([0.0; 3], [1.0; 3]));
+    let mut prim_of = vec![0u64; n];
+    for f in 0..out.prims() {
+        for &c in out.prim(f) {
+            prim_of[c as usize] = f as u64;
+        }
+    }
+    for i in 0..n {
+        job.every(i)?;
+        let rgb: [f32; 3] = match mode {
+            "normal" => normals.as_ref().expect("computed")[i].map(|x| x * 0.5 + 0.5),
+            "uv" => uv
+                .as_ref()
+                .map_or([0.0; 3], |v| [v[i * 2], v[i * 2 + 1], 0.0]),
+            "position" => std::array::from_fn(|k| {
+                let e = hi[k] - lo[k];
+                if e > 0.0 {
+                    (out.p[i][k] - lo[k]) / e
+                } else {
+                    0.5
+                }
+            }),
+            "random" | "random_prim" => {
+                let key = if mode == "random" {
+                    i as u64
+                } else {
+                    prim_of[i]
+                };
+                std::array::from_fn(|k| crate::points::unit(seed, key, k as u64) as f32)
+            }
+            _ => [1.0; 3],
+        };
+        cd.extend([
+            rgb[0] * tint[0],
+            rgb[1] * tint[1],
+            rgb[2] * tint[2],
+            tint[3],
+        ]);
+    }
+    out.set_point_attr(Column::f32(names::CD, 4, cd));
     Ok(out)
 }

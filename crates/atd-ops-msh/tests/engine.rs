@@ -246,3 +246,90 @@ fn errors_are_reported_and_recover() {
     assert_eq!(e.error(del), None);
     assert_eq!(e.geometry(del).unwrap().points(), 8);
 }
+
+fn pixels(e: &Engine, node: NodeId) -> Vec<u8> {
+    assert_eq!(e.error(node), None);
+    atd_interop::readback::read_rgba8(e.device(), e.queue(), e.result(node).unwrap()).unwrap()
+}
+
+/// M2 AC5: scatter (MSH) → Iso Surface (MSH) → noise deform (PNT) → Render
+/// Points, wired GEO to GEO with no conversion node, offline twice with the
+/// same bytes.
+#[test]
+fn pnt_msh_pnt_chain_wires_without_conversion() {
+    let _g = GPU.lock().unwrap_or_else(|e| e.into_inner());
+    let mut runs = Vec::new();
+    for _ in 0..2 {
+        let Some(mut e) = engine() else { return };
+        e.set_mode(CookMode::Offline { fps: 30.0 });
+        let mut b = Build::new(&mut e);
+        let src = b.node("msh.sphere", &[("radius", json!(0.6))]);
+        let sc = b.node("msh.scatter", &[("count", json!(400)), ("seed", json!(3))]);
+        let iso = b.node(
+            "msh.iso_surface",
+            &[("radius", json!(0.08)), ("resolution", json!(48))],
+        );
+        let noise = b.node("pnt.noise", &[("amplitude", json!(0.05))]);
+        b.expr(noise, "evolution", "time");
+        let draw = b.node("img.render_points", &[("size", json!(1.0))]);
+        b.wire(src, sc, "in");
+        b.wire(sc, iso, "in");
+        b.wire(iso, noise, "in");
+        b.wire(noise, draw, "geo");
+        b.done();
+        let mut frames = Vec::new();
+        for f in 0..3u32 {
+            e.cook(&[draw], f64::from(f) / 30.0).unwrap();
+            for n in [sc, iso, noise] {
+                assert_eq!(e.error(n), None);
+            }
+            frames.push(pixels(&e, draw));
+        }
+        let g = e.geometry(noise).unwrap();
+        let iso_g = e.geometry(iso).unwrap();
+        assert_eq!(g.points(), iso_g.points());
+        assert!(
+            g.prims() > 100 && g.prims() == iso_g.prims(),
+            "topology rides along"
+        );
+        // The deformer wrote P on the GPU (copy on write), the mesh stays.
+        assert!(!g.point("P").unwrap().shares(iso_g.point("P").unwrap()));
+        let lit = frames[2].chunks_exact(4).filter(|p| p[0] > 0).count();
+        assert!(lit > 100, "{lit} lit pixels");
+        assert_ne!(frames[0], frames[2], "the noise moves with time");
+        runs.push(frames);
+    }
+    if runs.len() == 2 {
+        assert_eq!(runs[0], runs[1], "two offline runs give the same bytes");
+    }
+}
+
+/// Live, a parameter that changes every frame: stale jobs are dropped or
+/// cancelled, results keep arriving, and the final result is the newest.
+#[test]
+fn latest_parameters_win_live() {
+    let _g = GPU.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(mut e) = engine() else { return };
+    let mut b = Build::new(&mut e);
+    let iso = b.node(
+        "msh.iso_surface",
+        &[("source", json!("sphere")), ("resolution", json!(96))],
+    );
+    b.done();
+    let mut t = 0.0;
+    for f in 0..40 {
+        let mut b = Build::new(&mut e);
+        b.param(iso, "radius", json!(0.1 + 0.01 * f64::from(f)));
+        b.done();
+        e.cook(&[iso], t).unwrap();
+        t += 1.0 / 60.0;
+        assert_eq!(e.error(iso), None);
+    }
+    settle(&mut e, &[iso], &mut t);
+    let p = floats(&e, iso, "P");
+    let r = p
+        .iter()
+        .map(|q| (q[0] * q[0] + q[1] * q[1] + q[2] * q[2]).sqrt())
+        .fold(0.0f32, f32::max);
+    assert!((r - 0.49).abs() < 0.02, "the last radius (0.49) wins: {r}");
+}

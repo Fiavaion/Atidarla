@@ -1,0 +1,149 @@
+# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 17
+
+[[node]]
+id = 0
+name = "vase"
+type = "msh.file_in"
+pos = [0.0, 0.0]
+params.file = "media/vase.obj"
+
+[[node]]
+id = 1
+name = "edges"
+type = "msh.normals"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+params.cusp = 50.0
+
+[[node]]
+id = 2
+name = "vase_colour"
+type = "msh.colour"
+pos = [440.0, 0.0]
+inputs.in = { node = 1, output = "out" }
+params.mode = "normal"
+
+[[node]]
+id = 3
+name = "save"
+type = "msh.file_out"
+pos = [660.0, 0.0]
+inputs.in = { node = 2, output = "out" }
+params.file = ".cache/vase.ply"
+
+[[node]]
+id = 4
+name = "place_vase"
+type = "msh.transform"
+pos = [880.0, 0.0]
+inputs.in = { node = 3, output = "out" }
+params.rotate = [20.0, 0.0, 0.0]
+params.translate = [-0.8, 0.0, 0.0]
+params.uniform = 1.6
+
+[[node]]
+id = 5
+name = "ring0"
+type = "msh.circle"
+pos = [0.0, 200.0]
+params.centre = [0.0, -0.5, 0.0]
+params.plane = "xz"
+params.radius = 0.35
+
+[[node]]
+id = 6
+name = "ring1"
+type = "msh.circle"
+pos = [0.0, 300.0]
+params.centre = [0.0, -0.1, 0.0]
+params.plane = "xz"
+params.radius = 0.15
+
+[[node]]
+id = 7
+name = "ring2"
+type = "msh.circle"
+pos = [0.0, 400.0]
+params.centre = [0.0, 0.25, 0.0]
+params.plane = "xz"
+params.radius = 0.4
+
+[[node]]
+id = 8
+name = "ring3"
+type = "msh.circle"
+pos = [0.0, 500.0]
+params.centre = [0.0, 0.55, 0.0]
+params.plane = "xz"
+params.radius = 0.1
+
+[[node]]
+id = 9
+name = "rings"
+type = "msh.merge"
+pos = [220.0, 300.0]
+inputs.in0 = { node = 5, output = "out" }
+inputs.in1 = { node = 6, output = "out" }
+inputs.in2 = { node = 7, output = "out" }
+inputs.in3 = { node = 8, output = "out" }
+
+[[node]]
+id = 10
+name = "loft"
+type = "msh.skin"
+pos = [440.0, 300.0]
+inputs.in = { node = 9, output = "out" }
+
+[[node]]
+id = 11
+name = "wrap"
+type = "msh.uv_project"
+pos = [660.0, 300.0]
+inputs.in = { node = 16, output = "out" }
+params.axis = "y"
+params.projection = "cylindrical"
+
+[[node]]
+id = 12
+name = "loft_colour"
+type = "msh.colour"
+pos = [880.0, 300.0]
+inputs.in = { node = 11, output = "out" }
+params.colour = [1.0, 0.7, 0.3, 1.0]
+params.mode = "uv"
+
+[[node]]
+id = 13
+name = "place_loft"
+type = "msh.transform"
+pos = [1100.0, 300.0]
+inputs.in = { node = 12, output = "out" }
+params.rotate = [20.0, 0.0, 0.0]
+params.translate = [0.8, 0.0, 0.0]
+
+[[node]]
+id = 14
+name = "both"
+type = "msh.merge"
+pos = [1320.0, 150.0]
+inputs.in0 = { node = 4, output = "out" }
+inputs.in1 = { node = 13, output = "out" }
+
+[[node]]
+id = 15
+name = "draw"
+type = "img.render_points"
+pos = [1540.0, 150.0]
+inputs.geo = { node = 14, output = "out" }
+params.blend = "over"
+params.size = 2.0
+
+[[node]]
+id = 16
+name = "soften"
+type = "msh.subdivide"
+pos = [550.0, 400.0]
+inputs.in = { node = 10, output = "out" }
+params.levels = 2

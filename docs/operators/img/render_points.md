@@ -35,5 +35,9 @@ All platforms.
 
 ## Examples
 
+- [Mesh Files](../../../examples/mesh-files.atidarla/) — `draw`
+- [Mesh Modelling](../../../examples/mesh-modelling.atidarla/) — `draw`
+- [Mesh Primitives](../../../examples/mesh-primitives.atidarla/) — `draw`
+- [Scatter to Iso Surface](../../../examples/mesh-scatter-iso.atidarla/) — `draw_blob`, `draw_seeds`, `draw_frame`
 - [Particles](../../../examples/particles.atidarla/) — `draw`
 - [Points](../../../examples/points.atidarla/) — `draw_cloud`, `draw_grid`

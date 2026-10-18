@@ -1,0 +1,166 @@
+# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 19
+
+[[node]]
+id = 0
+name = "block"
+type = "msh.box"
+pos = [0.0, 0.0]
+params.centre = [-1.15, -0.2, 0.0]
+params.divisions = 3
+params.size = [0.6, 0.4, 0.6]
+
+[[node]]
+id = 1
+name = "top"
+type = "msh.group"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+params.box_centre = [-1.15, 0.0, 0.0]
+params.box_size = [0.15, 0.1, 0.15]
+params.name = "top"
+
+[[node]]
+id = 2
+name = "tower"
+type = "msh.extrude"
+pos = [440.0, 0.0]
+inputs.in = { node = 1, output = "out" }
+params.distance = { value = 0.5, expr = "0.45 + 0.15 * sin(time)" }
+params.group = "top"
+params.mode = "connected"
+
+[[node]]
+id = 3
+name = "smooth"
+type = "msh.subdivide"
+pos = [660.0, 0.0]
+inputs.in = { node = 2, output = "out" }
+params.levels = 2
+
+[[node]]
+id = 4
+name = "smooth_colour"
+type = "msh.colour"
+pos = [880.0, 0.0]
+inputs.in = { node = 3, output = "out" }
+params.mode = "position"
+
+[[node]]
+id = 5
+name = "ball"
+type = "msh.sphere"
+pos = [0.0, 160.0]
+params.level = 3
+params.radius = 0.45
+params.type = "ico"
+
+[[node]]
+id = 6
+name = "cutter"
+type = "msh.box"
+pos = [0.0, 280.0]
+params.centre = [0.3, 0.3, 0.0]
+params.size = [0.6, 0.6, 1.2]
+
+[[node]]
+id = 7
+name = "cut"
+type = "msh.boolean"
+pos = [220.0, 200.0]
+inputs.a = { node = 5, output = "out" }
+inputs.b = { node = 6, output = "out" }
+params.operation = "subtract"
+
+[[node]]
+id = 8
+name = "weld"
+type = "msh.fuse"
+pos = [440.0, 200.0]
+inputs.in = { node = 7, output = "out" }
+
+[[node]]
+id = 9
+name = "cut_colour"
+type = "msh.colour"
+pos = [660.0, 200.0]
+inputs.in = { node = 8, output = "out" }
+params.mode = "random_prim"
+params.seed = 4
+
+[[node]]
+id = 10
+name = "donut"
+type = "msh.torus"
+pos = [0.0, 400.0]
+params.centre = [1.15, 0.0, 0.0]
+params.columns = 64
+params.radius = 0.35
+params.rows = 24
+params.thickness = 0.14
+
+[[node]]
+id = 11
+name = "upper"
+type = "msh.group"
+pos = [220.0, 400.0]
+inputs.in = { node = 10, output = "out" }
+params.box_centre = [1.15, 0.5, 0.0]
+params.name = "upper"
+
+[[node]]
+id = 12
+name = "halve"
+type = "msh.delete"
+pos = [440.0, 400.0]
+inputs.in = { node = 11, output = "out" }
+params.group = "upper"
+
+[[node]]
+id = 13
+name = "tris"
+type = "msh.triangulate"
+pos = [660.0, 400.0]
+inputs.in = { node = 12, output = "out" }
+
+[[node]]
+id = 14
+name = "reduce"
+type = "msh.polyreduce"
+pos = [880.0, 400.0]
+inputs.in = { node = 13, output = "out" }
+
+[[node]]
+id = 15
+name = "reduce_colour"
+type = "msh.colour"
+pos = [1100.0, 400.0]
+inputs.in = { node = 14, output = "out" }
+params.colour = [1.0, 0.6, 0.2, 1.0]
+
+[[node]]
+id = 16
+name = "all"
+type = "msh.merge"
+pos = [1320.0, 200.0]
+inputs.in0 = { node = 4, output = "out" }
+inputs.in1 = { node = 9, output = "out" }
+inputs.in2 = { node = 15, output = "out" }
+
+[[node]]
+id = 17
+name = "tilt"
+type = "msh.transform"
+pos = [1540.0, 200.0]
+inputs.in = { node = 16, output = "out" }
+params.rotate = [20.0, 0.0, 0.0]
+
+[[node]]
+id = 18
+name = "draw"
+type = "img.render_points"
+pos = [1760.0, 200.0]
+inputs.geo = { node = 17, output = "out" }
+params.blend = "over"
+params.size = 2.0

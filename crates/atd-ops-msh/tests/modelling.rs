@@ -422,3 +422,35 @@ fn iso_surfaces_are_closed() {
         iso
     );
 }
+
+#[test]
+fn colour_modes() {
+    let b = make("msh.box", &[]);
+    let c = on(
+        "msh.colour",
+        &[("colour", json!([0.5, 0.25, 1.0, 1.0]))],
+        &b,
+    );
+    let cd = c.point_attr("Cd").unwrap().floats().unwrap();
+    assert_eq!(&cd[..4], [0.5, 0.25, 1.0, 1.0]);
+    let n = on("msh.colour", &[("mode", json!("normal"))], &b);
+    let cd = n.point_attr("Cd").unwrap().floats().unwrap();
+    assert!(cd.iter().all(|&x| (0.0..=1.0).contains(&x)));
+    let pos = on("msh.colour", &[("mode", json!("position"))], &b);
+    let cd = pos.point_attr("Cd").unwrap().floats().unwrap();
+    assert!(
+        cd.chunks_exact(4)
+            .all(|c| c[..3].iter().all(|&x| x == 0.0 || x == 1.0))
+    );
+    let per_prim = on("msh.colour", &[("mode", json!("random_prim"))], &b);
+    assert_eq!(per_prim.points(), 24, "each face gets its own points");
+    let cd = per_prim.point_attr("Cd").unwrap().floats().unwrap();
+    for f in 0..per_prim.prims() {
+        let p = per_prim.prim(f);
+        let first = &cd[p[0] as usize * 4..p[0] as usize * 4 + 4];
+        assert!(
+            p.iter()
+                .all(|&i| &cd[i as usize * 4..i as usize * 4 + 4] == first)
+        );
+    }
+}

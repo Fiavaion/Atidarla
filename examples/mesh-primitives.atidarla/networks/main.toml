@@ -1,0 +1,137 @@
+# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 14
+
+[[node]]
+id = 0
+name = "box"
+type = "msh.box"
+pos = [0.0, 0.0]
+params.centre = [-1.2, 0.1, 0.0]
+params.divisions = 3
+params.size = [0.55, 0.55, 0.55]
+
+[[node]]
+id = 1
+name = "round_box"
+type = "msh.subdivide"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+params.levels = 2
+
+[[node]]
+id = 2
+name = "ball"
+type = "msh.sphere"
+pos = [0.0, 120.0]
+params.centre = [-0.4, 0.1, 0.0]
+params.level = 3
+params.radius = 0.32
+params.type = "ico"
+
+[[node]]
+id = 3
+name = "ring"
+type = "msh.torus"
+pos = [0.0, 240.0]
+params.centre = [0.4, 0.1, 0.0]
+params.columns = 64
+params.radius = 0.28
+params.rows = 16
+params.thickness = 0.1
+
+[[node]]
+id = 4
+name = "cone"
+type = "msh.tube"
+pos = [0.0, 360.0]
+params.centre = [1.2, 0.1, 0.0]
+params.columns = 48
+params.height = 0.6
+params.radius_bottom = 0.3
+params.radius_top = 0.0
+params.rows = 8
+
+[[node]]
+id = 5
+name = "shapes"
+type = "msh.merge"
+pos = [440.0, 120.0]
+inputs.in0 = { node = 1, output = "out" }
+inputs.in1 = { node = 2, output = "out" }
+inputs.in2 = { node = 3, output = "out" }
+inputs.in3 = { node = 4, output = "out" }
+
+[[node]]
+id = 6
+name = "pulse"
+type = "msh.transform"
+pos = [660.0, 120.0]
+inputs.in = { node = 5, output = "out" }
+params.pivot = [0.0, 0.1, 0.0]
+params.rotate = [25.0, 0.0, 0.0]
+params.uniform = { value = 1.0, expr = "1 + 0.08 * sin(time * 2)" }
+
+[[node]]
+id = 7
+name = "ground"
+type = "msh.grid"
+pos = [440.0, 360.0]
+params.centre = [0.0, -0.7, 0.0]
+params.columns = 48
+params.rows = 6
+params.size = [3.2, 0.4]
+
+[[node]]
+id = 8
+name = "outline"
+type = "msh.circle"
+pos = [440.0, 480.0]
+params.centre = [0.0, 0.05, 0.0]
+params.divisions = 256
+params.radius = 0.95
+params.type = "polyline"
+
+[[node]]
+id = 9
+name = "scene"
+type = "msh.merge"
+pos = [880.0, 240.0]
+inputs.in0 = { node = 6, output = "out" }
+inputs.in1 = { node = 7, output = "out" }
+inputs.in2 = { node = 8, output = "out" }
+inputs.in3 = { node = 13, output = "out" }
+
+[[node]]
+id = 10
+name = "tint"
+type = "msh.colour"
+pos = [1100.0, 240.0]
+inputs.in = { node = 9, output = "out" }
+params.mode = "normal"
+
+[[node]]
+id = 11
+name = "export"
+type = "msh.file_out"
+pos = [1320.0, 240.0]
+inputs.in = { node = 10, output = "out" }
+params.file = ".cache/primitives.glb"
+
+[[node]]
+id = 12
+name = "draw"
+type = "img.render_points"
+pos = [1540.0, 240.0]
+inputs.geo = { node = 11, output = "out" }
+params.blend = "over"
+params.size = 2.0
+
+[[node]]
+id = 13
+name = "horizon"
+type = "msh.line"
+pos = [440.0, 600.0]
+params.end = [1.6, -0.45, 0.0]
+params.points = 160
+params.start = [-1.6, -0.45, 0.0]
