@@ -39,7 +39,7 @@ impl SigOp for InputDevices {
                 });
                 if !fresh {
                     // Busy this instant: keep last frame's values.
-                    return Ok(());
+                    w.keep_previous();
                 }
             }
             "gamepad" => {

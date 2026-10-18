@@ -206,6 +206,16 @@ impl ChannelWriter<'_> {
     }
 }
 
+impl ChannelWriter<'_> {
+    /// Ends the writer without changing anything: the channels stay as the
+    /// last cook left them. Dropping a writer that pushed nothing would empty
+    /// them, so an operator that cannot read its source this frame calls this.
+    pub fn keep_previous(self) {
+        // Skips the truncating `Drop`; the writer owns nothing but a borrow.
+        std::mem::forget(self);
+    }
+}
+
 impl Drop for ChannelWriter<'_> {
     fn drop(&mut self) {
         self.ch.names.truncate(self.n);
@@ -1384,6 +1394,20 @@ fn settle(errors: &mut HashMap<NodeId, String>, exprs: &ExprTable, id: NodeId) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_writer_that_keeps_the_previous_values_leaves_them_alone() {
+        let mut ch = Channels::default();
+        let mut w = ch.writer();
+        w.push("a", 1.0);
+        w.push("b", 2.0);
+        drop(w);
+        ch.writer().keep_previous();
+        assert_eq!((ch.value("a"), ch.value("b")), (Some(1.0), Some(2.0)));
+        // A writer that pushed nothing and was dropped empties the channels.
+        drop(ch.writer());
+        assert_eq!(ch.value("a"), None);
+    }
 
     #[test]
     fn channels_reuse_storage_and_resolve_names() {
