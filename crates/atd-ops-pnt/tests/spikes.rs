@@ -13,9 +13,18 @@
 //!   1080p: simulation and draw GPU time; two offline runs of 300 frames
 //!   (the second with every core busy) are byte-identical.
 //! - **S3**: 30 noise deformers in a row over 2M points (the hand-over makes
-//!   29 of them write in place): GPU time unfused.
+//!   29 of them write in place): GPU time unfused; and a 100k-point round
+//!   trip GPU → CPU worker → GPU, live, the worker uploading with
+//!   `Queue::write_buffer`: frames of latency and render-thread stalls.
 
-use std::time::Instant;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
+
+use atd_core::geo::AttrType;
+use atd_core::registry::{OpFamily, OperatorSchema, SocketSchema, WireType};
+use atd_gpu::engine::{GeoCtx, GeoOp};
+use atd_gpu::geo::readback::{Mapped, Readback};
+use atd_gpu::geo::{Attribute, Geometry};
 
 use atd_core::graph::{Edit, Endpoint, Node, NodeId, Param, Wire};
 use atd_core::registry::Registry;
@@ -343,4 +352,217 @@ fn s3_thirty_deformers() {
         e.buffer_pool().free_bytes() >> 20
     );
     assert_eq!(after, before);
+}
+
+/// A CPU operator in miniature (the MSH pattern of design §2.3): reads `P`
+/// back without blocking, hands it to a worker thread that adds 1 to every
+/// y and uploads the result itself (`Queue::write_buffer` from the worker),
+/// and outputs the newest finished result. Records each result's latency in
+/// frames.
+struct RoundTrip {
+    readback: Readback,
+    /// Frame and geometry whose `P` is being read back.
+    reading: Option<(u64, Geometry)>,
+    /// Geometry whose `P` the worker is processing.
+    working: Option<Geometry>,
+    jobs: Option<mpsc::Sender<(u64, Mapped)>>,
+    results: Option<mpsc::Receiver<(u64, Attribute)>>,
+    latency: std::sync::Arc<std::sync::Mutex<Vec<u64>>>,
+}
+
+impl GeoOp for RoundTrip {
+    fn cook(&mut self, ctx: &mut GeoCtx<'_>) -> Result<(), String> {
+        if self.jobs.is_none() {
+            let (jobs, rx) = mpsc::channel::<(u64, Mapped)>();
+            let (tx, results) = mpsc::channel();
+            let (pool, queue) = (ctx.buffers.clone(), ctx.queue.clone());
+            std::thread::spawn(move || {
+                for (frame, mapped) in rx {
+                    // The copy out of the mapped buffer happens here, not on
+                    // the render thread; dropping `mapped` unmaps it.
+                    let mut bytes = mapped.bytes(0).unwrap();
+                    drop(mapped);
+                    for p in bytes.chunks_exact_mut(16) {
+                        let y = f32::from_le_bytes(p[4..8].try_into().unwrap()) + 1.0;
+                        p[4..8].copy_from_slice(&y.to_le_bytes());
+                    }
+                    let buffer = pool.attr(bytes.len() as u64);
+                    queue.write_buffer(&buffer, 0, &bytes);
+                    let n = (bytes.len() / 16) as u32;
+                    if tx
+                        .send((frame, Attribute::gpu("P", AttrType::VEC3, n, buffer)))
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            });
+            self.jobs = Some(jobs);
+            self.results = Some(results);
+        }
+        let mode = ctx.params.mode();
+        // A finished result becomes the output.
+        if self.working.is_some()
+            && let Ok((frame, p)) = mode.receive(self.results.as_ref().unwrap())
+        {
+            let mut g = self.working.take().unwrap();
+            g.set_point(p);
+            *ctx.output = g;
+            self.latency.lock().unwrap().push(ctx.frame - frame);
+        }
+        // A finished readback goes to the worker.
+        if self.working.is_none()
+            && self.reading.is_some()
+            && let Some(mapped) = self.readback.take_mapped(mode, ctx.device)?
+        {
+            let (frame, g) = self.reading.take().unwrap();
+            self.jobs.as_ref().unwrap().send((frame, mapped)).unwrap();
+            self.working = Some(g);
+        }
+        // This frame's input starts its way to the CPU.
+        if self.reading.is_none()
+            && let Some(input) = ctx.input(0)
+        {
+            let g = input.clone();
+            self.readback
+                .record(ctx.encoder, ctx.buffers, g.point("P").ok_or("no P")?);
+            self.reading = Some((ctx.frame, g));
+        }
+        Ok(())
+    }
+
+    fn after_submit(&mut self) {
+        self.readback.start();
+    }
+}
+
+#[test]
+#[ignore = "spike: run with --release --ignored --nocapture"]
+fn s3_cpu_round_trip() {
+    let Some(mut e) = engine(64, 64) else { return };
+    let latency = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let lat = latency.clone();
+    e.extend(|r, l| {
+        r.register(OperatorSchema {
+            type_id: "pnt.round_trip".into(),
+            family: OpFamily::Pnt,
+            label: "Round Trip".into(),
+            summary: "spike".into(),
+            version: 1,
+            params: vec![],
+            inputs: vec![SocketSchema {
+                name: "in".into(),
+                wire: WireType::Geo,
+                optional: true,
+                feedback: false,
+            }],
+            outputs: vec![SocketSchema {
+                name: "out".into(),
+                wire: WireType::Geo,
+                optional: false,
+                feedback: false,
+            }],
+            capabilities: vec![],
+            cook_budget_us: 500,
+            time_dependent: true,
+            sink: false,
+        })
+        .unwrap();
+        l.add_geo("pnt.round_trip", move |_| {
+            Box::new(RoundTrip {
+                readback: Readback::new(),
+                reading: None,
+                working: None,
+                jobs: None,
+                results: None,
+                latency: lat.clone(),
+            })
+        });
+    });
+    let mut edits = Vec::new();
+    let src = add(
+        &mut e,
+        &mut edits,
+        "pnt.points",
+        &[("shape", json!("random")), ("count", json!(100_000))],
+    );
+    // Zero amplitude but time-dependent: a fresh GPU-only P every frame.
+    let n = add(
+        &mut e,
+        &mut edits,
+        "pnt.noise",
+        &[("amplitude", json!(0.0))],
+    );
+    expr(&mut edits, n, "evolution", "time");
+    let rt = add(&mut e, &mut edits, "pnt.round_trip", &[]);
+    wire(&mut edits, src, n, "in");
+    wire(&mut edits, n, rt, "in");
+    e.edit("s3b", edits).unwrap();
+    // Live, paced at 60 fps like the app.
+    let frame = Duration::from_secs_f64(1.0 / 60.0);
+    let paced = |e: &mut Engine, nodes: &[NodeId], frames: u32| {
+        let start = Instant::now();
+        let mut cooks = Vec::new();
+        for i in 0..frames {
+            let t0 = Instant::now();
+            e.cook(nodes, f64::from(i) / 60.0).unwrap();
+            cooks.push(t0.elapsed().as_secs_f64() * 1e3);
+            if let Some(wait) = (frame * (i + 1)).checked_sub(start.elapsed()) {
+                std::thread::sleep(wait);
+            }
+        }
+        cooks
+    };
+    // The same frames without the round trip, for comparison.
+    let mut base = paced(&mut e, &[n, src], 180)[10..].to_vec();
+    let (b50, b95, bmax) = (
+        pct(&mut base, 0.5),
+        pct(&mut base, 0.95),
+        pct(&mut base, 1.0),
+    );
+    eprintln!(
+        "S3: baseline (points + noise, no round trip): cook p50 {b50:.3} ms, p95 {b95:.3} ms, max {bmax:.3} ms"
+    );
+    let cooks = paced(&mut e, &[rt, src], 180);
+    assert_eq!(e.error(rt), None);
+    let lat = latency.lock().unwrap().clone();
+    let skip = 10;
+    let cooks_after = &mut cooks[skip..].to_vec();
+    let (c50, c95, cmax) = (
+        pct(cooks_after, 0.5),
+        pct(cooks_after, 0.95),
+        cooks_after[cooks_after.len() - 1],
+    );
+    let (lmin, lmax) = (lat.iter().min().copied(), lat.iter().max().copied());
+    // Values: y + 1 of the source.
+    let want = read_blocking(
+        e.device(),
+        e.queue(),
+        e.buffer_pool(),
+        e.geometry(src).unwrap().point("P").unwrap(),
+    )
+    .unwrap();
+    let got = read_blocking(
+        e.device(),
+        e.queue(),
+        e.buffer_pool(),
+        e.geometry(rt).unwrap().point("P").unwrap(),
+    )
+    .unwrap();
+    let ok = want
+        .chunks_exact(16)
+        .zip(got.chunks_exact(16))
+        .all(|(w, g)| {
+            let f =
+                |b: &[u8], i: usize| f32::from_le_bytes(b[i * 4..i * 4 + 4].try_into().unwrap());
+            f(g, 0) == f(w, 0) && f(g, 1) == f(w, 1) + 1.0 && f(g, 2) == f(w, 2)
+        });
+    eprintln!(
+        "S3: 100k-point GPU -> CPU worker -> GPU round trip, live at 60 fps: {} results, latency {lmin:?}..{lmax:?} frames; \
+         render-thread cook (whole frame, 3 nodes) p50 {c50:.3} ms, p95 {c95:.3} ms, max {cmax:.3} ms; \
+         values y+1: {ok}; write_buffer from the worker thread: works",
+        lat.len()
+    );
+    assert!(ok, "the worker's upload has the expected values");
+    assert!(lat.len() > 30, "results keep arriving");
 }

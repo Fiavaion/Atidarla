@@ -128,6 +128,78 @@ impl Readback {
         }
         Ok(true)
     }
+
+    /// Like [`Self::receive`], but instead of copying the values on this
+    /// thread it hands over the mapped staging buffers ([`Mapped`]), so a
+    /// worker thread copies them (large readbacks would otherwise cost the
+    /// render thread a memory copy). `Ok(None)` while not ready.
+    pub fn take_mapped(
+        &mut self,
+        mode: CookMode,
+        device: &wgpu::Device,
+    ) -> Result<Option<Mapped>, String> {
+        if !self.started {
+            return Ok(None);
+        }
+        let poll = if mode.is_offline() {
+            wgpu::PollType::wait_indefinitely()
+        } else {
+            wgpu::PollType::Poll
+        };
+        device.poll(poll).map_err(|e| e.to_string())?;
+        if !self.is_ready() {
+            return Ok(None);
+        }
+        self.started = false;
+        let items = std::mem::take(&mut self.items);
+        if self.failed.load(Ordering::SeqCst) > 0 {
+            for (_, staging) in &items {
+                staging.unmap();
+            }
+            return Err("mapping a readback buffer failed".into());
+        }
+        Ok(Some(Mapped { items }))
+    }
+}
+
+/// Mapped readback buffers, to read on any thread ([`Readback::take_mapped`]).
+/// Dropping it unmaps them and returns them to the pool.
+#[derive(Debug)]
+pub struct Mapped {
+    items: Vec<(Attribute, GeoBuffer)>,
+}
+
+impl Mapped {
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    /// The attribute read back as item `i` (in recording order).
+    pub fn attribute(&self, i: usize) -> &Attribute {
+        &self.items[i].0
+    }
+
+    /// Copies item `i`'s values (on the calling thread).
+    pub fn bytes(&self, i: usize) -> Result<Vec<u8>, String> {
+        let (attr, staging) = &self.items[i];
+        let data = staging
+            .slice(..staged_bytes(attr))
+            .get_mapped_range()
+            .map_err(|e| e.to_string())?;
+        Ok(data[..attr.bytes() as usize].to_vec())
+    }
+}
+
+impl Drop for Mapped {
+    fn drop(&mut self) {
+        for (_, staging) in &self.items {
+            staging.unmap();
+        }
+    }
 }
 
 /// Reads an attribute's values to the CPU, waiting for the GPU (tests,
