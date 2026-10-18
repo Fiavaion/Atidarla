@@ -546,6 +546,66 @@ impl<'p> Lowerer<'p> {
                 });
                 self.out.push('\n');
             }
+            StmtKind::Assign(place, v) if matches!(place.comp, Some(Comp::Dynamic(_))) => {
+                // `v[i] = x` with a variable `i` is not a valid l-value for FXC
+                // (Direct3D, so Windows on WARP): "array reference cannot be
+                // used as an l-value". Write through constant indices instead,
+                // selected by the clamped index, the same behaviour as a read.
+                let Some(Comp::Dynamic(i)) = &place.comp else {
+                    return;
+                };
+                let base = match place.base {
+                    PlaceBase::Local(id) => self.local(id),
+                    PlaceBase::Attr(id) => self.res[id as usize].private.clone(),
+                };
+                let base_ty = match place.base {
+                    PlaceBase::Local(id) => self.locals.get(id as usize).map(|l| l.ty),
+                    PlaceBase::Attr(id) => self.p.attrs.get(id as usize).map(|a| a.ty),
+                }
+                .unwrap_or(Type::Vec(4));
+                let (n, value_ty, is_vec) = match base_ty {
+                    Type::Mat(n) => (n, format!("vec{n}f"), false),
+                    Type::Vec(n) => (n, "f32".to_owned(), true),
+                    _ => (1, "f32".to_owned(), true),
+                };
+                self.line("{");
+                self.indent += 1;
+                self.start_line();
+                self.mapped(span, |w| {
+                    w.out.push_str("let atd_di: i32 = clamp(");
+                    w.expr(i);
+                    let _ = write!(w.out, ", 0i, {}i);", n.max(1) - 1);
+                });
+                self.out.push('\n');
+                self.start_line();
+                self.mapped(span, |w| {
+                    let _ = write!(w.out, "let atd_dv: {value_ty} = ");
+                    w.expr(v);
+                    w.out.push(';');
+                });
+                self.out.push('\n');
+                for k in 0..n.max(1) {
+                    let target = if is_vec {
+                        format!("{base}.{}", XYZW[usize::from(k).min(3)])
+                    } else {
+                        format!("{base}[{k}]")
+                    };
+                    let head = if k == 0 { "if" } else { "} else if" };
+                    let last = k + 1 == n.max(1);
+                    let cond = if last {
+                        "} else {".to_owned()
+                    } else {
+                        format!("{head} (atd_di == {k}i) {{")
+                    };
+                    self.line(&cond);
+                    self.indent += 1;
+                    self.line(&format!("{target} = atd_dv;"));
+                    self.indent -= 1;
+                }
+                self.line("}");
+                self.indent -= 1;
+                self.line("}");
+            }
             StmtKind::Assign(place, v) => {
                 self.start_line();
                 self.mapped(span, |w| {

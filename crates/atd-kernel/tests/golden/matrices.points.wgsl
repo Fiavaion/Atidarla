@@ -149,7 +149,17 @@ fn atd_kernel() {
     var l8_swz: vec2f = (l7_p).zx;
     l7_p.y = ((l7_p).y + (((l8_swz).y - (atd_col3(l3_m, 1i)).z) + (atd_col3(mat3x3f(vec3f(1.0f, 0.0f, 0.0f), vec3f(0.0f, 1.0f, 0.0f), vec3f(0.0f, 0.0f, 1.0f)), 0i)).x));
     var l9_i: i32 = atd_imod(i32(atd_index), 3i);
-    l7_p[clamp(l9_i, 0i, 2i)] = ((l7_p)[clamp(l9_i, 0i, 2i)] * 0.5f);
+    {
+        let atd_di: i32 = clamp(l9_i, 0i, 2i);
+        let atd_dv: f32 = ((l7_p)[clamp(l9_i, 0i, 2i)] * 0.5f);
+        if (atd_di == 0i) {
+            l7_p.x = atd_dv;
+        } else if (atd_di == 1i) {
+            l7_p.y = atd_dv;
+        } else {
+            l7_p.z = atd_dv;
+        }
+    }
     a_orient = atd_slerp(l1_q, l2_r, 0.25f);
     a_P = (l7_p + ((a_orient).xyz * vec3f(0.0f)));
     a_Cd = vec4f((l7_p).x, (l7_p).y, (l7_p).z, 1.0f);
