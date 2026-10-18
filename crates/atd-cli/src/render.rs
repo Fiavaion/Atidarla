@@ -480,6 +480,7 @@ mod tests {
         };
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             required_features: atd_gpu::optional_features(&adapter),
+            required_limits: atd_gpu::required_limits(&adapter),
             ..Default::default()
         }))
         .ok()?;

@@ -11,9 +11,15 @@
 //! current value when the node cooks; the scheduler orders and dirties
 //! through bindings, so a time-dependent LFO animates whatever it drives.
 //!
-//! **Status (M1 pre-work):** IMG and SIG wires. GEO/DAT results arrive with
-//! their families. Operators are created per node from an [`OpLibrary`] of
-//! factories registered by the `atd-ops-*` crates.
+//! GEO operators ([`GeoOp`]) cook on the GPU into the same encoder; their
+//! results are [`Geometry`] values whose attribute buffers come from the
+//! engine's [`BufferPool`] (design: `docs/design/geometry-attributes.md`).
+//! A GEO result moves to its consumer instead of being shared when nothing
+//! else can read it ([`GeoCtx::take_input`]).
+//!
+//! **Status:** IMG, SIG and GEO wires (M2 pre-work for GEO). DAT results
+//! arrive with their family. Operators are created per node from an
+//! [`OpLibrary`] of factories registered by the `atd-ops-*` crates.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -28,6 +34,7 @@ use serde_json::Value;
 
 use crate::expr::ExprTable;
 
+use crate::geo::{AttrType, Attribute, BufferPool, Geometry};
 use crate::pool::{TexKey, TexturePool};
 
 /// Usage of every engine texture: render target, sampled, copyable.
@@ -413,6 +420,10 @@ pub struct CookCtx<'a> {
     /// SIG inputs by input index (`None` for IMG sockets), for operators
     /// that turn channels into images.
     pub sig_inputs: SigInputs<'a>,
+    /// GEO inputs by input index, for operators that render geometry.
+    pub geo_inputs: GeoInputs<'a>,
+    /// The engine's attribute buffer pool (for uploading CPU-only inputs).
+    pub buffers: &'a BufferPool,
     /// A 1×1 transparent black texture, for unconnected inputs.
     pub black: &'a wgpu::Texture,
     pub output: &'a wgpu::Texture,
@@ -495,6 +506,148 @@ impl<'a> SigInputs<'a> {
     }
 }
 
+/// GEO inputs of a node, by input index. Does not allocate.
+#[derive(Debug, Clone, Copy)]
+pub struct GeoInputs<'a> {
+    sources: &'a [Option<NodeId>],
+    geo: &'a HashMap<NodeId, Geometry>,
+}
+
+impl<'a> GeoInputs<'a> {
+    /// Inputs given by source node per input index (for tests and tools).
+    pub fn new(sources: &'a [Option<NodeId>], geo: &'a HashMap<NodeId, Geometry>) -> Self {
+        Self { sources, geo }
+    }
+
+    /// Geometry on input `i`, if connected and cooked.
+    pub fn get(&self, i: usize) -> Option<&'a Geometry> {
+        self.sources
+            .get(i)
+            .copied()
+            .flatten()
+            .and_then(|n| self.geo.get(&n))
+    }
+
+    pub fn len(&self) -> usize {
+        self.sources.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.sources.is_empty()
+    }
+}
+
+/// Everything a GEO operator needs to cook one frame. Work goes into the
+/// frame's command encoder; buffers come from [`GeoCtx::buffers`].
+///
+/// **Inputs are read-only.** To build on an input, take it with
+/// [`GeoCtx::take_input`]: you get the value itself when the engine can hand
+/// it over (nothing else reads it this frame or next), else a cheap clone
+/// sharing every attribute. Either way, write an attribute in place only
+/// when [`Attribute::unique_gpu`] gives you its buffer, else write a new one
+/// ([`GeoCtx::alloc`]) and set it on your output: copy on write.
+#[derive(Debug)]
+pub struct GeoCtx<'a> {
+    pub device: &'a wgpu::Device,
+    pub queue: &'a wgpu::Queue,
+    pub encoder: &'a mut wgpu::CommandEncoder,
+    /// The engine's attribute buffer pool.
+    pub buffers: &'a BufferPool,
+    /// IMG inputs by input index (`None` for other sockets).
+    pub images: &'a [Option<wgpu::Texture>],
+    /// SIG inputs by input index.
+    pub sig_inputs: SigInputs<'a>,
+    /// This node's result from its previous cook (empty on the first), to
+    /// overwrite or reuse. Replacing it releases its buffers to the pool
+    /// after the frame is submitted.
+    pub output: &'a mut Geometry,
+    pub params: Params<'a>,
+    /// Seconds since the engine's time origin.
+    pub time: f64,
+    /// Seconds since the previous frame (offline: exactly one step).
+    pub dt: f64,
+    pub frame: u64,
+    /// Set when the result is provisional: the node cooks again next frame.
+    pub cook_again: bool,
+    node: NodeId,
+    sources: &'a [Option<NodeId>],
+    handover: &'a [bool],
+    geo: &'a mut HashMap<NodeId, Geometry>,
+}
+
+impl GeoCtx<'_> {
+    /// Geometry on input `i`, if connected and cooked (feedback inputs: the
+    /// source's result from the previous frame; a node wired into its own
+    /// feedback input reads [`Self::output`] as it was before this cook).
+    pub fn input(&self, i: usize) -> Option<&Geometry> {
+        let src = self.sources.get(i).copied().flatten()?;
+        if src == self.node {
+            return Some(&*self.output);
+        }
+        self.geo.get(&src)
+    }
+
+    /// Whether [`Self::take_input`] on input `i` would move the value rather
+    /// than share it: nothing else can read it (see `Engine::cook`), or it is
+    /// this node's own previous output (a feedback wire from itself).
+    pub fn can_take(&self, i: usize) -> bool {
+        let own = self.sources.get(i).copied().flatten() == Some(self.node);
+        (own || self.handover.get(i).copied().unwrap_or(false)) && self.input(i).is_some()
+    }
+
+    /// Input `i` to build on: moved out of the source's result when
+    /// [`Self::can_take`], else a clone sharing its attributes. Taking an
+    /// input that was moved gives an empty geometry (own output) or `None`.
+    pub fn take_input(&mut self, i: usize) -> Option<Geometry> {
+        let src = self.sources.get(i).copied().flatten()?;
+        if src == self.node {
+            Some(std::mem::take(self.output))
+        } else if self.handover.get(i).copied().unwrap_or(false) {
+            self.geo.remove(&src)
+        } else {
+            self.geo.get(&src).cloned()
+        }
+    }
+
+    /// A new GPU attribute of `len` elements from the pool. Its contents are
+    /// whatever the buffer last held (offline it is cleared to zero, so no
+    /// frame depends on the pool's history): write all of it.
+    pub fn alloc(
+        &mut self,
+        name: impl Into<std::sync::Arc<str>>,
+        ty: AttrType,
+        len: u32,
+    ) -> Attribute {
+        let buffer = self.buffers.attr(atd_core::geo::buffer_bytes(len, ty));
+        if self.params.mode().is_offline() {
+            self.encoder.clear_buffer(&buffer, 0, None);
+        }
+        Attribute::gpu(name, ty, len, buffer)
+    }
+
+    /// A header for a count the CPU knows (written with `write_buffer`;
+    /// share it rather than writing one per frame).
+    pub fn cpu_header(&self, points: u32) -> std::sync::Arc<crate::geo::GeoBuffer> {
+        crate::geo::cpu_header(self.queue, self.buffers, points)
+    }
+}
+
+/// A live GEO operator instance (one per node).
+pub trait GeoOp: Send {
+    fn cook(&mut self, ctx: &mut GeoCtx<'_>) -> Result<(), String>;
+
+    /// Runs once the frame's commands are submitted (start readbacks here).
+    fn after_submit(&mut self) {}
+
+    /// A short status line for the parameter panel, or `None`.
+    fn status(&self) -> Option<&str> {
+        None
+    }
+}
+
+/// Creates a GEO operator instance.
+pub type GeoFactory = Box<dyn Fn(&wgpu::Device) -> Box<dyn GeoOp> + Send + Sync>;
+
 /// Everything a SIG operator needs to cook one frame.
 #[derive(Debug)]
 pub struct SigCtx<'a> {
@@ -561,6 +714,7 @@ pub struct OpLibrary {
     factories: HashMap<String, OpFactory>,
     sig_factories: HashMap<String, SigFactory>,
     analysis_factories: HashMap<String, ImgToSigFactory>,
+    geo_factories: HashMap<String, GeoFactory>,
 }
 
 impl std::fmt::Debug for OpLibrary {
@@ -570,6 +724,7 @@ impl std::fmt::Debug for OpLibrary {
             .keys()
             .chain(self.sig_factories.keys())
             .chain(self.analysis_factories.keys())
+            .chain(self.geo_factories.keys())
             .collect();
         ids.sort();
         f.debug_struct("OpLibrary").field("types", &ids).finish()
@@ -605,10 +760,21 @@ impl OpLibrary {
             .insert(type_id.into(), Box::new(factory));
     }
 
+    /// Registers a GEO operator implementation (an operator whose first
+    /// output is a `GEO` socket).
+    pub fn add_geo(
+        &mut self,
+        type_id: impl Into<String>,
+        factory: impl Fn(&wgpu::Device) -> Box<dyn GeoOp> + Send + Sync + 'static,
+    ) {
+        self.geo_factories.insert(type_id.into(), Box::new(factory));
+    }
+
     pub fn contains(&self, type_id: &str) -> bool {
         self.factories.contains_key(type_id)
             || self.sig_factories.contains_key(type_id)
             || self.analysis_factories.contains_key(type_id)
+            || self.geo_factories.contains_key(type_id)
     }
 }
 
@@ -650,10 +816,16 @@ pub struct Engine {
     gpu_ops: HashMap<NodeId, Box<dyn GpuOp>>,
     sig_ops: HashMap<NodeId, Box<dyn SigOp>>,
     analysis_ops: HashMap<NodeId, Box<dyn ImgToSigOp>>,
+    geo_ops: HashMap<NodeId, Box<dyn GeoOp>>,
     results: HashMap<NodeId, wgpu::Texture>,
     sig: HashMap<NodeId, Channels>,
+    geo: HashMap<NodeId, Geometry>,
     errors: HashMap<NodeId, String>,
     pool: TexturePool,
+    buffers: BufferPool,
+    /// Wires leaving each node (feedback wires included), for the GEO
+    /// hand-over; rebuilt on every edit.
+    consumers: HashMap<NodeId, u32>,
     black: wgpu::Texture,
     frame: u64,
     last_time: Option<f64>,
@@ -662,6 +834,8 @@ pub struct Engine {
     requested: Vec<NodeId>,
     inputs: Vec<Option<wgpu::Texture>>,
     sig_sources: Vec<Option<NodeId>>,
+    geo_sources: Vec<Option<NodeId>>,
+    handover: Vec<bool>,
     /// Nodes that asked to cook again next frame ([`CookCtx::cook_again`]).
     again: Vec<NodeId>,
     released: Vec<wgpu::Texture>,
@@ -709,6 +883,7 @@ impl Engine {
             view_formats: &[],
         });
         let pool = TexturePool::new(device.clone());
+        let buffers = BufferPool::new(device.clone());
         Self {
             device,
             queue,
@@ -721,10 +896,14 @@ impl Engine {
             gpu_ops: HashMap::new(),
             sig_ops: HashMap::new(),
             analysis_ops: HashMap::new(),
+            geo_ops: HashMap::new(),
             results: HashMap::new(),
             sig: HashMap::new(),
+            geo: HashMap::new(),
             errors: HashMap::new(),
             pool,
+            buffers,
+            consumers: HashMap::new(),
             black,
             frame: 0,
             last_time: None,
@@ -732,6 +911,8 @@ impl Engine {
             requested: Vec::new(),
             inputs: Vec::new(),
             sig_sources: Vec::new(),
+            geo_sources: Vec::new(),
+            handover: Vec::new(),
             again: Vec::new(),
             released: Vec::new(),
             project_dir: None,
@@ -832,6 +1013,11 @@ impl Engine {
         &self.pool
     }
 
+    /// The attribute buffer pool of GEO results.
+    pub fn buffer_pool(&self) -> &BufferPool {
+        &self.buffers
+    }
+
     pub fn device(&self) -> &wgpu::Device {
         &self.device
     }
@@ -906,8 +1092,10 @@ impl Engine {
             .keys()
             .chain(self.sig_ops.keys())
             .chain(self.analysis_ops.keys())
+            .chain(self.geo_ops.keys())
             .chain(self.results.keys())
             .chain(self.sig.keys())
+            .chain(self.geo.keys())
             .copied()
             .filter(|id| !alive(id))
             .collect();
@@ -915,7 +1103,10 @@ impl Engine {
             self.gpu_ops.remove(&id);
             self.sig_ops.remove(&id);
             self.analysis_ops.remove(&id);
+            self.geo_ops.remove(&id);
             self.sig.remove(&id);
+            // Its buffers return to the pool, reusable after the next submit.
+            self.geo.remove(&id);
             self.errors.remove(&id);
             self.scheduler.forget(id);
             if let Some(t) = self.results.remove(&id) {
@@ -930,6 +1121,7 @@ impl Engine {
             .collect();
         dirty.extend(self.rebuild_exprs());
         self.scheduler.mark_dirty(&self.net, dirty);
+        count_consumers(&self.net, &mut self.consumers);
     }
 
     /// Cooks what `requested` needs at `time` (seconds) and submits it.
@@ -956,16 +1148,22 @@ impl Engine {
             gpu_ops,
             sig_ops,
             analysis_ops,
+            geo_ops,
             results,
             sig,
+            geo,
             errors,
             pool,
+            buffers,
+            consumers,
             black,
             frame,
             last_time,
             plan,
             inputs,
             sig_sources,
+            geo_sources,
+            handover,
             released,
             again,
             project_dir,
@@ -1024,6 +1222,110 @@ impl Engine {
                 .outputs
                 .first()
                 .is_some_and(|o| o.wire == WireType::Sig);
+            let is_geo = schema
+                .outputs
+                .first()
+                .is_some_and(|o| o.wire == WireType::Geo);
+
+            if is_geo {
+                if let std::collections::hash_map::Entry::Vacant(slot) = geo_ops.entry(id) {
+                    match library.geo_factories.get(&node.type_id) {
+                        Some(f) => {
+                            slot.insert(f(device));
+                        }
+                        None => {
+                            errors.insert(
+                                id,
+                                format!("no GEO implementation for `{}`", node.type_id),
+                            );
+                            geo.remove(&id);
+                            scheduler.record(id, start.elapsed());
+                            continue;
+                        }
+                    }
+                }
+                inputs.clear();
+                sig_sources.clear();
+                geo_sources.clear();
+                handover.clear();
+                for socket in &schema.inputs {
+                    let src = net
+                        .inputs_of(id)
+                        .find(|(name, _)| *name == socket.name)
+                        .map(|(_, src)| src.node);
+                    let from_geo = src.filter(|_| socket.wire == WireType::Geo);
+                    // Hand the value over (no copy on write) only when nothing
+                    // else can read it. Through a normal input: this is its
+                    // only wire, it cooked this frame and will next frame, and
+                    // nobody asked to see it. Through a feedback input (the
+                    // previous frame's value): this is its only wire and the
+                    // source cooks again later this frame.
+                    handover.push(from_geo.is_some_and(|a| {
+                        let pos = |n: NodeId| plan.iter().position(|&p| p == n);
+                        a != id
+                            && consumers.get(&a) == Some(&1)
+                            && if socket.feedback {
+                                pos(a) > pos(id)
+                            } else {
+                                plan.contains(&a)
+                                    && !requested.contains(&a)
+                                    && scheduler.continuous(a)
+                            }
+                    }));
+                    geo_sources.push(from_geo);
+                    sig_sources.push(src.filter(|_| socket.wire == WireType::Sig));
+                    inputs.push(
+                        src.filter(|_| socket.wire == WireType::Img)
+                            .and_then(|s| results.get(&s))
+                            .cloned(),
+                    );
+                }
+                let mut out = geo.remove(&id).unwrap_or_default();
+                let mut ctx = GeoCtx {
+                    device,
+                    queue,
+                    encoder: &mut encoder,
+                    buffers,
+                    images: inputs,
+                    sig_inputs: SigInputs {
+                        sources: sig_sources,
+                        sig,
+                    },
+                    output: &mut out,
+                    params: Params {
+                        net,
+                        registry,
+                        sig,
+                        node: id,
+                        project_dir: project_dir.as_deref(),
+                        exprs: Some(exprs),
+                        mode,
+                    },
+                    time,
+                    dt,
+                    frame: *frame,
+                    cook_again: false,
+                    node: id,
+                    sources: geo_sources,
+                    handover,
+                    geo,
+                };
+                let op = geo_ops.get_mut(&id).expect("instance created above");
+                let result = op.cook(&mut ctx);
+                if ctx.cook_again {
+                    again.push(id);
+                }
+                match result {
+                    Ok(()) => settle(errors, exprs, id),
+                    Err(e) => {
+                        errors.insert(id, e);
+                        out.clear();
+                    }
+                }
+                geo.insert(id, out);
+                scheduler.record(id, start.elapsed());
+                continue;
+            }
 
             if is_sig && let Some(factory) = library.analysis_factories.get(&node.type_id) {
                 let op = analysis_ops.entry(id).or_insert_with(|| factory(device));
@@ -1147,6 +1449,7 @@ impl Engine {
 
             inputs.clear();
             sig_sources.clear();
+            geo_sources.clear();
             // Size of the first connected IMG input (feedback inputs carry
             // last frame's image and do not set the size).
             let mut input_size = None;
@@ -1165,6 +1468,7 @@ impl Engine {
                 }
                 inputs.push(tex);
                 sig_sources.push(src.filter(|_| socket.wire == WireType::Sig));
+                geo_sources.push(src.filter(|_| socket.wire == WireType::Geo));
             }
 
             let project = (config.width, config.height);
@@ -1208,6 +1512,11 @@ impl Engine {
                     sources: sig_sources,
                     sig,
                 },
+                geo_inputs: GeoInputs {
+                    sources: geo_sources,
+                    geo,
+                },
+                buffers,
                 black,
                 output: &output,
                 params: Params {
@@ -1268,12 +1577,15 @@ impl Engine {
                 op.after_submit();
             } else if let Some(op) = gpu_ops.get_mut(id) {
                 op.after_submit();
+            } else if let Some(op) = geo_ops.get_mut(id) {
+                op.after_submit();
             }
         }
         for t in released.drain(..) {
             pool.release(t);
         }
         pool.end_frame();
+        buffers.end_frame();
         *frame += 1;
         Ok(plan.len())
     }
@@ -1289,10 +1601,14 @@ impl Engine {
         self.gpu_ops.clear();
         self.sig_ops.clear();
         self.analysis_ops.clear();
+        self.geo_ops.clear();
         self.sig.clear();
+        // Buffers return to the pool, reusable after the next submit.
+        self.geo.clear();
         self.errors.clear();
         self.again.clear();
         self.last_time = None;
+        count_consumers(&self.net, &mut self.consumers);
         // Textures may still be read by a submitted frame: release them
         // with the next frame's.
         self.released.extend(self.results.drain().map(|(_, t)| t));
@@ -1334,6 +1650,13 @@ impl Engine {
         self.sig.get(&node)
     }
 
+    /// The latest geometry of a GEO node. `None` before it cooks, and also
+    /// when its value was handed over to its only consumer this frame
+    /// (request the node to keep its result, as a viewer does).
+    pub fn geometry(&self, node: NodeId) -> Option<&Geometry> {
+        self.geo.get(&node)
+    }
+
     /// The last cook error of `node`, if any.
     pub fn error(&self, node: NodeId) -> Option<&str> {
         self.errors.get(&node).map(String::as_str)
@@ -1342,7 +1665,10 @@ impl Engine {
     /// The status line of an IMG node's operator, if it reports one
     /// ([`GpuOp::status`]).
     pub fn status(&self, node: NodeId) -> Option<&str> {
-        self.gpu_ops.get(&node)?.status()
+        match self.gpu_ops.get(&node) {
+            Some(op) => op.status(),
+            None => self.geo_ops.get(&node)?.status(),
+        }
     }
 
     pub fn stat(&self, node: NodeId) -> Option<&CookStat> {
@@ -1351,6 +1677,14 @@ impl Engine {
 
     pub fn frame(&self) -> u64 {
         self.frame
+    }
+}
+
+/// Counts the wires leaving each node (on edits, not per frame).
+fn count_consumers(net: &Network, out: &mut HashMap<NodeId, u32>) {
+    out.clear();
+    for w in net.wires() {
+        *out.entry(w.from.node).or_default() += 1;
     }
 }
 

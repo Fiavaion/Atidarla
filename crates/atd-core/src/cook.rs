@@ -75,6 +75,9 @@ pub struct Scheduler {
     // Scratch buffers reused by `plan`.
     marks: HashMap<NodeId, Mark>,
     included: HashSet<NodeId>,
+    /// Planned nodes that will be planned next frame too (see
+    /// [`Scheduler::continuous`]).
+    continuous: HashSet<NodeId>,
     stack: Vec<(NodeId, Step)>,
 }
 
@@ -115,6 +118,16 @@ impl Scheduler {
         self.stats.get(&node)
     }
 
+    /// Whether the last [`Scheduler::plan`] included `node` for a reason that
+    /// holds next frame too: it is time-dependent (or its expressions are),
+    /// it has a wired feedback input, or it is downstream of such a node.
+    /// A node planned only because an edit dirtied it is not continuous. The
+    /// engine hands a GEO value to its consumer in place only when the source
+    /// cooks again next frame anyway (design: geometry-attributes.md §3.2).
+    pub fn continuous(&self, node: NodeId) -> bool {
+        self.continuous.contains(&node)
+    }
+
     /// Records that `node` cooked in `took`: clears its dirty flag and
     /// updates its metrics.
     pub fn record(&mut self, node: NodeId, took: Duration) {
@@ -143,6 +156,7 @@ impl Scheduler {
         out.clear();
         self.marks.clear();
         self.included.clear();
+        self.continuous.clear();
         self.stack.clear();
         for &r in requested.iter().rev() {
             if net.node(r).is_none() {
@@ -162,32 +176,44 @@ impl Scheduler {
 
             let extra = self.extra.get(&n);
             if step == Step::Expand {
-                let mut needs = self.dirty.contains(&n)
-                    || !self.stats.contains_key(&n)
-                    || schema.is_some_and(|s| s.time_dependent)
+                let mut continuous = schema.is_some_and(|s| s.time_dependent)
                     || extra.is_some_and(|e| e.time_dependent);
+                let mut needs =
+                    continuous || self.dirty.contains(&n) || !self.stats.contains_key(&n);
                 for (input, src) in net.inputs_of(n) {
-                    if is_feedback(input) || self.included.contains(&src.node) {
+                    if is_feedback(input) {
                         needs = true;
+                        continuous = true;
+                    } else if self.included.contains(&src.node) {
+                        needs = true;
+                        continuous |= self.continuous.contains(&src.node);
                     }
                 }
                 for b in net.bindings_of(n) {
                     if self.included.contains(&b.node) {
                         needs = true;
+                        continuous |= self.continuous.contains(&b.node);
                     }
                 }
                 // A dependency still in progress closes a loop through
                 // expressions: whether it cooks is not known yet, so cook.
-                if extra.is_some_and(|e| {
-                    e.deps.iter().any(|d| {
-                        self.included.contains(d) || self.marks.get(d) == Some(&Mark::InProgress)
-                    })
-                }) {
-                    needs = true;
+                if let Some(e) = extra {
+                    for d in &e.deps {
+                        if self.marks.get(d) == Some(&Mark::InProgress) {
+                            needs = true;
+                            continuous = true;
+                        } else if self.included.contains(d) {
+                            needs = true;
+                            continuous |= self.continuous.contains(d);
+                        }
+                    }
                 }
                 if needs {
                     self.included.insert(n);
                     out.push(n);
+                    if continuous {
+                        self.continuous.insert(n);
+                    }
                 }
                 self.marks.insert(n, Mark::Done);
                 continue;
@@ -375,6 +401,48 @@ mod tests {
             [fb, mix],
             "the loop advances each frame; the static source stays cached"
         );
+    }
+
+    #[test]
+    fn continuous_nodes_are_those_that_cook_again_next_frame() {
+        let reg = test_registry();
+        let mut net = Network::default();
+        let lfo = add(&mut net, &reg, "sig.lfo");
+        let a = add(&mut net, &reg, "img.gen");
+        let b = add(&mut net, &reg, "img.mix");
+        let c = add(&mut net, &reg, "img.mix");
+        connect(&mut net, &reg, a, b, "a");
+        connect(&mut net, &reg, b, c, "a");
+        let mut s = Scheduler::default();
+        let mut plan = Vec::new();
+        // First cook: everything is planned, nothing is continuous.
+        s.plan(&net, &reg, &[c, lfo], &mut plan).unwrap();
+        assert_eq!(plan.len(), 4);
+        assert!(plan.iter().all(|&n| !s.continuous(n) || n == lfo));
+        assert!(s.continuous(lfo), "time-dependent");
+        cook_all(&mut s, &plan);
+        // An edit of `a` plans a, b, c once: not continuous.
+        s.mark_dirty(&net, [a]);
+        s.plan(&net, &reg, &[c], &mut plan).unwrap();
+        assert_eq!(plan, [a, b, c]);
+        assert!(!s.continuous(a) && !s.continuous(b) && !s.continuous(c));
+        cook_all(&mut s, &plan);
+        // Driving b from the LFO makes b and c continuous, not a.
+        net.apply(
+            &reg,
+            Edit::SetParam {
+                node: b,
+                param: "gain".into(),
+                value: Some(Param::bound(json!(1.0), lfo, "")),
+            },
+        )
+        .unwrap();
+        s.mark_dirty(&net, [b]);
+        s.plan(&net, &reg, &[c], &mut plan).unwrap();
+        cook_all(&mut s, &plan);
+        s.plan(&net, &reg, &[c], &mut plan).unwrap();
+        assert_eq!(plan, [lfo, b, c]);
+        assert!(s.continuous(b) && s.continuous(c) && !s.continuous(a));
     }
 
     #[test]

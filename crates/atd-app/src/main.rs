@@ -31,21 +31,13 @@ fn main() -> ExitCode {
     // The default egui device plus the optional features the engine uses.
     let mut setup = eframe::egui_wgpu::WgpuSetupCreateNew::without_display_handle();
     setup.instance_descriptor = atd_gpu::instance_descriptor();
-    setup.device_descriptor = std::sync::Arc::new(|adapter| {
-        let base = if adapter.get_info().backend == wgpu::Backend::Gl {
-            wgpu::Limits::downlevel_webgl2_defaults()
-        } else {
-            wgpu::Limits::default()
-        };
-        wgpu::DeviceDescriptor {
-            label: Some("atidarla device"),
-            required_features: atd_gpu::optional_features(adapter),
-            required_limits: wgpu::Limits {
-                max_texture_dimension_2d: 8192,
-                ..base
-            },
-            ..Default::default()
-        }
+    // Limits: the WebGPU defaults raised to what the adapter offers where
+    // geometry needs it (storage buffers, buffer sizes, 8K textures).
+    setup.device_descriptor = std::sync::Arc::new(|adapter| wgpu::DeviceDescriptor {
+        label: Some("atidarla device"),
+        required_features: atd_gpu::optional_features(adapter),
+        required_limits: atd_gpu::required_limits(adapter),
+        ..Default::default()
     });
     let wgpu_options = eframe::egui_wgpu::WgpuConfiguration {
         wgpu_setup: eframe::egui_wgpu::WgpuSetup::CreateNew(setup),

@@ -3,11 +3,13 @@
 //!
 //! **Status:** device bring-up, adapter reporting and GPU-vendor detection
 //! (M0); M1 pre-work: the texture pool ([`pool`]), full-screen passes
-//! ([`fullscreen`]) and the cooking [`engine`].
+//! ([`fullscreen`]) and the cooking [`engine`]; M2 pre-work: geometry
+//! values, the attribute buffer pool and compute building blocks ([`geo`]).
 
 pub mod engine;
 pub mod expr;
 pub mod fullscreen;
+pub mod geo;
 pub mod isf;
 pub mod pool;
 
@@ -125,6 +127,7 @@ impl GpuContext {
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("atd-headless"),
                 required_features: optional_features(&adapter),
+                required_limits: required_limits(&adapter),
                 ..Default::default()
             })
             .await?;
@@ -152,6 +155,60 @@ pub fn optional_features(adapter: &wgpu::Adapter) -> wgpu::Features {
     adapter.features() & wgpu::Features::TEXTURE_COMPRESSION_BC
 }
 
+/// Storage buffers per shader stage requested when the adapter offers them
+/// (design: geometry-attributes.md §7; the WebGPU default is 8).
+pub const TARGET_STORAGE_BUFFERS: u32 = 16;
+/// Storage binding and buffer size requested when offered (1 GiB; the
+/// WebGPU defaults are 128 MiB and 256 MiB).
+pub const TARGET_BUFFER_BYTES: u64 = 1 << 30;
+/// Largest 2D texture requested when offered.
+pub const TARGET_TEXTURE_2D: u32 = 8192;
+
+/// The device limits Atidarla asks for: the WebGPU defaults, raised to what
+/// the adapter offers up to the targets above (storage buffers per stage,
+/// storage binding and buffer size, 2D texture size). Every core operator
+/// still works at the defaults; the raised limits only lift ceilings (more
+/// points per buffer, wider kernels). GL adapters get the WebGL2 defaults.
+pub fn required_limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
+    let offered = adapter.limits();
+    let base = if adapter.get_info().backend == wgpu::Backend::Gl {
+        wgpu::Limits::downlevel_webgl2_defaults()
+    } else {
+        wgpu::Limits::default()
+    };
+    raise_limits(base, &offered)
+}
+
+/// `base` with the GEO-relevant limits raised to `min(offered, target)`
+/// (never below `base`).
+pub fn raise_limits(base: wgpu::Limits, offered: &wgpu::Limits) -> wgpu::Limits {
+    let up32 = |base: u32, offered: u32, target: u32| base.max(offered.min(target));
+    let up64 = |base: u64, offered: u64, target: u64| base.max(offered.min(target));
+    wgpu::Limits {
+        max_storage_buffers_per_shader_stage: up32(
+            base.max_storage_buffers_per_shader_stage,
+            offered.max_storage_buffers_per_shader_stage,
+            TARGET_STORAGE_BUFFERS,
+        ),
+        max_storage_buffer_binding_size: up64(
+            base.max_storage_buffer_binding_size,
+            offered.max_storage_buffer_binding_size,
+            TARGET_BUFFER_BYTES,
+        ),
+        max_buffer_size: up64(
+            base.max_buffer_size,
+            offered.max_buffer_size,
+            TARGET_BUFFER_BYTES,
+        ),
+        max_texture_dimension_2d: up32(
+            base.max_texture_dimension_2d,
+            offered.max_texture_dimension_2d,
+            TARGET_TEXTURE_2D,
+        ),
+        ..base
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,6 +229,32 @@ mod tests {
             backend,
             ..wgpu::AdapterInfo::new(wgpu::DeviceType::Other, wgpu::Backend::Noop)
         }
+    }
+
+    #[test]
+    fn limits_rise_to_what_is_offered_up_to_the_targets() {
+        let base = wgpu::Limits::default();
+        let mut offered = base.clone();
+        offered.max_storage_buffers_per_shader_stage = 64;
+        offered.max_storage_buffer_binding_size = 2 << 30;
+        offered.max_buffer_size = 512 << 20;
+        let got = raise_limits(base.clone(), &offered);
+        assert_eq!(
+            got.max_storage_buffers_per_shader_stage,
+            TARGET_STORAGE_BUFFERS
+        );
+        assert_eq!(got.max_storage_buffer_binding_size, TARGET_BUFFER_BYTES);
+        assert_eq!(got.max_buffer_size, 512 << 20, "what the adapter offers");
+        // An adapter offering less than the defaults keeps the defaults
+        // (requesting them then fails loudly, as before).
+        let mut small = base.clone();
+        small.max_storage_buffers_per_shader_stage = 4;
+        let got = raise_limits(base.clone(), &small);
+        assert_eq!(got.max_storage_buffers_per_shader_stage, 8);
+        assert_eq!(
+            got.max_bind_groups, base.max_bind_groups,
+            "others unchanged"
+        );
     }
 
     #[test]

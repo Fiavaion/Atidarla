@@ -8,6 +8,7 @@ pub mod capability;
 pub mod cook;
 pub mod expr;
 pub mod fragment;
+pub mod geo;
 pub mod graph;
 pub mod history;
 pub mod pack;
