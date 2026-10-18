@@ -137,9 +137,17 @@ impl Parser<'_> {
     /// Expects the `;` that ends a statement. A missing one is reported and treated as
     /// present, so the next statement still parses.
     fn semi(&mut self) {
-        if !self.eat(&Tok::Semi) {
-            let _ = self.expect(&Tok::Semi, "`;`");
+        if self.eat(&Tok::Semi) {
+            return;
         }
+        if matches!(self.peek(), Tok::PlusPlus | Tok::MinusMinus) {
+            let _ = self.error::<()>(
+                Error::new(self.span(), "`++` and `--` are statements, not expressions")
+                    .hint("write `x++;` on its own line, or use x + 1"),
+            );
+            return;
+        }
+        let _ = self.expect(&Tok::Semi, "`;`");
     }
 
     fn ident(&mut self, what: &str) -> PResult<(String, Span)> {
@@ -716,6 +724,10 @@ impl Parser<'_> {
             Tok::Int(n) => {
                 self.bump();
                 ExprKind::Int(n)
+            }
+            Tok::IntBits(n) => {
+                self.bump();
+                ExprKind::IntBits(n)
             }
             Tok::Float(v) => {
                 self.bump();

@@ -143,6 +143,7 @@ fn sigil_type(s: char) -> Option<Type> {
 fn int_lit(e: &ast::Expr) -> Option<i64> {
     match &e.kind {
         AK::Int(n) => i64::try_from(*n).ok(),
+        AK::IntBits(n) => Some(i64::from(*n as i32)),
         AK::Unary(ast::UnOp::Neg, inner) => int_lit(inner).map(|n| -n),
         AK::Unary(ast::UnOp::Plus, inner) => int_lit(inner),
         _ => None,
@@ -153,6 +154,7 @@ fn int_lit(e: &ast::Expr) -> Option<i64> {
 fn const_value(e: &ast::Expr) -> Option<Vec<f64>> {
     match &e.kind {
         AK::Int(n) => Some(vec![*n as f64]),
+        AK::IntBits(n) => Some(vec![f64::from(*n as i32)]),
         AK::Float(v) => Some(vec![*v]),
         AK::Bool(b) => Some(vec![f64::from(u8::from(*b))]),
         AK::Unary(ast::UnOp::Neg, inner) => {
@@ -402,8 +404,11 @@ impl Checker<'_> {
             }
             params.push(self.declare(&p.name, p.ty));
         }
+        let errors_before = self.errors.len();
         let body = self.block(&f.body);
-        if f.ret != Type::Void && !always_returns(&body) {
+        // A statement that failed to check is missing from `body`; do not also report
+        // the missing return it causes.
+        if f.ret != Type::Void && self.errors.len() == errors_before && !always_returns(&body) {
             self.push(
                 Error::new(
                     f.name_span,
@@ -995,6 +1000,12 @@ impl Checker<'_> {
         if name.is_empty() {
             return Err(Error::new(span, "expected an attribute name after `@`"));
         }
+        if !is_identifier(name) {
+            return Err(
+                Error::new(span, format!("`{name}` is not a valid attribute name"))
+                    .hint("use letters, digits and _, starting with a letter"),
+            );
+        }
         let sig_ty = match sigil {
             None => None,
             Some('s') => {
@@ -1181,6 +1192,7 @@ impl Checker<'_> {
                 };
                 Expr::new(ExprKind::Int(v), Type::Int, span)
             }
+            AK::IntBits(v) => Expr::new(ExprKind::Int(*v as i32), Type::Int, span),
             AK::Float(v) => Expr::new(ExprKind::Float(*v as f32), Type::Float, span),
             AK::Bool(b) => Expr::new(ExprKind::Bool(*b), Type::Bool, span),
             AK::Str(_) => {
@@ -1820,12 +1832,7 @@ impl Checker<'_> {
                     .hint(format!("{name}(\"amount\", 1.0)")),
             );
         };
-        let valid = pname
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-            && pname.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
-        if !valid {
+        if !is_identifier(pname) {
             return Err(Error::new(
                 args[0].span,
                 format!("`{pname}` is not a valid parameter name"),
@@ -2184,6 +2191,16 @@ fn assign_binop(op: AssignOp) -> Option<BinOp> {
         AssignOp::Div => BinOp::Div,
         AssignOp::Rem => BinOp::Rem,
     })
+}
+
+/// ASCII letters, digits and `_`, not starting with a digit (and not `__`, which WGSL
+/// reserves).
+fn is_identifier(s: &str) -> bool {
+    s.chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && !s.starts_with("__")
 }
 
 /// The common type of two operands under the implicit conversions.

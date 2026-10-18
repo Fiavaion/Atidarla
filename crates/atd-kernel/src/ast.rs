@@ -162,6 +162,8 @@ pub(crate) struct Expr {
 #[derive(Debug)]
 pub(crate) enum ExprKind {
     Int(u64),
+    /// A hexadecimal bit pattern above `0x7FFFFFFF`.
+    IntBits(u32),
     Float(f64),
     Bool(bool),
     Str(String),

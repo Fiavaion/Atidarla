@@ -98,7 +98,7 @@ fresh.
 
 ## Literals
 
-`1`, `0x1F` (int, up to 2147483647; `-2147483648` is allowed), `1.5`, `.5`, `2.`, `1e-3`
+`1`, `0x1F` (int, up to 2147483647; `-2147483648` is allowed; a hexadecimal literal up to `0xFFFFFFFF` gives the `int` with those bits, for hash constants such as `0x9E3779B1`), `1.5`, `.5`, `2.`, `1e-3`
 (float), `true`, `false`. `{a, b, c}` builds a `vec2`, `vec3` or `vec4` from 2 to 4 scalars
 (any expressions, as in a `set()` call). Constants: `M_PI`, `M_TWO_PI`, `M_E`.
 

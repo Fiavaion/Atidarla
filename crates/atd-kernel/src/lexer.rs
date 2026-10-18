@@ -8,6 +8,9 @@ pub(crate) enum Tok {
     Ident(String),
     /// An integer literal; range-checked by the type checker (it may be negated).
     Int(u64),
+    /// A hexadecimal literal above `0x7FFFFFFF` (up to `0xFFFFFFFF`): the `int` with
+    /// these bits.
+    IntBits(u32),
     Float(f64),
     Str(String),
     /// `@name` with an optional type sigil (`v@P`).
@@ -63,6 +66,7 @@ impl Tok {
         match self {
             Tok::Ident(s) => format!("`{s}`"),
             Tok::Int(n) => format!("`{n}`"),
+            Tok::IntBits(n) => format!("`{n:#X}`"),
             Tok::Float(_) => "a number".into(),
             Tok::Str(_) => "a string".into(),
             Tok::Attr { name, .. } => format!("`@{name}`"),
@@ -374,12 +378,15 @@ fn number(src: &str, start: usize, errors: &mut Vec<Error>) -> (Tok, usize) {
         }
         let value = u64::from_str_radix(&src[digits..i], 16);
         return match value {
-            Ok(v) => (Tok::Int(v), end_of_number(src, i, start, errors)),
-            Err(_) => {
-                errors.push(Error::new(
-                    Span::new(start, i),
-                    "invalid hexadecimal number",
-                ));
+            Ok(v) if v > i32::MAX as u64 && v <= u64::from(u32::MAX) => {
+                (Tok::IntBits(v as u32), end_of_number(src, i, start, errors))
+            }
+            Ok(v) if v <= i32::MAX as u64 => (Tok::Int(v), end_of_number(src, i, start, errors)),
+            _ => {
+                errors.push(
+                    Error::new(Span::new(start, i), "invalid hexadecimal number")
+                        .hint("write 1 to 8 hex digits (up to 0xFFFFFFFF)"),
+                );
                 (Tok::Int(0), end_of_number(src, i, start, errors))
             }
         };

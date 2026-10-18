@@ -162,9 +162,23 @@ fn compile_inner(source: &str, options: &CompileOptions) -> Result<Compiled, Vec
     };
     let mut errors = Vec::new();
     let tokens = lexer::lex(source, &mut errors);
+    let lexed = errors.len();
     let ast = parser::parse(&tokens, &mut errors);
     if !errors.is_empty() {
-        return Err(report(&errors, Origin::Kernel));
+        // A bad character or number usually makes the parser complain on the same line
+        // too; keep only the lexer's error there.
+        let lines: Vec<u32> = errors[..lexed]
+            .iter()
+            .map(|e| index.position(e.span.start).0)
+            .collect();
+        let mut kept: Vec<Error> = errors[..lexed].to_vec();
+        kept.extend(
+            errors[lexed..]
+                .iter()
+                .filter(|e| !lines.contains(&index.position(e.span.start).0))
+                .cloned(),
+        );
+        return Err(report(&kept, Origin::Kernel));
     }
     let Some(program) = check::check(
         &ast,
