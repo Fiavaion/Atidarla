@@ -10,6 +10,7 @@ pub mod expr;
 pub mod fragment;
 pub mod graph;
 pub mod history;
+pub mod pack;
 pub mod platform;
 pub mod registry;
 
