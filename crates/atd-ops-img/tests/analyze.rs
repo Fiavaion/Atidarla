@@ -4,6 +4,16 @@ use atd_core::graph::{Edit, Endpoint, Node, NodeId, Param, Wire};
 use atd_core::registry::Registry;
 use atd_gpu::engine::{Engine, EngineConfig, OpLibrary};
 use serde_json::{Value, json};
+use std::sync::{Mutex, MutexGuard};
+
+/// One test at a time: two software (WARP) devices cooking compute passes in
+/// parallel crashed or stalled their readbacks (9 of 25 local runs; CI runs
+/// 39073127218 and 39143168336).
+static SERIAL: Mutex<()> = Mutex::new(());
+
+fn serial() -> MutexGuard<'static, ()> {
+    SERIAL.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 fn engine(w: u32, h: u32) -> Option<Engine> {
     let instance = atd_gpu::primary_instance();
@@ -90,6 +100,7 @@ fn require_gpu() {
 
 #[test]
 fn constant_and_ramp_measure_correctly() {
+    let _serial = serial();
     // Not a multiple of the workgroup stride, to exercise the edges.
     let Some(mut e) = engine(333, 77) else {
         return require_gpu();
@@ -129,6 +140,7 @@ fn constant_and_ramp_measure_correctly() {
 
 #[test]
 fn analysis_drives_a_parameter() {
+    let _serial = serial();
     let Some(mut e) = engine(64, 32) else {
         return require_gpu();
     };
