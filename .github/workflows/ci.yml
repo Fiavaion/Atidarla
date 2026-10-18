@@ -27,11 +27,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: windows, os: windows-latest, optional: false, python: python, gpu: "1" }
-          - { name: macos-arm64, os: macos-latest, optional: false, python: python3, gpu: "1" }
-          - { name: linux, os: ubuntu-latest, optional: true, python: python3, gpu: "" }
+          - { name: windows, os: windows-latest, optional: false, python: python, gpu: "1", tests: "1" }
+          - { name: macos-arm64, os: macos-latest, optional: false, python: python3, gpu: "1", tests: "4" }
+          - { name: linux, os: ubuntu-latest, optional: true, python: python3, gpu: "", tests: "4" }
     env:
       ATD_PYTHON: ${{ matrix.python }}
+      # The Windows runner draws with WARP, which crashes (access violation) or
+      # stalls when two devices run in parallel: one test at a time there.
+      RUST_TEST_THREADS: ${{ matrix.tests }}
       # GPU tests must run, not skip, where the runner has a GPU device
       # (WARP on Windows, the paravirtual Metal device on macOS).
       ATD_REQUIRE_GPU: ${{ matrix.gpu }}
@@ -123,11 +126,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: windows, os: windows-latest, optional: false, python: python, gpu: "1" }
-          - { name: macos-arm64, os: macos-latest, optional: false, python: python3, gpu: "1" }
-          - { name: linux, os: ubuntu-latest, optional: true, python: python3, gpu: "" }
+          - { name: windows, os: windows-latest, optional: false, python: python, gpu: "1", tests: "1" }
+          - { name: macos-arm64, os: macos-latest, optional: false, python: python3, gpu: "1", tests: "4" }
+          - { name: linux, os: ubuntu-latest, optional: true, python: python3, gpu: "", tests: "4" }
     env:
       ATD_PYTHON: ${{ matrix.python }}
+      # The Windows runner draws with WARP, which crashes (access violation) or
+      # stalls when two devices run in parallel: one test at a time there.
+      RUST_TEST_THREADS: ${{ matrix.tests }}
       ATD_REQUIRE_GPU: ${{ matrix.gpu }}
     steps:
       - uses: actions/checkout@v4
