@@ -1,5 +1,7 @@
 # Handoff: continuing M1 locally
 
+> **2026-10-19:** the M2 foundations (geometry, PNT/MSH/MAT operators, 3D render, Packs, Python operators, NCA and compute, a Kernel DSL compiler, offline render) were built overnight and are on this branch, CI green. Start with [`docs/milestones/m2/REVIEW.md`](milestones/m2/REVIEW.md): what exists, what to try, the decisions needed and the caveats. M1 is still open on hardware checks (see `docs/milestones/M1.md`, "Hand checks for Mark"). The rest of this file describes the state on 2026-10-16.
+
 Written 2026-10-16 when work moved from a cloud session to local VS Code + Claude Code.
 Branch: `claude/compassionate-franklin-c9opw6` (no pull request opened yet).
 
