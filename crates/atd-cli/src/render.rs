@@ -455,6 +455,10 @@ pub fn classify(type_id: &str) -> Option<Class> {
         // Geometry (M2): GPU work in the frame's encoder, nothing waits.
         "img.render_points" | "pnt.points" | "pnt.noise" => Pure,
         "pnt.particles" => Stateful,
+        "img.render" | "msh.platonic" => Pure,
+        "mat.line" | "mat.matcap" | "mat.pbr" | "mat.point_sprite" | "mat.toon" | "mat.unlit" => {
+            Pure
+        }
         "img.movie_in" | "img.text" | "img.wgsl" | "sig.audio_file_in" => Waits,
         // Compile; persistent `state` images and buffers also make it stateful.
         "img.compute" => Waits,

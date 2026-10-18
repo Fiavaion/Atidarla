@@ -28,13 +28,15 @@ pub fn schema() -> OperatorSchema {
         type_id: "msh.platonic".into(),
         family: OpFamily::Msh,
         label: "Platonic Solid".into(),
-        summary: "A tetrahedron, cube, octahedron, dodecahedron or icosahedron centred on the origin, or a flat regular polygon facing +Z, as polygons wound counter-clockwise seen from outside. Each face has its own points, so it writes flat normals `N` and per-face texture coordinates `uv` (the polygon's span the unit square); optionally a colour per face (prim `Cd`).".into(),
+        summary: "A tetrahedron, cube, octahedron, dodecahedron or icosahedron centred on Centre, or a flat regular polygon facing +Z, as polygons wound counter-clockwise seen from outside. Each face has its own points, so it writes flat normals `N` and per-face texture coordinates `uv` (the polygon's span the unit square); optionally a colour per face (prim `Cd`).".into(),
         version: 1,
         params: vec![
             ParamSchema::menu("shape", "Shape", SHAPES, "icosahedron")
                 .help("Which solid, or polygon: one flat face with Sides corners."),
             ParamSchema::float("radius", "Radius", 1.0, Some(0.0), None)
                 .help("Distance from the centre to every corner."),
+            ParamSchema::vec("centre", "Centre", &[0.0, 0.0, 0.0])
+                .help("Where the shape is centred."),
             ParamSchema::int("sides", "Sides", 4, Some(3), Some(256))
                 .help("Polygon: number of corners (4 is a square, edges along the axes)."),
             ParamSchema::toggle("face_colours", "Face Colours", false)
@@ -215,8 +217,15 @@ fn face_colour(i: usize) -> [f32; 4] {
 }
 
 /// Builds the geometry (CPU attributes) for the given parameters.
-pub fn build(shape: &str, radius: f32, sides: u32, face_colours: bool) -> Geometry {
+pub fn build(
+    shape: &str,
+    radius: f32,
+    sides: u32,
+    face_colours: bool,
+    centre: [f32; 3],
+) -> Geometry {
     let r = f64::from(radius.max(0.0));
+    let c = centre.map(f64::from);
     let mut faces: Vec<Vec<V3>> = Vec::new();
     let mut normals: Vec<V3> = Vec::new();
     if shape == "polygon" {
@@ -264,7 +273,11 @@ pub fn build(shape: &str, radius: f32, sides: u32, face_colours: bool) -> Geomet
         let mut ids = Vec::new();
         for (q, (a, b)) in face.iter().zip(&local) {
             ids.push(p.len() as u32);
-            p.push([(q[0] * r) as f32, (q[1] * r) as f32, (q[2] * r) as f32]);
+            p.push([
+                (c[0] + q[0] * r) as f32,
+                (c[1] + q[1] * r) as f32,
+                (c[2] + q[2] * r) as f32,
+            ]);
             nrm.push([n[0] as f32, n[1] as f32, n[2] as f32]);
             uv.push([
                 ((a - lo.0) / (hi.0 - lo.0).max(1e-12)) as f32,
@@ -298,7 +311,7 @@ pub fn build(shape: &str, radius: f32, sides: u32, face_colours: bool) -> Geomet
 
 #[derive(Debug, Default)]
 pub struct Platonic {
-    key: Option<(String, u32, u32, bool)>,
+    key: Option<(String, u32, u32, bool, [u32; 3])>,
     built: Geometry,
     header: Option<(u32, Arc<GeoBuffer>)>,
 }
@@ -314,9 +327,17 @@ impl GeoOp for Platonic {
         let radius = p.f32("radius");
         let sides = p.i64("sides").clamp(3, 256) as u32;
         let colours = p.bool("face_colours");
-        let key = (shape.to_owned(), radius.to_bits(), sides, colours);
+        let c = p.vec4("centre");
+        let centre = [c[0], c[1], c[2]];
+        let key = (
+            shape.to_owned(),
+            radius.to_bits(),
+            sides,
+            colours,
+            centre.map(f32::to_bits),
+        );
         if self.key.as_ref() != Some(&key) {
-            self.built = build(shape, radius, sides, colours);
+            self.built = build(shape, radius, sides, colours, centre);
             self.key = Some(key);
         }
         let points = self.built.points();
@@ -353,7 +374,7 @@ mod tests {
             ("icosahedron", 20, 3),
             ("polygon", 1, 4),
         ] {
-            let g = build(shape, 2.0, 4, true);
+            let g = build(shape, 2.0, 4, true, [0.0; 3]);
             assert_eq!(g.prims(), faces, "{shape}");
             assert_eq!(
                 g.points(),
@@ -405,7 +426,13 @@ mod tests {
 
     #[test]
     fn the_square_spans_the_unit_square_in_uv() {
-        let g = build("polygon", std::f32::consts::SQRT_2, 4, false);
+        let g = build(
+            "polygon",
+            std::f32::consts::SQRT_2,
+            4,
+            false,
+            [5.0, 0.0, 0.0],
+        );
         let uv: Vec<f32> = g
             .point("uv")
             .unwrap()
