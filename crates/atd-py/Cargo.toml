@@ -11,17 +11,19 @@ publish.workspace = true
 
 [dependencies]
 atd-core.workspace = true
+atd-gpu.workspace = true
 pyo3.workspace = true
 log.workspace = true
+wgpu.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
-atd-gpu.workspace = true
 atd-ops-img.workspace = true
 atd-ops-sig.workspace = true
 atd-interop.workspace = true
-wgpu.workspace = true
+atd-format.workspace = true
 pollster.workspace = true
-serde_json.workspace = true
 
 [lints]
 workspace = true

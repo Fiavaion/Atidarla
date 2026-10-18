@@ -187,3 +187,46 @@ fn offline_python_results_are_exactly_one_frame_late() {
     assert!(matches!(red(&mut e, level, 2.0 / 60.0), 127 | 128));
     assert_eq!(e.error(level), None);
 }
+
+/// Offline, a Python expression that does not finish is a node error after
+/// the timeout, not a hung render.
+#[test]
+fn offline_waits_for_python_expressions_are_bounded() {
+    let Some(mut e) = engine() else { return };
+    let mut host = PyExprHost::start().unwrap();
+    host.set_offline_timeout(Duration::from_millis(300));
+    e.set_python(Box::new(host));
+    e.set_mode(atd_gpu::engine::CookMode::Offline { fps: 60.0 });
+    let (white, level) = (e.alloc_id(), e.alloc_id());
+    e.edit(
+        "build",
+        [
+            Edit::AddNode {
+                node: Node::new(white, "img.constant", "white"),
+            },
+            Edit::AddNode {
+                node: Node::new(level, "img.level", "level1"),
+            },
+            Edit::Connect {
+                wire: Wire::new(Endpoint::new(white, "out"), Endpoint::new(level, "in")),
+            },
+            Edit::SetParam {
+                node: level,
+                param: "brightness".into(),
+                value: Some(Param {
+                    value: json!(1.0),
+                    expr: Some("[__import__('time').sleep(3), 0.5][1]".into()),
+                    bind: None,
+                }),
+            },
+        ],
+    )
+    .unwrap();
+    let start = Instant::now();
+    red(&mut e, level, 0.0);
+    red(&mut e, level, 1.0 / 60.0);
+    let took = start.elapsed();
+    let msg = e.error(level).unwrap_or_default();
+    assert!(msg.contains("TimeoutError"), "{msg}");
+    assert!(took < Duration::from_secs(2), "{took:?}");
+}

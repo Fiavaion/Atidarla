@@ -377,12 +377,29 @@ pub enum RegistryError {
     FamilyMismatch { type_id: String, family: OpFamily },
     #[error("operator `{type_id}` declares parameter `{param}` twice")]
     DuplicateParam { type_id: String, param: String },
+    #[error(
+        "custom operator type ID `{0}` must be `py.<file>.<name>` in lower-case ASCII, digits or `_`"
+    )]
+    InvalidCustomId(String),
 }
+
+/// Provenance of operators a project defines in Python (`docs/python-ops.md`).
+pub const PYTHON_CUSTOM: &str = "python.custom";
 
 /// All registered operator types, ordered by type ID.
 #[derive(Debug, Default, Clone)]
 pub struct Registry {
     ops: BTreeMap<String, OperatorSchema>,
+    /// Where operators that are not built in come from (e.g.
+    /// [`PYTHON_CUSTOM`]), by type ID.
+    provenance: BTreeMap<String, String>,
+}
+
+/// Lower-case ASCII letters, digits and `_`, not empty.
+fn valid_id_part(s: &str) -> bool {
+    !s.is_empty()
+        && s.bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
 
 impl Registry {
@@ -391,11 +408,7 @@ impl Registry {
         let (prefix, name) = id
             .split_once('.')
             .ok_or_else(|| RegistryError::InvalidTypeId(id.clone()))?;
-        let valid_name = !name.is_empty()
-            && name
-                .bytes()
-                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
-        if !valid_name {
+        if !valid_id_part(name) {
             return Err(RegistryError::InvalidTypeId(id.clone()));
         }
         if prefix != schema.family.prefix() {
@@ -404,6 +417,58 @@ impl Registry {
                 family: schema.family,
             });
         }
+        self.insert(schema)
+    }
+
+    /// Registers or replaces an operator a project defines (custom code),
+    /// recording where it comes from (e.g. [`PYTHON_CUSTOM`]). Its type ID is
+    /// `py.<file>.<name>` whatever its family. Built-in operators cannot be
+    /// replaced this way.
+    pub fn replace_custom(
+        &mut self,
+        schema: OperatorSchema,
+        provenance: &str,
+    ) -> Result<(), RegistryError> {
+        let id = schema.type_id.clone();
+        let valid = id
+            .strip_prefix("py.")
+            .and_then(|rest| rest.split_once('.'))
+            .is_some_and(|(file, name)| valid_id_part(file) && valid_id_part(name));
+        if !valid {
+            return Err(RegistryError::InvalidCustomId(id));
+        }
+        if self.ops.contains_key(&id) && !self.provenance.contains_key(&id) {
+            return Err(RegistryError::Duplicate(id));
+        }
+        let old = self.ops.remove(&id);
+        match self.insert(schema) {
+            Ok(()) => {
+                self.provenance.insert(id, provenance.into());
+                Ok(())
+            }
+            Err(e) => {
+                if let Some(old) = old {
+                    self.ops.insert(id, old);
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// Removes an operator registered with [`Self::replace_custom`] (its file
+    /// was removed, or another project opened). Load the network afterwards.
+    pub fn remove_custom(&mut self, type_id: &str) -> Option<OperatorSchema> {
+        self.provenance.remove(type_id)?;
+        self.ops.remove(type_id)
+    }
+
+    /// Where a custom operator comes from; `None` for built-in operators.
+    pub fn provenance(&self, type_id: &str) -> Option<&str> {
+        self.provenance.get(type_id).map(String::as_str)
+    }
+
+    fn insert(&mut self, schema: OperatorSchema) -> Result<(), RegistryError> {
+        let id = &schema.type_id;
         for (i, param) in schema.params.iter().enumerate() {
             if schema.params[..i].iter().any(|p| p.name == param.name) {
                 return Err(RegistryError::DuplicateParam {
@@ -479,6 +544,9 @@ impl Registry {
             .map(|op| {
                 let mut v = serde_json::to_value(op).expect("operator schema serialises");
                 v["params_schema"] = op.params_json_schema();
+                if let Some(p) = self.provenance(&op.type_id) {
+                    v["provenance"] = json!(p);
+                }
                 v
             })
             .collect();
@@ -696,6 +764,47 @@ mod tests {
         assert!(i.validate(&json!(4)).is_ok());
         assert!(i.validate(&json!(0)).is_err());
         assert!(i.validate(&json!(1.5)).is_err());
+    }
+
+    #[test]
+    fn custom_operators_are_namespaced_and_carry_provenance() {
+        let mut reg = Registry::default();
+        reg.register(diffusion_fixture()).unwrap();
+        let mut op = diffusion_fixture();
+        op.type_id = "py.motion.counter".into();
+        op.family = OpFamily::Sig;
+        reg.replace_custom(op.clone(), PYTHON_CUSTOM).unwrap();
+        assert_eq!(reg.provenance("py.motion.counter"), Some(PYTHON_CUSTOM));
+        assert_eq!(reg.provenance("ai.diffusion"), None);
+        assert_eq!(reg.family(OpFamily::Sig).count(), 1);
+        // Replacing a custom operator is allowed (hot reload) ...
+        op.label = "Counter 2".into();
+        reg.replace_custom(op.clone(), PYTHON_CUSTOM).unwrap();
+        assert_eq!(reg.get("py.motion.counter").unwrap().label, "Counter 2");
+        let export = reg.export_json();
+        assert_eq!(export["operators"][1]["provenance"], PYTHON_CUSTOM);
+        // ... a built-in one is not, and IDs must be `py.<file>.<name>`.
+        let mut builtin = diffusion_fixture();
+        assert!(matches!(
+            reg.replace_custom(builtin.clone(), PYTHON_CUSTOM),
+            Err(RegistryError::InvalidCustomId(_))
+        ));
+        for bad in [
+            "py.counter",
+            "py.Motion.counter",
+            "py.motion.",
+            "sig.motion.x",
+        ] {
+            builtin.type_id = bad.into();
+            assert!(
+                reg.replace_custom(builtin.clone(), PYTHON_CUSTOM).is_err(),
+                "{bad}"
+            );
+        }
+        assert_eq!(reg.remove_custom("ai.diffusion"), None, "built-in stays");
+        assert!(reg.remove_custom("py.motion.counter").is_some());
+        assert_eq!(reg.len(), 1);
+        assert_eq!(reg.provenance("py.motion.counter"), None);
     }
 
     #[test]

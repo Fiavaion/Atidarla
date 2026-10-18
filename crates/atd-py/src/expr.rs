@@ -15,6 +15,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use atd_core::expr::{PyJob, PythonHost};
 use pyo3::prelude::*;
@@ -108,10 +109,16 @@ struct Shared {
     done: Condvar,
 }
 
+/// How long an offline render waits for one frame's Python expressions
+/// before they become node errors (the render report listed an unbounded
+/// wait as a hang risk).
+pub const OFFLINE_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// The Python worker for expressions.
 pub struct PyExprHost {
     shared: Arc<Shared>,
     thread: Option<JoinHandle<()>>,
+    offline_timeout: Duration,
 }
 
 impl std::fmt::Debug for PyExprHost {
@@ -132,7 +139,13 @@ impl PyExprHost {
         Ok(Self {
             shared,
             thread: Some(thread),
+            offline_timeout: OFFLINE_TIMEOUT,
         })
+    }
+
+    /// Changes how long [`PythonHost::submit_wait`] waits (tests).
+    pub fn set_offline_timeout(&mut self, timeout: Duration) {
+        self.offline_timeout = timeout;
     }
 }
 
@@ -140,9 +153,9 @@ impl Drop for PyExprHost {
     fn drop(&mut self) {
         self.shared.stop.store(true, Ordering::Relaxed);
         self.shared.wake.notify_all();
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
-        }
+        // Not joined: an expression stuck in Python must not stall whoever
+        // drops the host; the thread ends when its evaluation returns.
+        drop(self.thread.take());
     }
 }
 
@@ -175,18 +188,44 @@ impl PythonHost for PyExprHost {
             inbox.batch
         };
         self.shared.wake.notify_one();
+        let deadline = Instant::now() + self.offline_timeout;
         let mut finished = self
             .shared
             .finished
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         while *finished < batch && self.thread.as_ref().is_some_and(|t| !t.is_finished()) {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                break;
+            }
             finished = self
                 .shared
                 .done
-                .wait_timeout(finished, std::time::Duration::from_millis(100))
+                .wait_timeout(finished, left.min(Duration::from_millis(100)))
                 .map_or_else(|e| e.into_inner().0, |(g, _)| g);
         }
+        if *finished >= batch {
+            return;
+        }
+        drop(finished);
+        // Late: the frame's expressions fail on their nodes, so the render
+        // stops with a message instead of hanging.
+        let message = if self.thread.as_ref().is_some_and(|t| !t.is_finished()) {
+            format!(
+                "TimeoutError: the Python expression worker did not finish within {} s",
+                self.offline_timeout.as_secs_f64()
+            )
+        } else {
+            "the Python expression worker stopped".to_owned()
+        };
+        let mut results = self
+            .shared
+            .results
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        results.retain(|(k, _)| !jobs.iter().any(|j| j.key == *k));
+        results.extend(jobs.iter().map(|j| (j.key, Err(message.clone()))));
     }
 
     fn collect(&mut self, out: &mut Vec<(u64, Result<f64, String>)>) {

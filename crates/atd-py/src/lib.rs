@@ -5,13 +5,13 @@
 //! Python runs on a worker thread and never on the render thread
 //! (CLAUDE.md rule 1). Python 3.13 is the default, 3.11 the floor (PRD A5).
 //!
-//! **Status (M0):** the module skeleton and embedding entry point, so CI
-//! proves PyO3 builds and links against CPython on every platform. The
-//! object model lands in M1 (expressions) and M2 (textport, Python ops).
+//! **Status (M2 pre-work):** expressions (A22, [`expr`]) and Python custom
+//! operators ([`ops`], `docs/python-ops.md`). The textport lands in M2.
 
 use pyo3::prelude::*;
 
 pub mod expr;
+pub mod ops;
 
 /// The embedded `atidarla` module.
 #[pymodule]
