@@ -355,17 +355,28 @@ pub fn iso_surface(s: &Snap, inputs: &[Option<Mesh>], job: &Job) -> Result<Mesh,
                     continue;
                 }
                 for t in TETS {
-                    let (inn, outs): (Vec<usize>, Vec<usize>) =
-                        t.iter().map(|&c| n[c]).partition(|&x| inside(field[x]));
+                    // Corners inside and outside, without allocating.
+                    let (mut inn, mut outs) = ([0usize; 4], [0usize; 4]);
+                    let (mut ni, mut no) = (0, 0);
+                    for &c in &t {
+                        if inside(field[n[c]]) {
+                            inn[ni] = n[c];
+                            ni += 1;
+                        } else {
+                            outs[no] = n[c];
+                            no += 1;
+                        }
+                    }
+                    let (inn, outs) = (&inn[..ni], &outs[..no]);
                     ids.clear();
                     match (inn.len(), outs.len()) {
                         (1, 3) => {
-                            for &o in &outs {
+                            for &o in outs {
                                 ids.push(vertex(inn[0], o, &mut out, &mut normals));
                             }
                         }
                         (3, 1) => {
-                            for &i in &inn {
+                            for &i in inn {
                                 ids.push(vertex(i, outs[0], &mut out, &mut normals));
                             }
                         }
@@ -393,7 +404,7 @@ pub fn iso_surface(s: &Snap, inputs: &[Option<Mesh>], job: &Job) -> Result<Mesh,
                         }
                         v3::scale(c, 1.0 / list.len() as f64)
                     };
-                    let dir = v3::sub(centre(&outs), centre(&inn));
+                    let dir = v3::sub(centre(outs), centre(inn));
                     let nrm = crate::mesh::newell(ids.iter().map(|&i| out.p[i as usize]));
                     if v3::dot(nrm, dir) < 0.0 {
                         ids.reverse();

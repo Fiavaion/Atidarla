@@ -84,23 +84,18 @@ fn split(
     front: &mut Vec<Poly>,
     back: &mut Vec<Poly>,
 ) {
-    let mut kinds = 0u8;
-    let types: Vec<u8> = poly
-        .v
-        .iter()
-        .map(|v| {
-            let t = v3::dot(plane.n, v.p) - plane.w;
-            let k = if t < -eps {
-                BACK
-            } else if t > eps {
-                FRONT
-            } else {
-                COPLANAR
-            };
-            kinds |= k;
-            k
-        })
-        .collect();
+    // Classify without allocating (most polygons do not span the plane).
+    let kind = |v: &Vert| {
+        let t = v3::dot(plane.n, v.p) - plane.w;
+        if t < -eps {
+            BACK
+        } else if t > eps {
+            FRONT
+        } else {
+            COPLANAR
+        }
+    };
+    let kinds = poly.v.iter().fold(0u8, |k, v| k | kind(v));
     match kinds {
         COPLANAR => {
             if v3::dot(plane.n, poly.plane.n) > 0.0 {
@@ -116,7 +111,7 @@ fn split(
             let (mut f, mut b) = (Vec::with_capacity(n + 1), Vec::with_capacity(n + 1));
             for i in 0..n {
                 let j = (i + 1) % n;
-                let (ti, tj) = (types[i], types[j]);
+                let (ti, tj) = (kind(&poly.v[i]), kind(&poly.v[j]));
                 let (vi, vj) = (&poly.v[i], &poly.v[j]);
                 if ti != BACK {
                     f.push(vi.clone());
