@@ -868,7 +868,7 @@ mod tests {
         assert!(warnings.contains("oscout1 (sig.osc_out)"), "{warnings}");
         let first = render(&mut r, 0..3);
         // OSC In did not take the port.
-        std::net::UdpSocket::bind(("0.0.0.0", PORT)).expect("port still free");
+        std::net::UdpSocket::bind(("127.0.0.1", PORT)).expect("port still free");
         let channels = |name: &str| {
             let id = r
                 .engine

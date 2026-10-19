@@ -20,7 +20,8 @@ None.
 
 | Name | Label | Type | Default | Range / options | Description |
 |---|---|---|---|---|---|
-| `port` | Port | int | `9000` | 0 – 65535 | UDP port to listen on (all interfaces). |
+| `port` | Port | int | `9000` | 0 – 65535 | UDP port to listen on. |
+| `listen` | Listen | menu | `"all"` | `all`, `local` | `all`: every network interface, so other computers can send; `local`: this computer only, which nothing on the network can reach and Windows Firewall does not ask about. |
 | `filter` | Filter | string | `""` |  | Only channels starting with this text. |
 
 ## Platforms

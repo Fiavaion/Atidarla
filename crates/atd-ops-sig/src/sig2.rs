@@ -247,6 +247,7 @@ impl SigOp for Onset {
 struct OscIn {
     rx: Option<OscReceiver>,
     port: i64,
+    local: bool,
 }
 
 impl SigOp for OscIn {
@@ -259,13 +260,17 @@ impl SigOp for OscIn {
             return Ok(());
         }
         let port = p.i64("port").clamp(0, 65_535);
-        if self.rx.is_none() || port != self.port {
+        let local = p.str("listen") == "local";
+        if self.rx.is_none() || port != self.port || local != self.local {
             self.rx = None;
             self.port = port;
-            self.rx = Some(
+            self.local = local;
+            let bound = if local {
+                OscReceiver::bind_loopback(port as u16)
+            } else {
                 OscReceiver::bind(port as u16)
-                    .map_err(|e| format!("cannot listen on UDP port {port}: {e}"))?,
-            );
+            };
+            self.rx = Some(bound.map_err(|e| format!("cannot listen on UDP port {port}: {e}"))?);
         }
         let prefix = p.str("filter");
         let rx = self.rx.as_ref().expect("bound above");
@@ -453,7 +458,9 @@ pub static DEFS2: &[Def] = &[
                 &[],
                 vec![
                     ParamSchema::int("port", "Port", 9000, Some(0), Some(65_535))
-                        .help("UDP port to listen on (all interfaces)."),
+                        .help("UDP port to listen on."),
+                    ParamSchema::menu("listen", "Listen", &["all", "local"], "all")
+                        .help("`all`: every network interface, so other computers can send; `local`: this computer only, which nothing on the network can reach and Windows Firewall does not ask about."),
                     ParamSchema::string("filter", "Filter", "")
                         .help("Only channels starting with this text."),
                 ],
@@ -728,7 +735,10 @@ mod tests {
             .local_addr()
             .unwrap()
             .port();
-        let rx_id = h.node("osc_in", &[("port", json!(port))]);
+        let rx_id = h.node(
+            "osc_in",
+            &[("port", json!(port)), ("listen", json!("local"))],
+        );
         let mut rx = op("osc_in");
         let mut rx_out = Channels::default();
         h.cook(rx.as_mut(), rx_id, &mut rx_out, 0.01).unwrap();

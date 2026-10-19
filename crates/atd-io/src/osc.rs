@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 use std::io;
-use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
@@ -84,7 +84,17 @@ pub struct OscReceiver {
 impl OscReceiver {
     /// Listens on all interfaces at `port` (0 picks a free port; see [`Self::port`]).
     pub fn bind(port: u16) -> io::Result<Self> {
-        let socket = UdpSocket::bind(("0.0.0.0", port))?;
+        Self::bind_to(Ipv4Addr::UNSPECIFIED.into(), port)
+    }
+
+    /// Listens on this computer only: nothing on the network can reach the
+    /// port, and Windows Firewall does not ask about it.
+    pub fn bind_loopback(port: u16) -> io::Result<Self> {
+        Self::bind_to(Ipv4Addr::LOCALHOST.into(), port)
+    }
+
+    fn bind_to(addr: IpAddr, port: u16) -> io::Result<Self> {
+        let socket = UdpSocket::bind((addr, port))?;
         socket.set_read_timeout(Some(POLL))?;
         let port = socket.local_addr()?.port();
         let values = Arc::new(Mutex::new(Received::default()));
@@ -163,11 +173,7 @@ impl OscSender {
         let target = (host, port).to_socket_addrs()?.next().ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotFound, format!("cannot resolve {host}"))
         })?;
-        let socket = UdpSocket::bind(if target.is_ipv4() {
-            "0.0.0.0:0"
-        } else {
-            "[::]:0"
-        })?;
+        let socket = UdpSocket::bind(crate::source_addr(target))?;
         let shared = Arc::new((Mutex::new(Outbox::default()), Condvar::new()));
         let sh = Arc::clone(&shared);
         let prefix = prefix.trim_end_matches('/').to_owned();
@@ -277,7 +283,7 @@ mod tests {
 
     #[test]
     fn sender_to_receiver_over_loopback() {
-        let rx = OscReceiver::bind(0).unwrap();
+        let rx = OscReceiver::bind_loopback(0).unwrap();
         let tx = OscSender::new("127.0.0.1", rx.port(), "/atd/").unwrap();
         tx.publish([("level", 0.25), ("beat", 3.0)]);
         assert!(
@@ -296,7 +302,7 @@ mod tests {
 
     #[test]
     fn receiver_handles_ints_bools_and_bundles() {
-        let rx = OscReceiver::bind(0).unwrap();
+        let rx = OscReceiver::bind_loopback(0).unwrap();
         let sock = UdpSocket::bind("127.0.0.1:0").unwrap();
         let bundle = OscPacket::Bundle(rosc::OscBundle {
             timetag: rosc::OscTime {
@@ -431,7 +437,7 @@ mod tests {
     #[test]
     fn dropping_stops_threads_promptly() {
         let start = Instant::now();
-        drop(OscReceiver::bind(0).unwrap());
+        drop(OscReceiver::bind_loopback(0).unwrap());
         drop(OscSender::new("127.0.0.1", 9, "/x").unwrap());
         assert!(start.elapsed() < Duration::from_secs(2));
     }

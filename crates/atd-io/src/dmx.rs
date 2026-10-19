@@ -145,11 +145,7 @@ impl DmxSender {
         if let Some(p) = port {
             target.set_port(p);
         }
-        let socket = UdpSocket::bind(if target.is_ipv4() {
-            "0.0.0.0:0"
-        } else {
-            "[::]:0"
-        })?;
+        let socket = UdpSocket::bind(crate::source_addr(target))?;
         socket.set_broadcast(true)?;
         let shared = Arc::new((Mutex::new(Outbox::default()), Condvar::new()));
         let sh = Arc::clone(&shared);
