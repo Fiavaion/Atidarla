@@ -39,5 +39,6 @@ All platforms.
 - [Pack: Chromatic Aberration](../../../examples/pack-chromatic-aberration.atidarla/) — `wobble`
 - [Pack: Feedback Trails](../../../examples/pack-feedback-trails.atidarla/) — `swing`
 - [Pack: Neon Edges](../../../examples/pack-neon-edges.atidarla/) — `colours`
+- [Pack: Spark Fountain](../../../examples/pack-spark-fountain.atidarla/) — `breath`
 - [Simulations](../../../examples/simulations.atidarla/) — `orbit`
 - [Texture sharing](../../../examples/texture-sharing.atidarla/) — `drift`

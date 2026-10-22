@@ -37,6 +37,10 @@ All platforms.
 - [Compute Shaders](../../../examples/compute-shaders.atidarla/) — `dot`
 - [Live control](../../../examples/live-control.atidarla/) — `shape1`
 - [Neural Growth](../../../examples/neural-growth.atidarla/) — `dot`
+- [Pack: Colour Grade](../../../examples/pack-colour-grade.atidarla/) — `left_half`
 - [Pack: Feedback Trails](../../../examples/pack-feedback-trails.atidarla/) — `triangle`
+- [Pack: Film Grain](../../../examples/pack-film-grain.atidarla/) — `sun`
+- [Pack: LFO Bank](../../../examples/pack-lfo-bank.atidarla/) — `pentagon`
 - [Pack: Neon Edges](../../../examples/pack-neon-edges.atidarla/) — `pentagon`
+- [Pack: RGB Delay](../../../examples/pack-rgb-delay.atidarla/) — `bar`, `triangle`
 - [Simulations](../../../examples/simulations.atidarla/) — `dot`, `seed`

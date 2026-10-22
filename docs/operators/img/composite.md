@@ -36,7 +36,11 @@ All platforms.
 - [Keying](../../../examples/keying.atidarla/) — `over`
 - [Scatter to Iso Surface](../../../examples/mesh-scatter-iso.atidarla/) — `mix`, `out`
 - [Neural Growth](../../../examples/neural-growth.atidarla/) — `screen`
+- [Pack: Colour Grade](../../../examples/pack-colour-grade.atidarla/) — `masked`, `split`
+- [Pack: Film Grain](../../../examples/pack-film-grain.atidarla/) — `scene`
 - [Pack: Kaleidoscope Tunnel](../../../examples/pack-kaleido-tunnel.atidarla/) — `together`
+- [Pack: LFO Bank](../../../examples/pack-lfo-bank.atidarla/) — `stack`
+- [Pack: RGB Delay](../../../examples/pack-rgb-delay.atidarla/) — `shapes`
 - [PNT Constellation](../../../examples/pnt-constellation.atidarla/) — `sky`
 - [Points](../../../examples/points.atidarla/) — `mix`
 - [Signal scope](../../../examples/signal-scope.atidarla/) — `scopes`, `all`

@@ -38,6 +38,9 @@ All platforms.
 - [Image processing](../../../examples/image-processing.atidarla/) — `source`
 - [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `clouds`
 - [Pack: Audio Pulse](../../../examples/pack-audio-pulse.atidarla/) — `clouds`
+- [Pack: Colour Grade](../../../examples/pack-colour-grade.atidarla/) — `source`
+- [Pack: Duotone](../../../examples/pack-duotone.atidarla/) — `clouds`
+- [Pack: Spinning Solid](../../../examples/pack-spinning-solid.atidarla/) — `skin`
 - [Pack: Vignette](../../../examples/pack-vignette.atidarla/) — `clouds`
 - [Render Textures](../../../examples/render-textures.atidarla/) — `noise`
 - [Texture sharing](../../../examples/texture-sharing.atidarla/) — `pattern`

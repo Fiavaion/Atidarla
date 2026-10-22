@@ -49,9 +49,17 @@ carries its own copy of the Pack in `packs/<name>/` (a test keeps it equal to th
 | [pack-audio-pulse](pack-audio-pulse.atidarla/) | Audio Pulse: a drum loop brightening noise; an expression reads the Pack's `level` channel |
 | [pack-beat-flash](pack-beat-flash.atidarla/) | Beat Flash: flashes and kicks on every beat at 128 BPM |
 | [pack-chromatic-aberration](pack-chromatic-aberration.atidarla/) | Chromatic Aberration: an LFO bound to a promoted parameter |
+| [pack-colour-grade](pack-colour-grade.atidarla/) | Colour Grade: a warm and a cold grade of the same noise, side by side |
+| [pack-curl-swarm](pack-curl-swarm.atidarla/) | Curl Swarm: a magenta and teal swarm whose pull breathes through an expression |
+| [pack-duotone](pack-duotone.atidarla/) | Duotone: clouds and a title in magenta and cyan |
 | [pack-feedback-trails](pack-feedback-trails.atidarla/) | Feedback Trails: an orbiting triangle leaving a hue-shifting spiral |
+| [pack-film-grain](pack-film-grain.atidarla/) | Film Grain: a title card with grain, flicker and faded colour |
 | [pack-kaleido-tunnel](pack-kaleido-tunnel.atidarla/) | Kaleidoscope Tunnel: two instances of one Pack with different settings |
+| [pack-lfo-bank](pack-lfo-bank.atidarla/) | LFO Bank: four phase-spread channels turning, recolouring and fading a picture |
 | [pack-neon-edges](pack-neon-edges.atidarla/) | Neon Edges: glowing outlines around a shape and text |
+| [pack-rgb-delay](pack-rgb-delay.atidarla/) | RGB Delay: turning shapes fanning out into red, green and blue copies |
+| [pack-spark-fountain](pack-spark-fountain.atidarla/) | Spark Fountain: sparks bouncing off the floor; an LFO bound to the spread |
+| [pack-spinning-solid](pack-spinning-solid.atidarla/) | Spinning Solid: an icosahedron with noise wired into its texture input |
 | [pack-vignette](pack-vignette.atidarla/) | Vignette: edges tinted towards deep blue |
 
 Checks (CI runs both on Windows and macOS):

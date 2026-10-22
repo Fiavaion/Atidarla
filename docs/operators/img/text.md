@@ -39,4 +39,6 @@ All platforms.
 
 - [Beat switcher](../../../examples/beat-switcher.atidarla/) — `title`
 - [Pack: Chromatic Aberration](../../../examples/pack-chromatic-aberration.atidarla/) — `title`
+- [Pack: Duotone](../../../examples/pack-duotone.atidarla/) — `title`
+- [Pack: Film Grain](../../../examples/pack-film-grain.atidarla/) — `title`
 - [Pack: Neon Edges](../../../examples/pack-neon-edges.atidarla/) — `label`
