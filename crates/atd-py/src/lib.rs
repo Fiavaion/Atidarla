@@ -5,13 +5,15 @@
 //! Python runs on a worker thread and never on the render thread
 //! (CLAUDE.md rule 1). Python 3.13 is the default, 3.11 the floor (PRD A5).
 //!
-//! **Status (M2 pre-work):** expressions (A22, [`expr`]) and Python custom
-//! operators ([`ops`], `docs/python-ops.md`). The textport lands in M2.
+//! **Status (M2 pre-work):** expressions (A22, [`expr`]), Python custom
+//! operators ([`ops`], `docs/python-ops.md`) and the textport ([`textport`],
+//! `docs/textport.md`).
 
 use pyo3::prelude::*;
 
 pub mod expr;
 pub mod ops;
+pub mod textport;
 
 /// The embedded `atidarla` module.
 #[pymodule]
