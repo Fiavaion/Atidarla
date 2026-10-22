@@ -48,6 +48,9 @@ pub struct ProjectState {
     pub python: Option<atd_py::ops::PythonOps>,
     /// Ask whether to run them (they are not allowed yet).
     pub python_ask: bool,
+    /// Counts projects opened or started; the textport starts afresh when
+    /// it changes.
+    pub opened: u64,
 }
 
 impl ProjectState {
@@ -62,6 +65,7 @@ impl ProjectState {
             message: None,
             python: None,
             python_ask: false,
+            opened: 0,
         }
     }
 
@@ -101,7 +105,9 @@ impl ProjectState {
                     return None;
                 }
                 engine.extend(|r, _| atd_py::ops::clear_custom(r));
+                let opened = self.opened + 1;
                 *self = Self::untitled(engine.network());
+                self.opened = opened;
                 None
             }
             Action::Open => {
@@ -124,6 +130,7 @@ impl ProjectState {
                     self.python = (!python.is_empty()).then_some(python);
                     self.meta = meta;
                     self.dir = Some(dir);
+                    self.opened += 1;
                     view
                 }
                 Err(e) => {

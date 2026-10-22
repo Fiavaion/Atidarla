@@ -9,7 +9,7 @@ use atd_gpu::engine::{Engine, EngineConfig, OpLibrary};
 use egui::{Key, KeyboardShortcut, Modifiers, RichText, Ui};
 use serde_json::json;
 
-use crate::dock::{DockState, TabViewer};
+use crate::dock::{Area, DockState, TabViewer};
 use crate::patch::PatchEditor;
 use crate::project::{Action, ProjectState};
 use crate::smoke::{Smoke, SmokeArgs};
@@ -41,6 +41,8 @@ pub enum Tab {
     Viewer,
     Operators,
     Platform,
+    /// The Python console (docs/textport.md); closed by default.
+    Textport,
 }
 
 pub struct AtidarlaApp {
@@ -72,6 +74,9 @@ struct Panels {
     wheel: f32,
     canvas_rect: egui::Rect,
     history: crate::channels::ChannelHistory,
+    /// The time the engine cooked last, in seconds.
+    time: f64,
+    textport: crate::textport::TextportPanel,
 }
 
 impl AtidarlaApp {
@@ -175,6 +180,8 @@ impl AtidarlaApp {
                 wheel: 0.0,
                 canvas_rect: egui::Rect::NOTHING,
                 history: Default::default(),
+                time: 0.0,
+                textport: Default::default(),
             },
             smoke: smoke.map(Smoke::new),
             start: Instant::now(),
@@ -298,6 +305,14 @@ impl eframe::App for AtidarlaApp {
                             self.dock.focus(|t| *t == tab);
                         }
                     }
+                    ui.separator();
+                    if ui
+                        .button(tab_title(Tab::Textport))
+                        .on_hover_text("Python console over the open project")
+                        .clicked()
+                    {
+                        self.dock.open(Area::Bottom, Tab::Textport);
+                    }
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.weak(format!("Atidarla {}", atd_core::VERSION));
@@ -340,8 +355,12 @@ impl eframe::App for AtidarlaApp {
         });
         self.panels.image_rect = None;
         self.dock.show(ui, &mut self.panels);
+        if std::mem::take(&mut self.panels.textport.close) {
+            self.dock.close(|t| *t == Tab::Textport);
+        }
         self.feed_input(ui.ctx());
         self.cook_and_present(ui.ctx(), frame);
+        self.textport_frame(ui.ctx());
         if let Some(smoke) = &mut self.smoke {
             smoke.tick(ui.ctx());
         }
@@ -573,6 +592,26 @@ impl AtidarlaApp {
         }
     }
 
+    /// The textport's parameter changes, applied here as undoable edits,
+    /// and its output (docs/textport.md). Never waits for Python.
+    fn textport_frame(&mut self, ctx: &egui::Context) {
+        let allowed = self.project.python.as_ref().is_some_and(|p| p.is_allowed());
+        let p = &mut self.panels;
+        let Some(engine) = &mut p.engine else {
+            return;
+        };
+        let busy = p.textport.frame(
+            engine,
+            p.time,
+            self.project.opened,
+            self.project.dir.as_deref(),
+            allowed,
+        );
+        if busy {
+            ctx.request_repaint_after(std::time::Duration::from_millis(30));
+        }
+    }
+
     fn shortcuts(&mut self, ui: &Ui) {
         if self.panels.engine.is_none() || ui.ctx().egui_wants_keyboard_input() {
             return;
@@ -651,7 +690,8 @@ impl AtidarlaApp {
             p.viewed = None;
         }
         let viewed = p.viewed;
-        let cooked = match engine.cook_frame(viewed, self.start.elapsed().as_secs_f64()) {
+        p.time = self.start.elapsed().as_secs_f64();
+        let cooked = match engine.cook_frame(viewed, p.time) {
             Ok(n) => n,
             Err(e) => {
                 p.patch.status(e.to_string());
@@ -693,6 +733,7 @@ fn tab_title(tab: Tab) -> &'static str {
         Tab::Viewer => "Viewer",
         Tab::Operators => "Operators",
         Tab::Platform => "Platform",
+        Tab::Textport => "Textport",
     }
 }
 
@@ -739,6 +780,7 @@ impl TabViewer for Panels {
             Tab::Viewer => self.viewer_ui(ui),
             Tab::Operators => self.operators_ui(ui),
             Tab::Platform => self.platform_ui(ui),
+            Tab::Textport => self.textport.ui(ui, self.engine.as_ref()),
         }
     }
 }

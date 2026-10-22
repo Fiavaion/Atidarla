@@ -9,6 +9,7 @@ mod patch;
 mod project;
 mod smoke;
 mod suggest;
+mod textport;
 mod viewer;
 
 use std::process::ExitCode;

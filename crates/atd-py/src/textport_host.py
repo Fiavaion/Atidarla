@@ -197,7 +197,7 @@ class Console:
         try:
             exec(code, self.ns)
         except SystemExit:
-            self._write("err", "exit() does not close the textport; Clear starts a fresh console.\n")
+            self._write("err", "exit() does not close the textport; Reset starts a fresh namespace.\n")
             return False
         except BaseException as e:
             # Leave out this frame: show the user's code only.

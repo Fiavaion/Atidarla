@@ -84,6 +84,37 @@ impl<Tab> DockState<Tab> {
         false
     }
 
+    /// Shows `tab`: makes it active where it is, or adds it to `area` (a
+    /// panel that is closed by default).
+    pub fn open(&mut self, area: Area, tab: Tab)
+    where
+        Tab: PartialEq,
+    {
+        if self.focus(|t| *t == tab) {
+            return;
+        }
+        self.areas[area.index()].push(tab);
+        self.active[area.index()] = self.areas[area.index()].len() - 1;
+    }
+
+    /// Removes the first tab matching `pred`, keeping its area's active
+    /// index valid. Returns whether one was found.
+    pub fn close(&mut self, mut pred: impl FnMut(&Tab) -> bool) -> bool {
+        for area in Area::ALL {
+            let tabs = &mut self.areas[area.index()];
+            if let Some(i) = tabs.iter().position(&mut pred) {
+                tabs.remove(i);
+                let active = &mut self.active[area.index()];
+                if *active > i {
+                    *active -= 1;
+                }
+                *active = (*active).min(tabs.len().saturating_sub(1));
+                return true;
+            }
+        }
+        false
+    }
+
     /// Moves a tab, keeping each area's active index valid. The moved tab
     /// becomes active in its new area.
     fn apply(&mut self, mv: Move) {
@@ -263,6 +294,32 @@ mod tests {
         let mut s = state();
         s.apply(mv(Area::Bottom, 3, Area::Left, None));
         assert_eq!(s.tabs(Area::Left), ["a", "b"]);
+    }
+
+    #[test]
+    fn open_adds_a_closed_tab_or_focuses_an_open_one() {
+        let mut s = state();
+        s.open(Area::Bottom, "t");
+        assert_eq!(s.tabs(Area::Bottom), ["t"]);
+        assert_eq!(s.active(Area::Bottom), Some(&"t"));
+        // Already open: focused where it is, not added again.
+        s.open(Area::Bottom, "e");
+        assert_eq!(s.tabs(Area::Bottom), ["t"]);
+        assert_eq!(s.active(Area::Center), Some(&"e"));
+    }
+
+    #[test]
+    fn close_removes_a_tab_and_keeps_active_valid() {
+        let mut s = state();
+        s.focus(|t| *t == "f");
+        assert!(s.close(|t| *t == "d"));
+        assert_eq!(s.tabs(Area::Center), ["e", "f"]);
+        assert_eq!(s.active(Area::Center), Some(&"f"));
+        assert!(s.close(|t| *t == "f"));
+        assert_eq!(s.active(Area::Center), Some(&"e"));
+        assert!(s.close(|t| *t == "c"));
+        assert_eq!(s.active(Area::Right), None);
+        assert!(!s.close(|t| *t == "zzz"));
     }
 
     #[test]
