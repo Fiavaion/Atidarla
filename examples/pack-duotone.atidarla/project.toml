@@ -1,0 +1,9 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "Pack: Duotone"
+description = '''
+Drifting grey clouds and a title recoloured by the Duotone Pack in magenta and cyan.
+
+Try: Contrast 3 for a two-colour print; Balance 0.2 or -0.2; Mix 0.5 to tint the original.
+'''
+resolution = [1280, 720]
