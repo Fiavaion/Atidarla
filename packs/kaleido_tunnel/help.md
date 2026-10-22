@@ -35,4 +35,5 @@ Kaleidoscope → Mirror → Tile → HSV Adjust → Bloom. The same network as t
 
 ## Versions
 
+- 1.0.1 (2026-10-22): help text for Segments and Glow; no change to the picture.
 - 1.0.0 (2026-10-18): first version.

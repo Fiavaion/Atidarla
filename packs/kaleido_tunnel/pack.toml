@@ -1,7 +1,7 @@
 # Atidarla Pack. Its network is network.toml; its help page is help.md.
 format = 1
 name = "kaleido_tunnel"
-version = "1.0.0"
+version = "1.0.1"
 label = "Kaleidoscope Tunnel"
 summary = "A self-running generator: coloured noise drifting through a turning kaleidoscope, mirrored, tiled and glowing."
 locked = true
@@ -20,6 +20,7 @@ name = "segments"
 label = "Segments"
 default = 8
 max = 32.0
+help = "How many mirrored segments the kaleidoscope folds the noise into (1 to 32)."
 to = [{ node = 5, param = "segments" }]
 
 [[param]]
@@ -53,6 +54,7 @@ label = "Glow"
 default = 0.8
 min = 0.0
 max = 4.0
+help = "Strength of the glow around the bright parts: 0 is none."
 to = [{ node = 9, param = "intensity" }]
 
 [[output]]
