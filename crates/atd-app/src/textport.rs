@@ -170,7 +170,12 @@ impl TextportPanel {
         let key = (opened, allowed);
         if self.project != Some(key) {
             match self.project {
-                Some((o, _)) if o == opened => host.allow_ops(),
+                Some((o, _)) if o == opened => {
+                    host.allow_ops();
+                    self.log.note(
+                        "The project's Python operators are allowed: the console starts afresh.",
+                    );
+                }
                 previous => {
                     let ops = dir.map(|d| d.join(atd_py::ops::OPS_DIR));
                     host.set_project(ops, allowed);
