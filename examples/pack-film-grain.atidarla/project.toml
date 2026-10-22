@@ -1,0 +1,11 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "Pack: Film Grain"
+description = '''
+A simple title card (a sky gradient, a sun and a line of text) through the Film Grain Pack:
+grain on every frame, a flicker and faded colour.
+
+Try: Saturation 0 and Amount 0.25 for old black-and-white film; Grain Scale 120 for coarse
+grain; Monochrome off for colour grain.
+'''
+resolution = [1280, 720]
