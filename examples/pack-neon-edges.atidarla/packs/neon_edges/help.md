@@ -33,4 +33,6 @@ Edge (colour mode) → Blur → Level → HSV Adjust → Composite (screen) over
 
 ## Versions
 
+- 1.1.0 (2026-10-22): Mix 0 now leaves the image alone (in 1.0.0 it showed the outlines
+  alone); Mix 1 is unchanged.
 - 1.0.0 (2026-10-18): first version.

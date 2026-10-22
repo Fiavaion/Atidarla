@@ -1,7 +1,7 @@
 # Atidarla Pack. Its network is network.toml; its help page is help.md.
 format = 1
 name = "neon_edges"
-version = "1.0.0"
+version = "1.1.0"
 label = "Neon Edges"
 summary = "Traces the outlines of an image in glowing, saturated colour and lays them over it."
 locked = true
@@ -59,7 +59,7 @@ to = [{ node = 4, param = "opacity" }]
 
 [[input]]
 name = "in"
-to = [{ node = 0, input = "in" }, { node = 4, input = "a" }]
+to = [{ node = 0, input = "in" }, { node = 4, input = "b" }]
 
 [[output]]
 name = "out"

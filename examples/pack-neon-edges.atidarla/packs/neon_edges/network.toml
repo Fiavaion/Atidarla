@@ -39,5 +39,5 @@ id = 4
 name = "mix"
 type = "img.composite"
 pos = [880.0, 0.0]
-inputs.b = { node = 3, output = "out" }
+inputs.a = { node = 3, output = "out" }
 params.operation = "screen"
