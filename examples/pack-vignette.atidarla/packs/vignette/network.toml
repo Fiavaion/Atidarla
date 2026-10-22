@@ -24,6 +24,6 @@ id = 2
 name = "darken"
 type = "img.composite"
 pos = [440.0, 0.0]
-inputs.b = { node = 1, output = "out" }
+inputs.a = { node = 1, output = "out" }
 params.opacity = 0.8
 params.operation = "multiply"

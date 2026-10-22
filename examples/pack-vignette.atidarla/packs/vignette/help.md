@@ -24,4 +24,6 @@ Ramp (radial, white to Edge Colour) → Level (gamma) → Composite (multiply) w
 
 ## Versions
 
+- 1.1.0 (2026-10-22): Amount 0 now leaves the image alone (in 1.0.0 it showed the bare
+  falloff gradient); Amount 1 is unchanged.
 - 1.0.0 (2026-10-18): first version.

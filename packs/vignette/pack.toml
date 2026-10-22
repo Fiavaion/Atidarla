@@ -1,7 +1,7 @@
 # Atidarla Pack. Its network is network.toml; its help page is help.md.
 format = 1
 name = "vignette"
-version = "1.0.0"
+version = "1.1.0"
 label = "Vignette"
 summary = "Darkens (or tints) the edges of an image towards a colour, drawing the eye to the centre."
 locked = true
@@ -40,7 +40,7 @@ to = [{ node = 0, param = "colour_b" }]
 
 [[input]]
 name = "in"
-to = [{ node = 2, input = "a" }]
+to = [{ node = 2, input = "b" }]
 
 [[output]]
 name = "out"
