@@ -1,0 +1,11 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "Pack: LFO Bank"
+description = '''
+The LFO Bank Pack driving a picture: lfo1 turns a pentagon and lfo2 rotates the background's hue
+(both through expressions), and lfo3 is bound to the pentagon's opacity, all moving at one rate a
+quarter cycle apart.
+
+Try: Shape triangle or square; Spread 0 so everything moves together; Rate 2.
+'''
+resolution = [1280, 720]
