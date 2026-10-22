@@ -1,6 +1,6 @@
 # M2 foundations: review sheet for Mark
 
-Written 2026-10-19 after an overnight run. **Status: built ahead of the milestone order, at Mark's instruction; nothing here is ratified.** CI is green on all jobs at commit `68d9453` (Windows, macOS, Linux, FFmpeg, app smoke, AI Host, cargo deny). Locally: 512 tests pass, 0 fail, 10 ignored (benches and manual timing tests); fmt, clippy `-D warnings` and `docs --check` are clean; every example (34) and every shipped Pack (7) cooks.
+Written 2026-10-19 after an overnight run. **Status: built ahead of the milestone order, at Mark's instruction; nothing here is ratified.** CI is green on all jobs at commit `68d9453` (Windows, macOS, Linux, FFmpeg, app smoke, AI Host, cargo deny). Locally: 512 tests pass, 0 fail, 10 ignored (benches and manual timing tests); fmt, clippy `-D warnings` and `docs --check` are clean; every example (34) and every shipped Pack (7) cooks. Since then (2026-10-22): 8 more Packs, so 15 shipped Packs and 42 examples, all of which cook (`packs.md`).
 
 M1 is still open: it needs your hardware checks (see "Hand checks for Mark" in `../M1.md`).
 
@@ -14,7 +14,7 @@ Each area has its own notes file (what was built, evidence actually run, open qu
 | PNT operators | 34 (31 new): forces, emitter, scatter, copy, deformers, attributes, grid-hash normals/smooth/connect, solver, piece | `pnt-batch.md`, `../../design/solver-foreach.md` | 4 new examples, byte-identical renders; 30 chained Transforms fuse 1.67 ms to 0.15 ms at 2M points (measured, not built into the planner) |
 | MSH operators | 26 (PRD asks 18): primitives, OBJ/PLY/glTF in and out, subdivide, extrude, UV project, polyreduce, Boolean, sweep, skin, scatter, iso surface | `msh-batch.md`, `../../design/msh-operators.md` | AC5 chain (scatter, iso surface, noise deform, render) works with no conversion; 5000 fuzzed mesh files, no panic |
 | MAT + 3D render | `img.render` (perspective/ortho, depth, 4x MSAA, one light) and 6 materials; `msh.platonic` as a test source | `mat-render.md` | 1M triangles at 1080p about 0.4 ms (noisy); frames inspected by eye |
-| Packs (FR-P4) | Nested networks, promoted parameters, versions, lock/unlock, update in place, folder format, 7 shipped Packs | `packs.md`, `../../packs.md` | flattened before the cook; fuzzed; Pack examples render identically |
+| Packs (FR-P4) | Nested networks, promoted parameters, versions, lock/unlock, update in place, folder format, 15 shipped Packs (the ≥15 the Palette needs) | `packs.md`, `../../packs.md` | flattened before the cook; fuzzed; Pack examples render identically |
 | NCA + compute (FR-K5) | `img.nca` (hand-built weights only) and `img.compute` (`#bind`, tile, iterations) | `nca-compute.md`, `../../compute.md`, `../../nca.md` | NCA 1.2 ms/frame at 640x360, 8 steps; CPU-reference matches |
 | Python operators | `@atidarla.op` operators in a project's `ops/`, schema without running code, opt-in trust gate, hot reload that keeps state | `python-ops.md`, `../../python-ops.md` | nothing in `ops/` runs until allowed |
 | Kernel DSL (A12, **Proposed**) | Compiler crate only (parser, typed IR, WGSL, CPU reference), isolated and removable | `kernel-dsl.md`, `../../kernel-dsl.md` | GPU results match the CPU reference; not wired to the engine |

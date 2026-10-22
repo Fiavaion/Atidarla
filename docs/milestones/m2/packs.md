@@ -11,7 +11,7 @@ decision-log rows are at the end. Reference for the model and the format: [`docs
 | 1. Core model: nested network node, promoted parameters, sockets by wire type, validation (types, cycles through nesting, feedback inputs), cook semantics, undo/redo, help, semver, lock/unlock, update in place | **Done** | `crates/atd-core/src/pack.rs` |
 | 2. Format: Pack folders in projects, Pack libraries by name+version, canonical form, round-trip/diff/fuzz tests | **Done** | `crates/atd-format/src/pack.rs` |
 | 3. CLI: `check` (errors with file names), `fmt`, `render` and `check --gpu` cook projects with Packs | **Done** (also `check`/`fmt` of a Pack folder) | `crates/atd-cli/src/project.rs`, `render.rs` |
-| 4. ≥5 useful Packs with help, promoted parameters, a version and an example each | **Done: 7** | `packs/`, `examples/pack-*.atidarla` |
+| 4. ≥5 useful Packs with help, promoted parameters, a version and an example each | **Done: 15** (7 on 2026-10-18, 8 more on 2026-10-22: the ≥15 the Palette needs) | `packs/`, `examples/pack-*.atidarla` |
 | 5. App UI: Make Pack, Palette, enter/leave, version indicator | **Not done.** First step only: the app opens and plays projects with Packs (expanded, saving refused) | `crates/atd-app/src/project.rs` |
 
 ### Decisions taken inside the slice (smallest version; for review)
@@ -58,27 +58,31 @@ at `f30b841`), with four other agents building and running GPU tests on the same
 Not checked: macOS (rule 6). Nothing in this slice is platform-specific, and CI's `check packs/*/`
 step runs on both OSes, but it has not run yet.
 
-## Shipped Packs (7 of the ≥15 the Palette needs)
+## Shipped Packs (15, the ≥15 the Palette needs)
 
 | Pack | Built from | Promoted |
 |---|---|---|
 | Audio Pulse | Spectrum → Select → Lag → Math → bound Level + Bloom; SIG output `pulse` | gain, attack, release, quiet, loud |
 | Beat Flash | Beat → Select → Trigger → Math → bound Level; SIG output `flash` | bpm, decay, intensity, restart |
 | Chromatic Aberration | 3 Channel Mix, 2 Displace (one through an expression), 2 Composite | amount, direction |
+| Colour Grade | Level → HSV Adjust → Composite (multiply) with a Constant | exposure, contrast, gamma, saturation, hue, tint, tint_amount |
+| Curl Swarm | Particles (curl noise, attract) → Render Points → Bloom; a generator | rate, life, swirl, scale, flow, pull, birth_colour, death_colour, brightness, glow, reset |
+| Duotone | Level → Lookup through a Ramp → Composite over the input | shadows, highlights, contrast, balance, mix |
 | Feedback Trails | Feedback, Transform, Level, HSV Adjust, Composite loop | decay, zoom, spin, hue_shift, blend, reset |
+| Film Grain | Noise (SIG) bound to Level → HSV Adjust; Noise (IMG, z from `frame`) multiplied over | amount, grain_scale, monochrome, flicker, contrast, saturation |
 | Kaleidoscope Tunnel | the kaleidoscope-tunnel example as a generator | speed, segments, scale, repeat, hue_speed, glow |
+| LFO Bank | 4 LFOs (phases from one Spread, two through expressions) → Constant with 4 bound channels → Math; SIG only | rate, shape, spread, low, high |
 | Neon Edges | Edge → Blur → Level → HSV Adjust → Composite (screen) | strength, width, glow, hue, saturation, mix |
+| RGB Delay | 3 Channel Mix, 2 Cache (blue's delay through an expression), 3 Composite | delay, mix |
+| Spark Fountain | Particles ← Emitter (Scatter ring) → Gravity → Turbulence → Drag → Collide loop; Colour by Attribute → Render Points → Bloom | rate, force, spread, life, gravity, stir, bounce, palette, size, glow |
+| Spinning Solid | Constant → Speed bound to Render azimuth; Platonic Solid + PBR (`texture` input as its map) → Render → Bloom | shape, spin, tilt, distance, colour, face_colours, roughness, metallic, emission, glow, background |
 | Vignette | Ramp (radial) → Level → Composite (multiply) | amount, softness, size, colour |
 
-**Plan for the other 8 or more** (all from existing IMG/SIG operators unless noted): Film Grain
-(Noise with `seed` following `frame`, composite), Colour Grade (Level + HSV Adjust + Lookup with a
-Ramp), RGB Delay (three Caches, one per channel), Slit Scan (Time Machine fed a Ramp), Glitch
-Blocks (Tile + Threshold-masked Transform switching on a Trigger), Ripple Touch (Ripple driven by
-the mouse from Input Devices), Reaction Bloom (Reaction-Diffusion seeded by the input, Bloom),
-Fluid Smoke (Fluid 2D with an audio-driven emitter), Posterise/Threshold Duotone, LFO Bank (SIG
-only: four LFOs merged, useful as a modulation source). After A12 (Kernel DSL) and the geometry
-work: particle and mesh Packs (curl-noise emitter, instancer). A Palette of 15 is reachable with
-operators that exist today.
+**Further Packs** that existing operators allow (not built): Slit Scan (Time Machine fed a
+Ramp), Glitch Blocks (Tile + Threshold-masked Transform switching on a Trigger), Ripple Touch
+(Ripple driven by the mouse from Input Devices), Reaction Bloom (Reaction-Diffusion seeded by
+the input, Bloom), Fluid Smoke (Fluid 2D with an audio-driven emitter), Constellation (Points →
+Noise → Connect → Render Points). After A12 (Kernel DSL): kernel-based Packs.
 
 ## Not done, and the next step for the app
 
