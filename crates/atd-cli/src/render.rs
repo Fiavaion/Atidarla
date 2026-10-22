@@ -946,6 +946,77 @@ mod tests {
         assert_eq!(a.output_name(), "flash1/flash");
         render(&mut a, 0..1);
     }
+
+    /// A Pack's "how much of the effect" parameter at 0 gives back the
+    /// image wired into it (Composite's opacity mixes from input B, so the
+    /// image must be on B): Vignette's Amount, Neon Edges' and Duotone's
+    /// Mix, Colour Grade's Tint Amount, RGB Delay's Mix.
+    #[test]
+    fn pack_amount_zero_leaves_the_image_alone() {
+        let Some(mut r) = renderer() else { return };
+        for (name, instance, param, source) in [
+            ("pack-vignette", "vignette1", "amount", "clouds"),
+            ("pack-neon-edges", "neon1", "mix", "label"),
+            ("pack-duotone", "duotone1", "mix", "title"),
+            ("pack-colour-grade", "warm", "tint_amount", "source"),
+            ("pack-rgb-delay", "delay1", "mix", "shapes"),
+        ] {
+            let mut project = atd_format::load(&example(name)).unwrap();
+            let reg = project.packs.register(&crate::builtin_registry()).unwrap();
+            let net = project.networks.get_mut(atd_format::MAIN).unwrap();
+            let node = net.node_by_name(instance).unwrap().id;
+            net.apply(
+                &reg,
+                Edit::SetParam {
+                    node,
+                    param: param.into(),
+                    value: Some(Param::constant(json!(0.0))),
+                },
+            )
+            .unwrap();
+            // Colour Grade's other controls are not neutral in the example.
+            if name == "pack-colour-grade" {
+                for p in ["contrast", "gamma", "saturation"] {
+                    net.apply(
+                        &reg,
+                        Edit::SetParam {
+                            node,
+                            param: p.into(),
+                            value: None,
+                        },
+                    )
+                    .unwrap();
+                }
+            }
+            let dir = TempProject(
+                std::env::temp_dir()
+                    .join(format!("atd-render-{name}-zero-{}.atidarla", std::process::id())),
+            );
+            atd_format::save(&dir.0, &project).unwrap();
+            let mut frames = |node: &str| {
+                let o = RenderOptions {
+                    node: Some(node.into()),
+                    ..opts(0..3)
+                };
+                r.load(&dir.0, &o).unwrap();
+                render(&mut r, 0..3)
+            };
+            let (out, src) = (frames(instance), frames(source));
+            for ((i, a), (_, b)) in out.iter().zip(&src) {
+                let worst = a
+                    .rgba
+                    .iter()
+                    .zip(&b.rgba)
+                    .map(|(x, y)| x.abs_diff(*y))
+                    .max()
+                    .unwrap();
+                assert!(
+                    worst <= 2,
+                    "{name}: `{param}` 0 changes frame {i} (largest difference {worst}/255)"
+                );
+            }
+        }
+    }
     /// Share Out publishes nothing in an offline render (Spout, Windows).
     #[cfg(windows)]
     #[test]
