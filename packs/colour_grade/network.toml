@@ -1,0 +1,33 @@
+# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 4
+
+[[node]]
+id = 0
+name = "exposure"
+type = "img.level"
+pos = [0.0, 0.0]
+
+[[node]]
+id = 1
+name = "colour"
+type = "img.hsv_adjust"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+
+[[node]]
+id = 2
+name = "tint_colour"
+type = "img.constant"
+pos = [220.0, 160.0]
+params.colour = [1.0, 0.8, 0.6, 1.0]
+
+[[node]]
+id = 3
+name = "tint"
+type = "img.composite"
+pos = [440.0, 80.0]
+inputs.a = { node = 2, output = "out" }
+inputs.b = { node = 1, output = "out" }
+params.opacity = 0.0
+params.operation = "multiply"

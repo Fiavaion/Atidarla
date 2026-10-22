@@ -1,0 +1,10 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "Pack: Colour Grade"
+description = '''
+Two Colour Grade instances on the same drifting colour noise, side by side: a warm, punchy grade
+on the left, a cold, washed-out one on the right.
+
+Try: Hue 90 on either; Saturation 0 for black and white; Tint Amount 1 with a strong colour.
+'''
+resolution = [1280, 720]
