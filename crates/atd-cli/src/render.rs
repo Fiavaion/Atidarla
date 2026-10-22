@@ -988,10 +988,10 @@ mod tests {
                     .unwrap();
                 }
             }
-            let dir = TempProject(
-                std::env::temp_dir()
-                    .join(format!("atd-render-{name}-zero-{}.atidarla", std::process::id())),
-            );
+            let dir = TempProject(std::env::temp_dir().join(format!(
+                "atd-render-{name}-zero-{}.atidarla",
+                std::process::id()
+            )));
             atd_format::save(&dir.0, &project).unwrap();
             let mut frames = |node: &str| {
                 let o = RenderOptions {
