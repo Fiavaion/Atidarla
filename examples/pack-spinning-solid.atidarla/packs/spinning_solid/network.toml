@@ -1,0 +1,54 @@
+# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 6
+
+[[node]]
+id = 0
+name = "spin_rate"
+type = "sig.constant"
+pos = [0.0, 0.0]
+params.name1 = "degrees"
+params.value1 = 30.0
+
+[[node]]
+id = 1
+name = "spin"
+type = "sig.speed"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+
+[[node]]
+id = 2
+name = "solid"
+type = "msh.platonic"
+pos = [0.0, 160.0]
+params.shape = "dodecahedron"
+
+[[node]]
+id = 3
+name = "surface"
+type = "mat.pbr"
+pos = [0.0, 300.0]
+params.albedo = [0.9, 0.55, 0.25, 1.0]
+params.roughness = 0.35
+
+[[node]]
+id = 4
+name = "render"
+type = "img.render"
+pos = [440.0, 160.0]
+inputs.geo = { node = 2, output = "out" }
+inputs.mat = { node = 3, output = "out" }
+params.azimuth = { value = 0.0, bind = { node = 1, channel = "degrees" } }
+params.background = [0.02, 0.02, 0.04, 1.0]
+params.distance = 3.6
+params.elevation = 25.0
+
+[[node]]
+id = 5
+name = "glow"
+type = "img.bloom"
+pos = [660.0, 160.0]
+inputs.in = { node = 4, output = "out" }
+params.intensity = 0.5
+params.threshold = 0.8
