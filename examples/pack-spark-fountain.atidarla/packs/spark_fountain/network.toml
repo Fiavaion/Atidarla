@@ -1,0 +1,104 @@
+# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 10
+
+[[node]]
+id = 0
+name = "system"
+type = "pnt.particles"
+pos = [0.0, 0.0]
+inputs.prev = { node = 6, output = "out" }
+params.attract = 0.0
+params.capacity = 200000
+params.curl_amplitude = 0.0
+params.drag = 0.0
+params.rate = 0.0
+
+[[node]]
+id = 1
+name = "nozzle_ring"
+type = "pnt.scatter"
+pos = [0.0, 160.0]
+params.centre = [0.0, -0.85, 0.0]
+params.count = 2000
+params.radius = 0.12
+params.rotate = [-90.0, 0.0, 0.0]
+params.shape = "circle"
+
+[[node]]
+id = 2
+name = "nozzle"
+type = "pnt.emitter"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+inputs.source = { node = 1, output = "out" }
+params.life = 3.0
+params.normal_speed = 2.6
+params.rate = 30000.0
+params.spread = 0.3
+
+[[node]]
+id = 3
+name = "gravity"
+type = "pnt.gravity"
+pos = [440.0, 0.0]
+inputs.in = { node = 2, output = "out" }
+params.acceleration = [0.0, -2.4, 0.0]
+
+[[node]]
+id = 4
+name = "stir"
+type = "pnt.turbulence"
+pos = [660.0, 0.0]
+inputs.in = { node = 3, output = "out" }
+params.amplitude = 0.6
+params.evolution = { value = 0.0, expr = "time * 0.3" }
+params.frequency = 1.5
+
+[[node]]
+id = 5
+name = "air"
+type = "pnt.drag"
+pos = [880.0, 0.0]
+inputs.in = { node = 4, output = "out" }
+params.amount = 0.15
+
+[[node]]
+id = 6
+name = "floor"
+type = "pnt.collide"
+pos = [1100.0, 0.0]
+inputs.in = { node = 5, output = "out" }
+params.bounce = 0.4
+params.centre = [0.0, -0.95, 0.0]
+params.friction = 0.2
+
+[[node]]
+id = 7
+name = "by_speed"
+type = "pnt.colour"
+pos = [1320.0, 0.0]
+inputs.in = { node = 6, output = "out" }
+params.attribute = "v"
+params.high = 3.0
+params.low = 0.0
+params.measure = "length"
+params.ramp = "heat"
+
+[[node]]
+id = 8
+name = "draw"
+type = "img.render_points"
+pos = [1540.0, 0.0]
+inputs.geo = { node = 7, output = "out" }
+params.height = 2.2
+params.intensity = 0.3
+
+[[node]]
+id = 9
+name = "glow"
+type = "img.bloom"
+pos = [1760.0, 0.0]
+inputs.in = { node = 8, output = "out" }
+params.intensity = 0.6
+params.threshold = 0.5
