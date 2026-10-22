@@ -569,7 +569,8 @@ mod tests {
     #[test]
     fn shipped_packs_are_complete_and_their_examples_current() {
         let lib = atd_format::Library::open(&repo("packs")).unwrap();
-        assert!(lib.latest().count() >= 5, "{} Packs", lib.latest().count());
+        // PRD §9 M2: a Palette of at least 15 Packs.
+        assert!(lib.latest().count() >= 15, "{} Packs", lib.latest().count());
         let opts = CheckOptions {
             gpu: false,
             frames: 0,

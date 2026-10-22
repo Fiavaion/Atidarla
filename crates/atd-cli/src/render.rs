@@ -902,6 +902,14 @@ mod tests {
             "pack-beat-flash",
             "pack-audio-pulse",
             "pack-feedback-trails",
+            "pack-spark-fountain",
+            "pack-curl-swarm",
+            "pack-spinning-solid",
+            "pack-lfo-bank",
+            "pack-film-grain",
+            "pack-duotone",
+            "pack-colour-grade",
+            "pack-rgb-delay",
         ] {
             let dir = example(name);
             a.load(&dir, &opts(0..12)).unwrap();
