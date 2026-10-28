@@ -1,6 +1,6 @@
-# Tír (working title) — RESEARCH.md
+# Tír — RESEARCH.md
 
-**Version:** 0.1 · **Date:** 28 October 2026 · **Author:** Claude, for the project owner
+**Version:** 0.2 · **Date:** 28 October 2026 · **Author:** Claude, for the project owner
 **Status:** First research pass; feeds `tir/PRD.md` v0.1
 **Subject:** an open-source, node-based heightmap and terrain generator in the class of QuadSpinner Gaea. It is built on Apple Silicon first, keeps a path to NVIDIA/CUDA, has a live bridge to the Unreal Engine 5.8 Landscape, and is designed to be a student's first node-based tool.
 **Relationship to Atidarla:** this is a separate product. It may share the node canvas, the project-format conventions and the licence policy with Atidarla (see PRD decision T12), but none of Atidarla's decisions are changed by this document.
@@ -49,7 +49,8 @@
    - Hesiod, the closest open-source analogue, is **GPL-3.0**: study it, never copy it.
    - Terrain Diffusion weights are MIT, and the TerrainSR super-resolution model is Apache-2.0.
    - DEM sources (Copernicus GLO-30, SRTM, USGS 3DEP) are free but carry attribution duties.
-   - A UE editor plugin released as source under MIT/Apache follows the Cesium for Unreal precedent. Prebuilt editor binaries are a grey area under the UE EULA "Engine Tools" clause: ship source on GitHub, and binaries via Fab, and get a legal check (§4.5).
+   - A UE editor plugin released as source under MIT/Apache follows the Cesium for Unreal precedent. Prebuilt editor binaries are a grey area under the UE EULA "Engine Tools" clause: ship source on GitHub and binaries via Fab, and get a legal check (§4.5; `docs/spikes/ue-plugin-licensing.md`).
+   - Gaea2Unreal's licence is a **modified MIT** that forbids competing standalone products and requires a Gaea credit, so its code must not be reused.
 
 ---
 
@@ -270,6 +271,10 @@ The DEM node must write attribution into the project and into export sidecars au
   - Original plugin source (no copied engine code) under MIT OR Apache-2.0 on GitHub matches established practice.
   - Prebuilt editor binaries should go through Fab.
   - Get a legal check before release.
+- **Follow-up desk check (28 Oct 2026):** see `docs/spikes/ue-plugin-licensing.md`.
+  - Cesium for Unreal and Houdini Engine for Unreal both ship compiled binaries on GitHub Releases, but they may hold separate agreements with Epic.
+  - Gaea2Unreal's LICENSE is a modified MIT with no selling, mandatory attribution and no competing standalone products, so its code is off-limits to Tír.
+  - Outcome: PRD T16.
 
 ---
 
@@ -460,14 +465,14 @@ The DEM node must write attribution into the project and into export sidecars au
 
 ## 9. Open questions to verify (M0)
 
-1. Our own erosion numbers on M1 base, M3/M4 base, M5 Pro/Max and RTX 4070 (fBm, pipe step, flow accumulation).
+1. Our own erosion numbers on MacBook Pro M1 Pro (guard rail), M3/M4 Pro, M5 Pro/Max (reference) and RTX 4070 (fBm, pipe step, flow accumulation).
 2. Slang 2026.2x MSL output quality and debuggability (Xcode GPU capture) versus CubeCL and hand MSL.
 3. LandscapeTexturePatch source modes in UE 5.8: which mode accepts a programmatic 2017² / 4033² float update fastest without the reported bug?
 4. Whether Gaea2Unreal has a 5.7/5.8 branch (affects interop expectations).
 5. Terrain Diffusion code licence (weights are MIT) and Copernicus attribution inheritance.
 6. Whether Atidarla's node canvas will be ready in time to reuse, or whether to start on `egui-snarl`.
-7. Lab reality: share of students on base M-series MacBook Airs (8–16 GB) versus Pro/Max; whether UE runs on the same Mac or on Windows lab PCs.
-8. Legal check of the plugin distribution model (source on GitHub + binaries on Fab).
+7. ~~Target hardware~~: resolved. The MacBook Pro is the target device (PRD T4). Still open: whether UE runs on the same MacBook Pro or on Windows lab PCs.
+8. Legal check of the plugin distribution model. A desk check is done (PRD T16); a legal sign-off and a question to Epic are still needed before the first binary release.
 
 ---
 

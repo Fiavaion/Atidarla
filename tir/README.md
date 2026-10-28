@@ -1,4 +1,4 @@
-# Tír (working title)
+# Tír
 
 Planning documents for an open-source, node-based heightmap/terrain generator: Apple Silicon first, CUDA-ready, with a live Unreal Engine 5.8 Landscape bridge and a learn-first UX for students new to node-based workflows.
 

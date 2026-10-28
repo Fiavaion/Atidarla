@@ -1,10 +1,10 @@
-# Tír (working title) — PRD.md
+# Tír — PRD.md
 
-**Version:** 0.1 (draft, all decisions Proposed) · **Date:** 28 October 2026 · **Owner:** project owner (TBC)
+**Version:** 0.2 (draft; T1 and T4 ratified, the rest Proposed) · **Date:** 28 October 2026 · **Owner:** project owner (TBC)
 **Companion:** `tir/RESEARCH.md` v0.1. Section references are written `R§n`.
 **Execution:** milestone by milestone (M0–M6). Each milestone ends only when every one of its acceptance criteria passes and is recorded in `tir/docs/milestones/Mn.md`.
 
-> **Tír** (Irish for *land*) is a free, open-source node-based terrain generator for Apple Silicon, with a path to NVIDIA/CUDA. It sends heightmaps live into Unreal Engine 5.8 Landscapes. Every preset in it is a graph that students can take apart to learn how node-based workflows work.
+> **Tír** (Irish for *land*, as in *Tír na nÓg*) is a free, open-source node-based terrain generator for the MacBook Pro, with a path to NVIDIA/CUDA. It sends heightmaps live into Unreal Engine 5.8 Landscapes. Every preset in it is a graph that students can take apart to learn how node-based workflows work.
 
 ---
 
@@ -16,10 +16,10 @@ Status key:
 
 | # | Decision | Status | Evidence |
 |---|---|---|---|
-| T1 | Working title **Tír**; project file `*.tir/` (folder of text files); CLI `tir`. The title is a placeholder until a trademark check is done | Proposed | — |
+| T1 | Name **Tír** (as in *Tír na nÓg*); project file `*.tir/` (folder of text files); CLI `tir`. A trademark search is still advised before public launch | Ratified 2026-10-28 | Owner |
 | T2 | Separate product from Atidarla, same owner. Shares its licence policy, its text-project conventions and (if ready) its egui node canvas | Proposed | R§5.3 |
 | T3 | Licence **MIT OR Apache-2.0**. No GPL or non-commercial code in the app or the UE plugin. Hesiod (GPL-3.0) is reference only | Proposed | R§1.6, R§4.5 |
-| T4 | **Platform priority:** macOS on Apple Silicon (M1+, macOS 15+) is the primary target. Windows + NVIDIA (CUDA) is the second target from M5. Linux + NVIDIA comes cheaply with the CUDA backend but is best-effort | Proposed | Brief; R§5 |
+| T4 | **Platform priority:** the **MacBook Pro** on Apple Silicon (macOS 15+) is the target device. The reference machine is a 14" MacBook Pro with M5 Pro; the guard rail is a MacBook Pro with M1 Pro and 16 GB. Other Apple Silicon Macs (Air, mini, Studio) work but never gate a milestone. Windows + NVIDIA (CUDA) is the second target from M5. Linux + NVIDIA comes cheaply with the CUDA backend but is best-effort | Ratified 2026-10-28 (device); guard-rail chip Proposed | Owner; R§5 |
 | T5 | **Host language Rust** (edition 2024). Thin compute HAL with backends: `metal` (`objc2-metal`, Metal 4), `cuda` (`cudarc`), `wgpu` (Vulkan/DX12 fallback). Viewport in `wgpu`. UI in `egui` 0.37 | Proposed | R§5.2–5.3 |
 | T6 | **Kernel language Slang**, single source. Compiled offline and at build time to MSL (Metal) and CUDA/PTX, with WGSL as fallback. Escape hatch: hand MSL/CUDA kernels, each with a Slang reference and a parity test. **Gated by the M0 bake-off**; if Slang→MSL fails the gate, use CubeCL | Proposed | R§5.2 |
 | T7 | **Canonical data:** f32 heightfields in metres, stored in GPU buffers (not textures), shared-storage zero-copy on Apple Silicon. Textures are viewport views only. No FP64 anywhere on the hot path | Proposed | R§5.1 |
@@ -31,6 +31,7 @@ Status key:
 | T13 | ML nodes are **optional**, run in-process through Core ML / Metal tensors (Mac) or ONNX Runtime + CUDA (NVIDIA). Weights are never bundled; a model manager records licence and source | Proposed | R§3.3 |
 | T14 | No telemetry, no accounts, works fully offline. Crash reports are opt-in and written locally first | Proposed | Atidarla A17 precedent |
 | T15 | No competitor trademarks or competitor node names in product UI. Comparisons appear only in docs | Proposed | Atidarla rule 10 precedent |
+| T16 | **UE plugin distribution:** source on GitHub under MIT OR Apache-2.0, with no copied Engine Code, icons or content, and editor-only modules. Compiled binaries go out through a **free Fab listing**. GitHub Releases carry binaries only after written confirmation from Epic or a legal sign-off. The Python fallback ships anywhere | Proposed (desk check done 2026-10-28; legal sign-off required before the first binary release) | `docs/spikes/ue-plugin-licensing.md` |
 
 ---
 
@@ -55,7 +56,7 @@ Status key:
 
 1. **First-year student (primary).**
    - Has used Photoshop-style layers and maybe UE sculpt tools. Has never used a node graph.
-   - Typically on a MacBook Air or Pro (M1–M5, 8–32 GB).
+   - Works on a MacBook Pro (M1 Pro or newer, 16 GB or more), the target device (T4).
    - Needs to be productive in 10 minutes and understand the graph in an hour.
 2. **Educator.**
    - Needs assignments that can be distributed as files, reproducible results, offline operation, no licence administration, and Git-friendly projects.
@@ -76,7 +77,7 @@ Status key:
 
 **Goals (v1.0)**
 - G1. A node-based heightfield generator with about 60 nodes covering primitives, noise, combining, shaping, erosion and hydrology, masks, colour/splat, import and export (§6).
-- G2. Interactive preview on base Apple Silicon. High-resolution builds up to 16k² in one piece on 64 GB+ Macs, with tiled builds beyond that.
+- G2. Interactive preview on every supported MacBook Pro, down to the M1 Pro guard rail. High-resolution builds up to 16k² in one piece on 64 GB+ Macs, with tiled builds beyond that.
 - G3. A live, non-destructive, bidirectional UE 5.8 Landscape bridge working in metres (§7.5).
 - G4. A Learn layer that turns presets into lessons (§7.4).
 - G5. The same graph builds on NVIDIA/CUDA within numeric tolerance (§8).
@@ -300,17 +301,17 @@ Measured by `tir bench` on the reference machines. A regression of more than 10 
 
 | ID | Target | Reference hardware |
 |---|---|---|
-| PT-1 | Slider drag on a non-simulation node → updated viewport ≤ 100 ms at 1024² preview, on a 20-node graph | M1 8 GB (guard rail) |
-| PT-2 | Hydraulic Erode (pipe) at 1024², "medium age" preset ≤ 1.5 s; Thermal ≤ 0.3 s | M1 8 GB |
-| PT-3 | Same as PT-2 ≤ 0.4 s / ≤ 0.1 s | M5 Pro |
-| PT-4 | Reference graph "Alpine Range" (≈25 nodes, 2 erosions) full build at 8129² ≤ 60 s | M5 Pro 48 GB |
-| PT-5 | Same graph at 16,384² single piece ≤ 4 min, peak memory ≤ 40 GB | M5 Max 128 GB |
-| PT-6 | UE bridge push of 2017² height → visible in UE viewport ≤ 1 s (same machine) | M5 Pro + UE 5.8 |
-| PT-7 | UE bridge push of 8129² → visible ≤ 5 s on the same machine; ≤ 8 s Mac → Windows over 1 GbE | M5 Pro + UE 5.8 |
-| PT-8 | Cold start to interactive ≤ 3 s; open a Recipe ≤ 1 s | M1 8 GB |
-| PT-9 | Node canvas 60 fps with 500 nodes and thumbnails | M1 8 GB |
+| PT-1 | Slider drag on a non-simulation node → updated viewport ≤ 100 ms at 1024² preview, on a 20-node graph | MacBook Pro M1 Pro 16 GB (guard rail) |
+| PT-2 | Hydraulic Erode (pipe) at 1024², "medium age" preset ≤ 1.5 s; Thermal ≤ 0.3 s | MacBook Pro M1 Pro 16 GB |
+| PT-3 | Same as PT-2 ≤ 0.4 s / ≤ 0.1 s | MacBook Pro M5 Pro |
+| PT-4 | Reference graph "Alpine Range" (≈25 nodes, 2 erosions) full build at 8129² ≤ 60 s | MacBook Pro M5 Pro 48 GB |
+| PT-5 | Same graph at 16,384² single piece ≤ 4 min, peak memory ≤ 40 GB | MacBook Pro M5 Max 128 GB |
+| PT-6 | UE bridge push of 2017² height → visible in UE viewport ≤ 1 s (same machine) | MacBook Pro M5 Pro + UE 5.8 |
+| PT-7 | UE bridge push of 8129² → visible ≤ 5 s on the same machine; ≤ 8 s Mac → Windows over 1 GbE | MacBook Pro M5 Pro + UE 5.8 |
+| PT-8 | Cold start to interactive ≤ 3 s; open a Recipe ≤ 1 s | MacBook Pro M1 Pro 16 GB |
+| PT-9 | Node canvas 60 fps with 500 nodes and thumbnails | MacBook Pro M1 Pro 16 GB |
 | PT-10 | CUDA backend: PT-2 workload ≤ 0.3 s; PT-4 ≤ 40 s | RTX 4070 12 GB |
-| PT-11 | Cross-backend parity: Metal vs CUDA heights max abs diff ≤ 0.05 m over a 3 km range at 2048², hillshade SSIM ≥ 0.99 | M5 Pro vs RTX 4070 |
+| PT-11 | Cross-backend parity: Metal vs CUDA heights max abs diff ≤ 0.05 m over a 3 km range at 2048², hillshade SSIM ≥ 0.99 | MacBook Pro M5 Pro vs RTX 4070 |
 
 PT-2 to PT-5 and PT-10 are **initial estimates**; M0 spike (a) confirms or revises them.
 
@@ -331,7 +332,7 @@ PT-2 to PT-5 and PT-10 are **initial estimates**; M0 spike (a) confirms or revis
 - **Workspace and CI.** Cargo workspace with stub crates (§5.2). CI on macOS Apple Silicon (required). Non-blocking Linux/Windows build of `tir-hal` with the CUDA feature. `fmt`, `clippy -D warnings`, `cargo deny`.
 - **Shell.** egui + wgpu window with an empty node canvas and a 3D viewport.
 - **Spikes**, each a short report in `tir/docs/spikes/` with numbers:
-  - (a) **Kernel bake-off:** Slang→MSL vs CubeCL→MSL vs hand MSL on three kernels (fBm + warp, one pipe-erosion step, MFD flow accumulation) at 1024², 4096² and 8192². Measures time, correctness against the CPU reference, Xcode GPU-capture debuggability and compile-time ergonomics. Run on M1 base and M5 Pro.
+  - (a) **Kernel bake-off:** Slang→MSL vs CubeCL→MSL vs hand MSL on three kernels (fBm + warp, one pipe-erosion step, MFD flow accumulation) at 1024², 4096² and 8192². Measures time, correctness against the CPU reference, Xcode GPU-capture debuggability and compile-time ergonomics. Run on a MacBook Pro M1 Pro (guard rail) and a MacBook Pro M5 Pro (reference).
   - (b) The same Slang kernels → CUDA on an RTX 4070, with a parity check.
   - (c) **UE 5.8 bridge:** an external process pushes a 2017² float heightfield into a `LandscapeTexturePatch` on a named edit layer. Test every patch source mode (including the reported render-target bug) and the `FLandscapeEditDataInterface` fallback. Measure latency.
   - (d) Zero-copy: wgpu viewport rendering directly from a Metal 4 compute buffer (`wgpu-hal` interop) with no copy.
@@ -423,8 +424,13 @@ PT-2 to PT-5 and PT-10 are **initial estimates**; M0 spike (a) confirms or revis
 ## 10. Licensing and compliance
 
 - **App:** MIT OR Apache-2.0 (T3); contributions under DCO.
-- **UE plugin:** original source under the same licence on GitHub, with no copied engine code (snippets of 30 lines or fewer only). Prebuilt binaries are distributed via Fab. Get a legal review before the first public release (R§4.5).
-- **Clean-room rule:** no code from GPL tools (Hesiod) or closed tools. Algorithms are implemented from papers. MIT-licensed references (Lague erosion, psrdnoise) may be adapted with attribution.
+- **UE plugin (T16):**
+  - Original source goes on GitHub under the same licence. It contains no copied Engine Code (snippets of 30 lines or fewer only), no engine icons or content, and editor-only modules, so it carries no royalty exposure.
+  - Compiled binaries ship through a free Fab listing.
+  - GitHub binary releases wait for written confirmation from Epic or a legal sign-off.
+  - Gaea2Unreal's code must not be reused: its modified-MIT licence forbids competing products.
+  - See `tir/docs/spikes/ue-plugin-licensing.md`.
+- **Clean-room rule:** no code from GPL tools (Hesiod), from Gaea2Unreal (its licence forbids competing products) or from closed tools. Algorithms are implemented from papers. MIT-licensed references (Lague erosion, psrdnoise) may be adapted with attribution.
 - **No model weights** in the repo or installers. DEM attributions are carried automatically into exports.
 - **No competitor trademarks or node names** in the UI.
 
@@ -441,9 +447,10 @@ PT-2 to PT-5 and PT-10 are **initial estimates**; M0 spike (a) confirms or revis
 
 ## 12. Open questions (resolve in M0)
 
-1. Ratify T1–T15, especially T6 (Slang vs CubeCL) and T9 (patch vs edit-data) after the spikes.
-2. Confirm the minimum Mac for students (M1 8 GB guard rail?) and whether labs run UE on Macs or on Windows PCs.
+1. Ratify the remaining Proposed decisions, especially T6 (Slang vs CubeCL) and T9 (patch vs edit-data) after the spikes.
+2. Confirm the guard-rail chip (M1 Pro 16 GB is proposed) and whether labs run UE on the same MacBook Pro or on Windows PCs.
 3. Should Tír live in its own repository? Recommended: yes, created once T1 and T2 are ratified. These docs sit in the Atidarla repo for now.
 4. Reuse Atidarla's node canvas, or start on `egui-snarl` and converge later?
-5. Name/trademark check for "Tír".
-6. Which institution pilots the M4 usability study, and its ethics/consent process.
+5. Trademark search for "Tír" before public launch (the name is ratified).
+6. Legal sign-off and a written question to Epic licensing before the first public binary release of TirBridge (T16).
+7. Which institution pilots the M4 usability study, and its ethics/consent process.
