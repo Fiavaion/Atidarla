@@ -281,6 +281,20 @@ fn check_one(dir: &Path, gpu: Option<&atd_gpu::GpuContext>, opts: CheckOptions) 
     if comfy_count > 0 {
         summary += &format!(", {comfy_count} ComfyUI workflow operators");
     }
+    // Batch wedges: canonical, and their items can be made.
+    let wedges = atd_format::batch::list_wedges(dir)?;
+    for name in &wedges {
+        let wedge = atd_format::batch::load_wedge(dir, name)?;
+        canonical(
+            dir,
+            &format!("{}/{name}.toml", atd_format::batch::DIR),
+            &atd_format::batch::wedge_to_string(&wedge)?,
+        )?;
+        crate::batch::plan(dir, name)?;
+    }
+    if !wedges.is_empty() {
+        summary += &format!(", {} wedges", wedges.len());
+    }
     let Some(gpu) = gpu else {
         return Ok(summary);
     };
@@ -494,6 +508,10 @@ pub fn fmt(dirs: &[impl AsRef<Path>]) -> Result<()> {
         } else {
             let project = atd_format::load(dir)?;
             atd_format::save(dir, &project)?;
+            for name in atd_format::batch::list_wedges(dir)? {
+                let wedge = atd_format::batch::load_wedge(dir, &name)?;
+                atd_format::batch::save_wedge(dir, &name, &wedge)?;
+            }
         }
         println!("formatted {}", dir.display());
     }

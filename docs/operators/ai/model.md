@@ -40,3 +40,4 @@ All platforms.
 ## Examples
 
 - [Live AI](../../../examples/ai-live.atidarla/) — `invert1`
+- [Batch Wedge](../../../examples/batch-wedge.atidarla/) — `invert1`

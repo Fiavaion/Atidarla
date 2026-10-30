@@ -35,6 +35,7 @@ All platforms.
 
 - [Live AI](../../../examples/ai-live.atidarla/) — `noise1`
 - [Audio-reactive feedback](../../../examples/audio-reactive-feedback.atidarla/) — `noise1`
+- [Batch Wedge](../../../examples/batch-wedge.atidarla/) — `noise1`
 - [Compute Shaders](../../../examples/compute-shaders.atidarla/) — `texture`
 - [Image processing](../../../examples/image-processing.atidarla/) — `source`
 - [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `clouds`

@@ -26,6 +26,7 @@ All platforms.
 
 ## Examples
 
+- [Batch Wedge](../../../examples/batch-wedge.atidarla/) — `colour1`
 - [Beat switcher](../../../examples/beat-switcher.atidarla/) — `solid`
 - [Stage deck](../../../examples/stage-deck.atidarla/) — `strobe`
 - [Timeline show](../../../examples/timeline-show.atidarla/) — `tint`
