@@ -489,6 +489,12 @@ dependencies = [
 [[package]]
 name = "atd-stage"
 version = "0.0.1"
+dependencies = [
+ "atd-core",
+ "atd-ops-img",
+ "atd-ops-sig",
+ "serde_json",
+]
 
 [[package]]
 name = "atd-timeline"
