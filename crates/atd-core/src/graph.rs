@@ -902,6 +902,105 @@ impl Network {
     }
 }
 
+/// After a hot reload changed the schemas of the operators a project
+/// defines with `provenance` (Python operators, kernel files): edits that
+/// drop what their nodes hold but the new schema no longer has (parameter
+/// values that no longer exist or fit, wires into removed inputs), as one
+/// undo step, and a note for each. Values whose name and kind still fit are
+/// kept. Empty when every node still fits.
+pub fn stale_edits(
+    net: &Network,
+    registry: &Registry,
+    provenance: &str,
+) -> (Vec<Edit>, Vec<String>) {
+    let mut edits = Vec::new();
+    let mut notes = Vec::new();
+    for node in net.nodes() {
+        if registry.provenance(&node.type_id) != Some(provenance) {
+            continue;
+        }
+        let Some(schema) = registry.get(&node.type_id) else {
+            continue;
+        };
+        let mut clean = node.clone();
+        let mut dropped = false;
+        clean.params.retain(|name, p| {
+            let keep = schema
+                .params
+                .iter()
+                .find(|s| &s.name == name)
+                .is_some_and(|s| s.validate(&p.value).is_ok());
+            if !keep {
+                notes.push(format!("{}: dropped the value of `{name}`", node.name));
+                dropped = true;
+            }
+            keep
+        });
+        let socket_ok = |wire: &Wire| {
+            let input_ok = |w: &Wire| {
+                schema
+                    .inputs
+                    .iter()
+                    .any(|s| s.name == w.to.socket && Some(s.wire) == output_wire(net, registry, w))
+            };
+            let output_ok = |w: &Wire| schema.outputs.iter().any(|s| s.name == w.from.socket);
+            (wire.to.node != node.id || input_ok(wire))
+                && (wire.from.node != node.id || output_ok(wire))
+        };
+        let wires: Vec<Wire> = net
+            .wires()
+            .filter(|w| w.from.node == node.id || w.to.node == node.id)
+            .collect();
+        let kept: Vec<Wire> = wires.iter().filter(|w| socket_ok(w)).cloned().collect();
+        if kept.len() != wires.len() {
+            for w in wires.iter().filter(|w| !socket_ok(w)) {
+                notes.push(format!(
+                    "{}: removed the wire into `{}`",
+                    node.name, w.to.socket
+                ));
+            }
+            dropped = true;
+        }
+        if !dropped {
+            continue;
+        }
+        // Remove and restore the node as it fits now; parameters of other
+        // nodes bound to its channels are bound again.
+        let rebind: Vec<Edit> = net
+            .nodes()
+            .flat_map(|other| {
+                other
+                    .params
+                    .iter()
+                    .filter(|(_, p)| p.bind.as_ref().is_some_and(|b| b.node == node.id))
+                    .map(move |(name, p)| Edit::SetParam {
+                        node: other.id,
+                        param: name.clone(),
+                        value: Some(Param::clone(p)),
+                    })
+            })
+            .collect();
+        edits.push(Edit::RemoveNode { id: node.id });
+        edits.push(Edit::RestoreNode {
+            node: clean,
+            wires: kept,
+        });
+        edits.extend(rebind);
+    }
+    (edits, notes)
+}
+
+/// The wire type of the output a wire comes from.
+fn output_wire(net: &Network, registry: &Registry, w: &Wire) -> Option<WireType> {
+    let src = net.node(w.from.node)?;
+    registry
+        .get(&src.type_id)?
+        .outputs
+        .iter()
+        .find(|s| s.name == w.from.socket)
+        .map(|s| s.wire)
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;

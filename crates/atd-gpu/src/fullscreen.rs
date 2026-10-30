@@ -5,6 +5,10 @@
 //! of `fn shade(uv: vec2f) -> vec4f`; inputs are bound as `in0`, `in1`, …
 //! with sampler `samp`, and parameters as a uniform struct `params` of
 //! `vec4f`s (`params.v[0]`, `params.v[1]`, …).
+//!
+//! [`FullscreenPass::try_from_module`] instead takes a complete module (a
+//! Pixels kernel's, say) that binds its uniforms and sampler in group 0 and
+//! its input textures in group 1 ([`ModuleLayout`]).
 
 /// Maximum uniform `vec4f` slots per pass.
 pub const MAX_PARAM_VEC4: usize = 8;
@@ -45,8 +49,10 @@ struct Caches {
     targets: Vec<(wgpu::Texture, wgpu::TextureView, u64)>,
     /// Draws so far.
     draws: u64,
-    /// Uniform bytes last written, to skip identical writes.
-    uniforms: Option<[u8; MAX_PARAM_VEC4 * 16]>,
+    /// Uniform bytes last written (the buffer's size), to skip identical
+    /// writes.
+    uniforms: Vec<u8>,
+    written: bool,
 }
 
 /// A compiled full-screen pass with `inputs` sampled textures.
@@ -56,11 +62,124 @@ struct Caches {
 #[derive(Debug)]
 pub struct FullscreenPass {
     pipeline: wgpu::RenderPipeline,
+    /// Layout of the group holding the inputs.
     layout: wgpu::BindGroupLayout,
+    /// A module's own layout: group 0 (uniforms and sampler), bound once;
+    /// the inputs are in group 1. `None`: everything is in group 0.
+    fixed: Option<wgpu::BindGroup>,
+    /// Binding of input 0 in its group.
+    input_base: u32,
     uniforms: wgpu::Buffer,
     sampler: wgpu::Sampler,
     inputs: usize,
     caches: std::sync::Mutex<Caches>,
+}
+
+/// How a complete module ([`FullscreenPass::try_from_module`]) binds its
+/// resources: group 0 holds the uniform buffer (binding 0) and a filtering
+/// sampler (binding 1, linear, clamp to edge), group 1 the input textures
+/// (`texture_2d<f32>`, input `i` at binding `i`). The layout may declare
+/// inputs the module does not use.
+#[derive(Debug, Clone, Copy)]
+pub struct ModuleLayout<'a> {
+    pub vertex_entry: &'a str,
+    pub fragment_entry: &'a str,
+    /// Bytes of the uniform buffer.
+    pub uniform_size: u64,
+    /// Input textures in group 1.
+    pub inputs: usize,
+}
+
+fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Uniform,
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    }
+}
+
+fn sampler_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+        count: None,
+    }
+}
+
+fn texture_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Texture {
+            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            view_dimension: wgpu::TextureViewDimension::D2,
+            multisampled: false,
+        },
+        count: None,
+    }
+}
+
+fn create_sampler(device: &wgpu::Device, label: &str) -> wgpu::Sampler {
+    device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some(label),
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        ..Default::default()
+    })
+}
+
+/// The render pipeline of a full-screen pass writing `format`.
+fn create_pipeline(
+    device: &wgpu::Device,
+    label: &str,
+    format: wgpu::TextureFormat,
+    module: &wgpu::ShaderModule,
+    entries: (&str, &str),
+    groups: &[Option<&wgpu::BindGroupLayout>],
+) -> wgpu::RenderPipeline {
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some(label),
+        bind_group_layouts: groups,
+        immediate_size: 0,
+    });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(label),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module,
+            entry_point: Some(entries.0),
+            compilation_options: Default::default(),
+            buffers: &[],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module,
+            entry_point: Some(entries.1),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+fn caches(uniform_size: u64) -> std::sync::Mutex<Caches> {
+    std::sync::Mutex::new(Caches {
+        uniforms: vec![0; uniform_size as usize],
+        ..Default::default()
+    })
 }
 
 /// The complete WGSL module, and the 1-based line where `shade_body` starts.
@@ -145,89 +264,110 @@ impl FullscreenPass {
             source: wgpu::ShaderSource::Wgsl(source.into()),
         });
 
-        let mut entries = vec![
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                count: None,
-            },
-        ];
+        let mut entries = vec![uniform_entry(0), sampler_entry(1)];
         for i in 0..inputs {
-            entries.push(wgpu::BindGroupLayoutEntry {
-                binding: (i + 2) as u32,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
-                },
-                count: None,
-            });
+            entries.push(texture_entry((i + 2) as u32));
         }
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some(label),
             entries: &entries,
         });
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some(label),
-            bind_group_layouts: &[Some(&layout)],
-            immediate_size: 0,
-        });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some(label),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &module,
-                entry_point: Some("vs"),
-                compilation_options: Default::default(),
-                buffers: &[],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: Some("fs"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
+        let pipeline = create_pipeline(
+            device,
+            label,
+            format,
+            &module,
+            ("vs", "fs"),
+            &[Some(&layout)],
+        );
+        let size = (MAX_PARAM_VEC4 * 16) as u64;
         let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(label),
-            size: (MAX_PARAM_VEC4 * 16) as u64,
+            size,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
-        });
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some(label),
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            ..Default::default()
         });
         Self {
             pipeline,
             layout,
+            fixed: None,
+            input_base: 2,
+            uniforms,
+            sampler: create_sampler(device, label),
+            inputs,
+            caches: caches(size),
+        }
+    }
+
+    /// Builds a pass from a complete WGSL module laid out as [`ModuleLayout`]
+    /// says, in an error scope (validate the module first: the driver's
+    /// errors carry no line). Blocks while the driver compiles; call it off
+    /// the render thread.
+    pub fn try_from_module(
+        device: &wgpu::Device,
+        label: &str,
+        format: wgpu::TextureFormat,
+        wgsl: &str,
+        layout: &ModuleLayout<'_>,
+    ) -> Result<Self, String> {
+        let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some(label),
+            source: wgpu::ShaderSource::Wgsl(wgsl.into()),
+        });
+        let g0 = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some(label),
+            entries: &[uniform_entry(0), sampler_entry(1)],
+        });
+        let entries: Vec<_> = (0..layout.inputs as u32).map(texture_entry).collect();
+        let g1 = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some(label),
+            entries: &entries,
+        });
+        let pipeline = create_pipeline(
+            device,
+            label,
+            format,
+            &module,
+            (layout.vertex_entry, layout.fragment_entry),
+            &[Some(&g0), Some(&g1)],
+        );
+        // A buffer binding is never empty.
+        let size = layout.uniform_size.max(16);
+        let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(label),
+            size,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let sampler = create_sampler(device, label);
+        let fixed = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(label),
+            layout: &g0,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniforms.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+        let pass = Self {
+            pipeline,
+            layout: g1,
+            fixed: Some(fixed),
+            input_base: 0,
             uniforms,
             sampler,
-            inputs,
-            caches: Default::default(),
+            inputs: layout.inputs,
+            caches: caches(size),
+        };
+        match pollster::block_on(scope.pop()) {
+            Some(e) => Err(e.to_string()),
+            None => Ok(pass),
         }
     }
 
@@ -242,7 +382,6 @@ impl FullscreenPass {
         params: &[[f32; 4]],
         output: &wgpu::Texture,
     ) {
-        assert_eq!(inputs.len(), self.inputs, "input count");
         assert!(params.len() <= MAX_PARAM_VEC4, "too many parameter slots");
         let mut data = [[0f32; 4]; MAX_PARAM_VEC4];
         data[..params.len()].copy_from_slice(params);
@@ -250,11 +389,29 @@ impl FullscreenPass {
         for (chunk, f) in bytes.chunks_exact_mut(4).zip(data.iter().flatten()) {
             chunk.copy_from_slice(&f.to_le_bytes());
         }
+        self.draw_bytes(device, queue, encoder, inputs, &bytes, output);
+    }
+
+    /// Like [`Self::draw`], with the uniform buffer's bytes as they are (at
+    /// most its size; the rest keeps its last contents). Allocates nothing
+    /// once the inputs and outputs have been seen.
+    pub fn draw_bytes(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        inputs: &[&wgpu::Texture],
+        uniforms: &[u8],
+        output: &wgpu::Texture,
+    ) {
+        assert_eq!(inputs.len(), self.inputs, "input count");
         let mut caches = self.caches.lock().unwrap_or_else(|e| e.into_inner());
         let caches = &mut *caches;
-        if caches.uniforms != Some(bytes) {
-            queue.write_buffer(&self.uniforms, 0, &bytes);
-            caches.uniforms = Some(bytes);
+        assert!(uniforms.len() <= caches.uniforms.len(), "uniform bytes");
+        if !caches.written || caches.uniforms[..uniforms.len()] != *uniforms {
+            queue.write_buffer(&self.uniforms, 0, uniforms);
+            caches.uniforms[..uniforms.len()].copy_from_slice(uniforms);
+            caches.written = true;
         }
         caches.draws += 1;
         let now = caches.draws;
@@ -277,19 +434,20 @@ impl FullscreenPass {
                     .iter()
                     .map(|t| t.create_view(&Default::default()))
                     .collect();
-                let mut entries = vec![
-                    wgpu::BindGroupEntry {
+                let mut entries = Vec::with_capacity(views.len() + 2);
+                if self.fixed.is_none() {
+                    entries.push(wgpu::BindGroupEntry {
                         binding: 0,
                         resource: self.uniforms.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
+                    });
+                    entries.push(wgpu::BindGroupEntry {
                         binding: 1,
                         resource: wgpu::BindingResource::Sampler(&self.sampler),
-                    },
-                ];
+                    });
+                }
                 for (i, view) in views.iter().enumerate() {
                     entries.push(wgpu::BindGroupEntry {
-                        binding: (i + 2) as u32,
+                        binding: self.input_base + i as u32,
                         resource: wgpu::BindingResource::TextureView(view),
                     });
                 }
@@ -339,7 +497,13 @@ impl FullscreenPass {
             multiview_mask: None,
         });
         pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, bind, &[]);
+        match &self.fixed {
+            Some(fixed) => {
+                pass.set_bind_group(0, fixed, &[]);
+                pass.set_bind_group(1, bind, &[]);
+            }
+            None => pass.set_bind_group(0, bind, &[]),
+        }
         pass.draw(0..3, 0..1);
     }
 }
