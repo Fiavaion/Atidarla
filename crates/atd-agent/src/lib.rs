@@ -5,6 +5,7 @@
 //! (CLAUDE.md rule 9).
 
 pub mod assistant;
+pub mod cues;
 pub mod lock;
 pub mod mcp;
 pub mod tools;

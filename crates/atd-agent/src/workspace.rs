@@ -6,12 +6,29 @@ use std::path::Path;
 
 use atd_core::Registry;
 use atd_core::graph::{Edit, Network, NodeId};
+use atd_core::pack::{PackDef, PackSet};
 
 pub trait Workspace {
     fn network(&self) -> &Network;
     fn registry(&self) -> &Registry;
     /// Applies `edits` as one undo step.
     fn apply(&mut self, label: &str, edits: Vec<Edit>) -> Result<(), String>;
+    /// Adds the new Packs `packs` to the project (registering their
+    /// operator types) and applies `edits`, together as one undo step; if
+    /// anything fails, nothing changes.
+    fn apply_with_packs(
+        &mut self,
+        _label: &str,
+        _packs: Vec<PackDef>,
+        _edits: Vec<Edit>,
+    ) -> Result<(), String> {
+        Err("this workspace cannot add Packs".into())
+    }
+    /// The beat position of the show's clock (`atd_stage::beat_position`
+    /// beats), when the workspace has one. In-show cues are timed by it.
+    fn beat(&self) -> Option<f64> {
+        None
+    }
     /// Cooks the network once and returns every node error.
     fn cook_errors(&mut self) -> Vec<(NodeId, String)>;
     /// The node's status line, if it has one.
@@ -46,7 +63,9 @@ pub trait Workspace {
 #[derive(Debug, Clone)]
 pub struct NetworkWorkspace {
     pub network: Network,
+    /// Operators, including one per Pack in `packs`.
     pub registry: Registry,
+    pub packs: PackSet,
     /// Applied batches, by label (one entry per undo step).
     pub history: Vec<String>,
 }
@@ -56,6 +75,7 @@ impl NetworkWorkspace {
         Self {
             network: Network::default(),
             registry,
+            packs: PackSet::default(),
             history: Vec::new(),
         }
     }
@@ -76,6 +96,33 @@ impl Workspace for NetworkWorkspace {
             next.apply(&self.registry, e).map_err(|e| e.to_string())?;
         }
         self.network = next;
+        self.history.push(label.to_owned());
+        Ok(())
+    }
+
+    fn apply_with_packs(
+        &mut self,
+        label: &str,
+        packs: Vec<PackDef>,
+        edits: Vec<Edit>,
+    ) -> Result<(), String> {
+        let mut registry = self.registry.clone();
+        let mut set = self.packs.clone();
+        for def in packs {
+            if set.get(&def.name).is_some() {
+                return Err(format!("a Pack named `{}` exists", def.name));
+            }
+            let schema = def.schema(&registry).map_err(|e| e.to_string())?;
+            registry.register(schema).map_err(|e| e.to_string())?;
+            set.insert(def);
+        }
+        let mut next = self.network.clone();
+        for e in edits {
+            next.apply(&registry, e).map_err(|e| e.to_string())?;
+        }
+        self.network = next;
+        self.registry = registry;
+        self.packs = set;
         self.history.push(label.to_owned());
         Ok(())
     }

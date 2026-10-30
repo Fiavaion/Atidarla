@@ -21,7 +21,7 @@ use atd_agent::mcp::{self, Request};
 use atd_agent::{Agent, ShowLock, Workspace};
 use atd_core::Registry;
 use atd_core::graph::{Edit, Network, NodeId};
-use atd_core::pack::Flat;
+use atd_core::pack::{Flat, PackDef};
 use atd_gpu::engine::{Engine, EngineConfig};
 use serde_json::json;
 
@@ -166,6 +166,49 @@ impl Workspace for ServeWorkspace {
         Ok(())
     }
 
+    fn apply_with_packs(
+        &mut self,
+        label: &str,
+        packs: Vec<PackDef>,
+        edits: Vec<Edit>,
+    ) -> Result<(), String> {
+        // Check everything on copies first, so a failure changes nothing.
+        let mut registry = self.engine.registry().clone();
+        let mut schemas = Vec::new();
+        for def in &packs {
+            if self.loaded.project.packs.get(&def.name).is_some() {
+                return Err(format!("a Pack named `{}` exists", def.name));
+            }
+            let schema = def.schema(&registry).map_err(|e| e.to_string())?;
+            registry
+                .register(schema.clone())
+                .map_err(|e| e.to_string())?;
+            schemas.push(schema);
+        }
+        let mut net = self.network().clone();
+        for e in edits {
+            net.apply(&registry, e).map_err(|e| e.to_string())?;
+        }
+        self.engine.extend(|r, _| {
+            for s in schemas {
+                r.register(s).expect("checked on a copy");
+            }
+        });
+        let names: Vec<String> = packs.iter().map(|d| d.name.clone()).collect();
+        for def in packs {
+            self.loaded.project.packs.insert(def);
+        }
+        if let Err(e) = self.reload(net) {
+            // The extra operator types stay registered, unused.
+            for n in &names {
+                self.loaded.project.packs.remove(n);
+            }
+            return Err(e);
+        }
+        self.history.push(label.to_owned());
+        Ok(())
+    }
+
     fn cook_errors(&mut self) -> Vec<(NodeId, String)> {
         // A few frames, so work started on worker threads can report.
         for _ in 0..4 {
@@ -179,6 +222,23 @@ impl Workspace for ServeWorkspace {
             }
         }
         out
+    }
+
+    /// The first deck's clock (`beat` + `beat_phase`), or the show's
+    /// seconds at 120 BPM without one, as the Stage panel reads it.
+    fn beat(&self) -> Option<f64> {
+        let stage = atd_stage::Stage::read(self.network(), self.engine.registry());
+        let ch = stage
+            .decks
+            .first()
+            .and_then(|d| d.clock())
+            .and_then(|c| self.flat.view(c))
+            .and_then(|v| self.engine.channels(v));
+        Some(atd_stage::beat_position(
+            ch.and_then(|c| c.value("beat")),
+            ch.and_then(|c| c.value("beat_phase")),
+            self.time,
+        ))
     }
 
     fn status(&self, node: NodeId) -> Option<String> {
@@ -362,6 +422,17 @@ pub fn run(args: ServeArgs) -> Result<()> {
             }
         }
         ws.frame();
+        // In-show cues (FR-G5) fire as the clock passes their beat.
+        if !agent.cues.is_empty()
+            && let Some(beat) = ws.beat()
+        {
+            for (m, r) in agent.fire_cues(&mut ws, beat) {
+                match r {
+                    Ok(v) => log::info!("cue: {}.{} = {v}", m.node, m.param),
+                    Err(e) => log::warn!("cue: {}.{} refused: {e}", m.node, m.param),
+                }
+            }
+        }
         if args
             .seconds
             .is_some_and(|s| start.elapsed().as_secs_f64() >= s)
