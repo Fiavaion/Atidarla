@@ -11,6 +11,7 @@
 //! (CLAUDE.md rule 1).
 
 pub mod client;
+pub mod egress;
 pub mod protocol;
 pub mod ring;
 

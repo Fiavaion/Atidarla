@@ -7,6 +7,7 @@
 //! values, the attribute buffer pool and compute building blocks ([`geo`]);
 //! M3: output mapping for `cmp.window` ([`output`]).
 
+pub mod capture;
 pub mod engine;
 pub mod expr;
 pub mod fullscreen;

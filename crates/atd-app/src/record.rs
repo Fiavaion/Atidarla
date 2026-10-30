@@ -12,146 +12,15 @@
 //! does closing the file.
 
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc::{Receiver, channel};
 
+use atd_gpu::capture::Capture;
 use atd_io::video::record::{Codec, ENABLED, Recorder, Settings, Stats};
 
 /// Frames per second of a live recording.
 const FPS: u32 = 60;
 /// Readback buffers in flight.
 const SLOTS: usize = 3;
-
-const IDLE: u8 = 0;
-const MAPPING: u8 = 1;
-const READY: u8 = 2;
-
-struct Slot {
-    buffer: wgpu::Buffer,
-    state: Arc<AtomicU8>,
-    /// Order of capture, to hand frames over in order.
-    seq: u64,
-}
-
-/// Copies a texture of a fixed size to the CPU asynchronously, a few
-/// frames in flight.
-pub struct Capture {
-    slots: Vec<Slot>,
-    width: u32,
-    height: u32,
-    padded: u32,
-    seq: u64,
-    /// Frames not captured because every buffer was in flight.
-    pub skipped: u64,
-}
-
-impl std::fmt::Debug for Capture {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Capture")
-            .field("size", &(self.width, self.height))
-            .field("skipped", &self.skipped)
-            .finish_non_exhaustive()
-    }
-}
-
-impl Capture {
-    pub fn new(device: &wgpu::Device, width: u32, height: u32) -> Self {
-        let padded = atd_interop::readback::padded_bytes_per_row(width);
-        let slots = (0..SLOTS)
-            .map(|_| Slot {
-                buffer: device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("atd-record"),
-                    size: u64::from(padded) * u64::from(height),
-                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-                    mapped_at_creation: false,
-                }),
-                state: Arc::new(AtomicU8::new(IDLE)),
-                seq: 0,
-            })
-            .collect();
-        Self {
-            slots,
-            width,
-            height,
-            padded,
-            seq: 0,
-            skipped: 0,
-        }
-    }
-
-    /// Starts copying `texture` (of the capture's size, 4 bytes a pixel)
-    /// into a free buffer; skips the frame when none is free.
-    pub fn copy(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture) {
-        let Some(slot) = self
-            .slots
-            .iter_mut()
-            .find(|s| s.state.load(Ordering::Acquire) == IDLE)
-        else {
-            self.skipped += 1;
-            return;
-        };
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("atd-record"),
-        });
-        encoder.copy_texture_to_buffer(
-            texture.as_image_copy(),
-            wgpu::TexelCopyBufferInfo {
-                buffer: &slot.buffer,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(self.padded),
-                    rows_per_image: None,
-                },
-            },
-            texture.size(),
-        );
-        queue.submit([encoder.finish()]);
-        slot.state.store(MAPPING, Ordering::Release);
-        slot.seq = self.seq;
-        self.seq += 1;
-        let state = slot.state.clone();
-        slot.buffer
-            .slice(..)
-            .map_async(wgpu::MapMode::Read, move |r| {
-                state.store(if r.is_ok() { READY } else { IDLE }, Ordering::Release);
-            });
-    }
-
-    /// Hands every finished copy to `sink` as tightly packed rows, oldest
-    /// first, without waiting.
-    pub fn poll(&mut self, device: &wgpu::Device, mut sink: impl FnMut(&[u8], u32)) {
-        let _ = device.poll(wgpu::PollType::Poll);
-        loop {
-            let next = self
-                .slots
-                .iter()
-                .filter(|s| s.state.load(Ordering::Acquire) == READY)
-                .min_by_key(|s| s.seq);
-            let Some(slot) = next else { break };
-            if let Ok(data) = slot.buffer.slice(..).get_mapped_range() {
-                let row = self.width as usize * 4;
-                for (y, chunk) in data
-                    .chunks(self.padded as usize)
-                    .take(self.height as usize)
-                    .enumerate()
-                {
-                    sink(&chunk[..row], y as u32);
-                }
-            }
-            slot.buffer.unmap();
-            slot.state.store(IDLE, Ordering::Release);
-        }
-    }
-
-    /// Whether copies are still in flight (tests wait on it).
-    #[cfg(test)]
-    pub fn busy(&self) -> bool {
-        self.slots
-            .iter()
-            .any(|s| s.state.load(Ordering::Acquire) != IDLE)
-    }
-}
 
 enum State {
     Idle,
@@ -376,7 +245,7 @@ impl RecordPanel {
                 Ok(recorder) => {
                     self.state = State::Recording(Box::new(Live {
                         recorder,
-                        capture: Capture::new(device, texture.width(), texture.height()),
+                        capture: Capture::new(device, texture.width(), texture.height(), SLOTS),
                         path,
                         filling: None,
                     }));
@@ -396,7 +265,7 @@ impl RecordPanel {
             self.stop();
             return;
         }
-        if (texture.width(), texture.height()) != (live.capture.width, live.capture.height) {
+        if (texture.width(), texture.height()) != live.capture.size() {
             self.stop();
             self.message = Some((
                 "Recording stopped: the viewed image changed size".into(),
@@ -410,8 +279,9 @@ impl RecordPanel {
             filling,
             ..
         } = &mut **live;
-        let row = capture.width as usize * 4;
-        let last = capture.height.saturating_sub(1);
+        let (cw, ch) = capture.size();
+        let row = cw as usize * 4;
+        let last = ch.saturating_sub(1);
         capture.poll(device, |pixels, y| {
             if y == 0 {
                 *filling = recorder.try_frame();
@@ -527,7 +397,7 @@ mod tests {
         };
         let (w, h) = (70, 9);
         let texture = texture(&device, w, h);
-        let mut capture = Capture::new(&device, w, h);
+        let mut capture = Capture::new(&device, w, h, SLOTS);
         let mut got: Vec<Vec<u8>> = Vec::new();
         let mut current = Vec::new();
         let mut sink = |row: &[u8], y: u32| {
