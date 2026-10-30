@@ -174,3 +174,37 @@ files = [
     { path = "onnx/model.onnx", size = 53827735, sha256 = "987d88b356554161cbb8f67b7a8f4162cad6dc147839c344e3d5142140f25d6f" },
     { path = "preprocessor_config.json", size = 152, sha256 = "cbc36266fcc93d5bc1e9ca69bcc648ae9d268918ad14cd3507216740f129cc4d" },
 ]
+
+[[model]]
+id = "whisper-base"
+name = "Whisper base (CTranslate2, faster-whisper)"
+adapter = "stt.whisper"
+task = "Speech-to-text: multilingual transcription and translation to English"
+vram_mb = 500
+platforms = "any (CTranslate2: CUDA on Windows with NVIDIA, CPU int8 elsewhere); real time on a modern CPU"
+main = "model.bin"
+licence = { id = "MIT", class = "commercial-safe", url = "https://huggingface.co/Systran/faster-whisper-base/blob/ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66/README.md" }
+source = { repo = "Systran/faster-whisper-base", revision = "ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66" }
+files = [
+    { path = "config.json", size = 2309, sha256 = "56a6d8110d311f19c8f0471e562832c7527f146b567275bfca59fcf7c184da9a" },
+    { path = "model.bin", size = 145217532, sha256 = "d01c3014881c9c6f3133c182f3d2887eb6ca1c789a7538c5c007196857a0a6a9" },
+    { path = "tokenizer.json", size = 2203239, sha256 = "fb7b63191e9bb045082c79fd742a3106a12c99513ab30df4a0d47fa6cb6fd0ab" },
+    { path = "vocabulary.txt", size = 459861, sha256 = "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913" },
+]
+
+[[model]]
+id = "whisper-small"
+name = "Whisper small (CTranslate2, faster-whisper)"
+adapter = "stt.whisper"
+task = "Speech-to-text: multilingual transcription and translation to English, more accurate than base"
+vram_mb = 1200
+platforms = "any (CTranslate2: CUDA on Windows with NVIDIA, CPU int8 elsewhere); near real time on an Apple silicon CPU"
+main = "model.bin"
+licence = { id = "MIT", class = "commercial-safe", url = "https://huggingface.co/Systran/faster-whisper-small/blob/536b0662742c02347bc0e980a01041f333bce120/README.md" }
+source = { repo = "Systran/faster-whisper-small", revision = "536b0662742c02347bc0e980a01041f333bce120" }
+files = [
+    { path = "config.json", size = 2370, sha256 = "b55496ac7940a7ae47d2c01eab40edfd8701feec1229d9cce3b40014383fb828" },
+    { path = "model.bin", size = 483546902, sha256 = "3e305921506d8872816023e4c273e75d2419fb89b24da97b4fe7bce14170d671" },
+    { path = "tokenizer.json", size = 2203239, sha256 = "fb7b63191e9bb045082c79fd742a3106a12c99513ab30df4a0d47fa6cb6fd0ab" },
+    { path = "vocabulary.txt", size = 459861, sha256 = "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913" },
+]

@@ -215,6 +215,29 @@ pub struct FrameCancel {
     pub seq: u64,
 }
 
+/// `audio.transcribe` (FR-A13): mono little-endian f32 samples follow as
+/// the payload, on either transport.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AudioTranscribe {
+    pub seq: u64,
+    pub model_id: String,
+    pub sample_rate: u32,
+    /// Per-adapter parameters (`language`, `task`, `prompt`, …).
+    #[serde(default, skip_serializing_if = "Value::is_null")]
+    pub params: Value,
+}
+
+/// The answer to `audio.transcribe`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Transcript {
+    pub seq: u64,
+    pub text: String,
+    #[serde(default)]
+    pub language: Option<String>,
+    #[serde(default)]
+    pub host_ms: f64,
+}
+
 /// JSON-RPC error codes used by hosts beyond the standard range.
 pub mod codes {
     pub const VERSION_MISMATCH: i64 = -32001;

@@ -17,11 +17,13 @@ pub mod comfy;
 pub mod egress;
 pub mod hosts;
 pub mod link;
+pub mod llm;
 pub mod models;
 pub mod protocol;
 pub mod refhost;
 pub mod ring;
 pub mod router;
+pub mod speech;
 pub mod supervisor;
 
 pub use client::{ClientError, FramePath, HostClient, HostCommand, Pending};

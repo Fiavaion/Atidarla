@@ -31,3 +31,4 @@ All platforms.
 ## Examples
 
 - [Signal scope](../../../examples/signal-scope.atidarla/) — `mic`
+- [Speech and chat](../../../examples/speech-chat.atidarla/) — `mic`

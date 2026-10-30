@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from . import PROTOCOL_VERSION, __version__
+from .adapters import Audio
 from .adapters.builtin import BUILTIN_MODELS
 from .capabilities import capabilities, gpu_mem_mb
 from .errors import (
@@ -177,10 +178,13 @@ class Session:
             if not self.opened and method != "session.open":
                 code = UNAUTHORIZED if self.ctx.token else INVALID_REQUEST
                 raise RpcError(code, "open a session first")
-            if payload is not None and method != "frame.submit":
+            if payload is not None and method not in ("frame.submit", "audio.transcribe"):
                 raise RpcError(INVALID_REQUEST, f"{method} takes no payload")
             if method == "frame.submit":
                 self.submit(request_id, params, payload)
+                return
+            if method == "audio.transcribe":
+                self.transcribe(request_id, params, payload)
                 return
             if method == "model.load":
                 threading.Thread(target=self._load, args=(request_id, params), daemon=True).start()
@@ -372,6 +376,26 @@ class Session:
             self._release_input(job)
             raise RpcError(BUSY, f"model {model_id!r} has too many queued frames")
 
+    def transcribe(self, request_id: Any, p: dict, payload: bytes | None) -> None:
+        """`audio.transcribe`: mono f32le samples in the payload, on either transport."""
+        seq = _uint(p, "seq")
+        rate = _uint(p, "sample_rate")
+        if not 8_000 <= rate <= 192_000:
+            raise RpcError(INVALID_PARAMS, "sample_rate must be 8000 to 192000")
+        if payload is None or len(payload) % 4:
+            raise RpcError(INVALID_PARAMS, "audio.transcribe needs a payload of f32le samples")
+        model_id = p.get("model_id")
+        with self._lock:
+            loaded = self.models.get(model_id)
+        if loaded is None:
+            raise RpcError(UNKNOWN_MODEL, f"model {model_id!r} not loaded")
+        params = p.get("params") or {}
+        if not isinstance(params, dict):
+            raise RpcError(INVALID_PARAMS, "params must be an object")
+        job = Job(self, request_id, model_id, seq, None, params, None, audio=Audio(rate, payload))
+        if not loaded.shared.submit(job):
+            raise RpcError(BUSY, f"model {model_id!r} has too many queued requests")
+
     def _slot_index(self, slot: int) -> None:
         try:
             self.ring.seq(slot)
@@ -391,6 +415,8 @@ class Session:
     @staticmethod
     def _release_input(job: Job) -> None:
         """Lets go of views into the ring so it can be unmapped."""
+        if job.frame is None:
+            return
         for f in (job.frame, *job.frame.aux.values()):
             if isinstance(f.data, memoryview):
                 f.data.release()
@@ -405,6 +431,18 @@ class Session:
                 loaded = self.models.get(job.model_id)
             if loaded is None:
                 self.fail(job.request_id, UNKNOWN_MODEL, f"model {job.model_id!r} unloaded")
+                return
+            if job.audio is not None:
+                heard = adapter.transcribe(loaded.state, job.audio, job.params)
+                self.reply(
+                    job.request_id,
+                    {
+                        "seq": job.seq,
+                        "text": str(heard.get("text", "")),
+                        "language": heard.get("language"),
+                        "host_ms": (time.perf_counter() - job.received) * 1e3,
+                    },
+                )
                 return
             out, skipped = adapter.process(loaded.state, job.frame, job.params)
             if job.cancelled:

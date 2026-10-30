@@ -27,6 +27,13 @@ vision = [
     "numpy>=2.0",
     "pillow>=11",
 ]
+# Speech-to-text (adapter `stt.whisper`, FR-A13): faster-whisper and
+# CTranslate2, both MIT. Weights come from the engine's model manager
+# (`whisper-base`, `whisper-small`); the adapter never downloads.
+stt = [
+    "faster-whisper>=1.1",
+    "numpy>=2.0",
+]
 # Decart realtime video-to-video (adapter `video.v2v`, model `decart/lucy-2.6`):
 # Decart's MIT SDK with its WebRTC (LiveKit, Apache-2.0) extra. Needs the
 # user's own DECART_API_KEY; see docs/cloud.md.

@@ -728,6 +728,11 @@ pub fn classify(type_id: &str) -> Option<Class> {
     if type_id == "ai.control_prep" || type_id == "ai.prompt" {
         return Some(Pure);
     }
+    if type_id == "ai.stt" || type_id == "ai.llm_chat" {
+        // Speech to Text and LLM Chat (FR-A13) send to a host or a server:
+        // offline they send nothing and publish nothing.
+        return Some(Sink);
+    }
     if type_id.starts_with("ai.") {
         // AI operators (`docs/ai-host-protocol.md`): run on an AI Host;
         // offline, frame i shows the result for frame i - 1's input, waited
