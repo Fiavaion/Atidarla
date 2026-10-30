@@ -493,6 +493,15 @@ version = "0.0.1"
 [[package]]
 name = "atd-timeline"
 version = "0.0.1"
+dependencies = [
+ "atd-core",
+ "atd-format",
+ "atd-gpu",
+ "atd-io",
+ "atd-ops-img",
+ "atd-ops-sig",
+ "serde_json",
+]
 
 [[package]]
 name = "atomic-waker"

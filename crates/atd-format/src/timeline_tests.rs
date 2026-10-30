@@ -89,7 +89,7 @@ fn random_timeline(rng: &mut Rng) -> TimelineDoc {
     let mut doc = TimelineDoc {
         length: 1.0 + rng.time(),
         fps: [24.0, 25.0, 29.97, 30.0, 60.0][rng.next(5) as usize],
-        loop_region: (rng.next(2) == 0).then(|| [1.0, 2.5]),
+        loop_region: (rng.next(2) == 0).then_some([1.0, 2.5]),
         ..Default::default()
     };
     for _ in 0..rng.next(6) {
