@@ -30,6 +30,16 @@ pub struct StagePanel {
     feeds: Option<(u64, Feeds)>,
     /// Crossfaders this frame, by mixer (keeps its capacity).
     crossfaders: Vec<(NodeId, f64)>,
+    /// Batch results to use as clips (FR-B3).
+    bin: crate::media_bin::MediaBinPanel,
+}
+
+/// The first empty clip slot of the deck's top layer.
+fn free_slot(deck: &Deck) -> Option<(NodeId, usize)> {
+    let layer = deck.layers.last()?;
+    (0..atd_stage::SLOTS)
+        .find(|s| layer.clip(*s).is_none())
+        .map(|s| (layer.node, s))
 }
 
 /// The deck's beat position: its clock's `beat` + `beat_phase`, or
@@ -136,6 +146,17 @@ impl StagePanel {
 
     pub fn ui(&mut self, ui: &mut Ui, engine: &mut Engine, time: f64) {
         let model = self.take_model(engine);
+        let free = model.1.deck().and_then(free_slot);
+        let bin = &mut self.bin;
+        let action = egui::Panel::bottom("stage-media-bin")
+            .resizable(true)
+            .default_size(170.0)
+            .show(ui, |ui| bin.ui(ui, engine, free))
+            .inner;
+        if let Some((label, edits)) = action {
+            self.message = None;
+            self.apply(engine, label, edits);
+        }
         self.deck_ui(ui, engine, &model.1, time);
         self.model = Some(model);
     }
@@ -261,7 +282,28 @@ impl StagePanel {
                     });
                     for col in 0..columns {
                         let Some(clip) = layer.clip(col) else {
-                            ui.weak("·");
+                            // An empty slot takes a Media Bin image.
+                            let (rect, r) = ui
+                                .allocate_exact_size(egui::vec2(96.0, 40.0), egui::Sense::hover());
+                            ui.painter().text(
+                                rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                "·",
+                                egui::FontId::default(),
+                                ui.visuals().weak_text_color(),
+                            );
+                            if let Some(c) = r.dnd_release_payload::<crate::media_bin::BinClip>() {
+                                let id = engine.alloc_id();
+                                edits = Some((
+                                    "Use media bin clip",
+                                    crate::media_bin::clip_edits(
+                                        engine.network(),
+                                        id,
+                                        &c,
+                                        Some((layer.node, col)),
+                                    ),
+                                ));
+                            }
                             continue;
                         };
                         let playing =

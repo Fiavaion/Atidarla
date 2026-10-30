@@ -1,0 +1,26 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "Batch Wedge"
+description = '''
+Batch Graph (M5): two wedges in batch/ cook work items over parameters into the Stage media bin
+(media/bin), shown in the Stage tab's Media Bin, where any result becomes a clip.
+
+`noise-seeds` wedges the noise seed and scale of noise → Invert (the built-in model, so it runs
+on the plain local AI Host): `atidarla batch run examples/batch-wedge.atidarla noise-seeds`.
+
+`prompts` is 10 prompts × 10 seeds through Diffusion on every LAN host (`lan:*`). Its model,
+`builtin.prompts`, is the reference host's stand-in for a diffusion model (one colour per
+prompt): start two with `cargo run -p atd-ai --bin atd-ai-refhost -- --listen 127.0.0.1:7421`
+and `… 127.0.0.1:7422` (lan:a, lan:b below), then `atidarla batch run … prompts`. Run either
+again: nothing cooks; edit one prompt in batch/prompts.toml and only its 10 items cook.
+See docs/batch.md.
+'''
+resolution = [256, 256]
+
+[[ai.hosts]]
+name = "lan:a"
+addr = "127.0.0.1:7421"
+
+[[ai.hosts]]
+name = "lan:b"
+addr = "127.0.0.1:7422"

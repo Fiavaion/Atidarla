@@ -1,0 +1,21 @@
+# Atidarla wedge: a batch of work items over parameters (docs/batch.md).
+# Nodes are IDs in networks/main.toml.
+format = 1
+target = 3
+frame = 0
+fps = 60.0
+size = [128, 128]
+combine = "product"
+scheduler = "lan:*"
+concurrency = 2
+
+[[axis]]
+node = 3
+param = "prompt1"
+name = "prompt"
+values = ["a watercolour painting of a stormy sea", "a neon city at night, rain", "a forest of glass trees", "an old map of an invented island", "a field of sunflowers at dusk", "a cathedral made of coral", "a desert under two moons", "a lighthouse in a snowstorm", "a market of floating lanterns", "a mountain lake at dawn"]
+
+[[axis]]
+node = 3
+param = "seed"
+seeds = { from = 1, count = 10 }

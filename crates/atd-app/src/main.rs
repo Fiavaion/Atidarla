@@ -9,6 +9,7 @@ mod dock;
 mod heartbeat;
 mod learn;
 mod mappings;
+mod media_bin;
 mod models_panel;
 mod outputs;
 mod params;

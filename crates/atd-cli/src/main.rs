@@ -2,6 +2,7 @@
 
 mod agent;
 mod bake;
+mod batch;
 mod bench;
 mod cloud;
 mod docs;
@@ -270,6 +271,13 @@ enum Command {
         #[command(subcommand)]
         action: models::ModelsCommand,
     },
+    /// Batch wedges (FR-B1–B3, docs/batch.md): cook work items over
+    /// parameters (prompts, seeds, any parameter) across AI Hosts into the
+    /// Stage media bin (media/bin), skipping items already there.
+    Batch {
+        #[command(subcommand)]
+        action: batch::BatchCommand,
+    },
     /// Cloud AI hosts (A59, docs/cloud.md): bring a Runpod pod running the
     /// AI Host container up, check it, and stop it.
     Cloud {
@@ -455,6 +463,7 @@ fn main() -> ExitCode {
         ),
         Command::Serve(args) => serve::run(args),
         Command::Agent(cmd) => agent::run(cmd),
+        Command::Batch { action } => batch::run(action),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

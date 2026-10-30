@@ -1,0 +1,20 @@
+# Atidarla wedge: a batch of work items over parameters (docs/batch.md).
+# Nodes are IDs in networks/main.toml.
+format = 1
+target = 1
+frame = 0
+fps = 60.0
+size = [256, 256]
+combine = "product"
+scheduler = "local"
+concurrency = 1
+
+[[axis]]
+node = 0
+param = "seed"
+seeds = { from = 1, count = 4 }
+
+[[axis]]
+node = 0
+param = "scale"
+range = { from = 2.0, to = 8.0, steps = 3 }

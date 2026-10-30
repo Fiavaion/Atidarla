@@ -127,6 +127,13 @@ fn is_pack_folder(dir: &Path) -> bool {
 }
 
 pub(crate) fn library() -> (atd_core::Registry, OpLibrary) {
+    library_with(atd_ai::supervisor::Supervisor::global())
+}
+
+/// Like [`library`], with AI operators running on `supervisor`'s hosts.
+pub(crate) fn library_with(
+    supervisor: &'static atd_ai::supervisor::Supervisor,
+) -> (atd_core::Registry, OpLibrary) {
     let registry = crate::builtin_registry();
     let mut library = OpLibrary::default();
     atd_ops_img::library(&mut library);
@@ -135,7 +142,7 @@ pub(crate) fn library() -> (atd_core::Registry, OpLibrary) {
     atd_ops_mat::library(&mut library);
     atd_ops_msh::library(&mut library);
     atd_ops_cmp::library(&mut library);
-    atd_ops_ai::library(&mut library);
+    atd_ops_ai::library_with(&mut library, supervisor);
     (registry, library)
 }
 
@@ -273,6 +280,20 @@ fn check_one(dir: &Path, gpu: Option<&atd_gpu::GpuContext>, opts: CheckOptions) 
     let comfy_count = comfy.schemas().count();
     if comfy_count > 0 {
         summary += &format!(", {comfy_count} ComfyUI workflow operators");
+    }
+    // Batch wedges: canonical, and their items can be made.
+    let wedges = atd_format::batch::list_wedges(dir)?;
+    for name in &wedges {
+        let wedge = atd_format::batch::load_wedge(dir, name)?;
+        canonical(
+            dir,
+            &format!("{}/{name}.toml", atd_format::batch::DIR),
+            &atd_format::batch::wedge_to_string(&wedge)?,
+        )?;
+        crate::batch::plan(dir, name)?;
+    }
+    if !wedges.is_empty() {
+        summary += &format!(", {} wedges", wedges.len());
     }
     let Some(gpu) = gpu else {
         return Ok(summary);
@@ -487,6 +508,10 @@ pub fn fmt(dirs: &[impl AsRef<Path>]) -> Result<()> {
         } else {
             let project = atd_format::load(dir)?;
             atd_format::save(dir, &project)?;
+            for name in atd_format::batch::list_wedges(dir)? {
+                let wedge = atd_format::batch::load_wedge(dir, &name)?;
+                atd_format::batch::save_wedge(dir, &name, &wedge)?;
+            }
         }
         println!("formatted {}", dir.display());
     }

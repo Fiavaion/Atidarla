@@ -270,13 +270,45 @@ pub struct Renderer {
     timeline: Option<atd_timeline::Player>,
     /// The loaded project's kernel operators (their files' texts).
     kernels: Option<atd_ops_pnt::project::ProjectKernels>,
+    /// The hosts the project's AI nodes run on.
+    supervisor: &'static atd_ai::supervisor::Supervisor,
+    /// What [`Self::load_variant`] starts from.
+    source: Option<Source>,
+}
+
+/// The loaded project's main network and what expands it, kept so a
+/// variant of it (a batch work item) loads without reading the project
+/// again.
+struct Source {
+    net: Network,
+    packs: atd_core::pack::PackSet,
+    /// The engine's registry plus the project's Packs.
+    registry: Registry,
+    timeline: Option<atd_format::TimelineDoc>,
+    node: Option<String>,
 }
 
 impl Renderer {
     /// An offline engine on `device` with every built-in operator and the
     /// Python worker for expressions.
     pub fn new(device: wgpu::Device, queue: wgpu::Queue, platform: PlatformInfo) -> Result<Self> {
-        let (registry, library) = crate::project::library();
+        Self::with_supervisor(
+            device,
+            queue,
+            platform,
+            atd_ai::supervisor::Supervisor::global(),
+        )
+    }
+
+    /// Like [`Self::new`], with AI nodes running on `supervisor`'s hosts
+    /// (a batch run has its own, so its hosts are not the app's).
+    pub fn with_supervisor(
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        platform: PlatformInfo,
+        supervisor: &'static atd_ai::supervisor::Supervisor,
+    ) -> Result<Self> {
+        let (registry, library) = crate::project::library_with(supervisor);
         let mut engine = Engine::new(device, queue, registry, library, EngineConfig::default());
         engine.set_python(Box::new(atd_py::expr::PyExprHost::start()?));
         Ok(Self {
@@ -291,6 +323,8 @@ impl Renderer {
             python: None,
             timeline: None,
             kernels: None,
+            supervisor,
+            source: None,
         })
     }
 
@@ -354,12 +388,15 @@ impl Renderer {
             self.warnings.push(format!("AI host tokens: {e}"));
             Default::default()
         });
-        atd_ai::hosts::apply(
-            &project.ai,
-            &tokens,
-            atd_ai::supervisor::Supervisor::global(),
-        );
+        atd_ai::hosts::apply(&project.ai, &tokens, self.supervisor);
         atd_ai::router::spend().reset();
+        self.source = Some(Source {
+            net: net.clone(),
+            packs: project.packs.clone(),
+            registry: registry.clone(),
+            timeline: project.timeline.clone(),
+            node: opts.node.clone(),
+        });
         self.engine
             .load(flat.network)
             .map_err(|e| match e {
@@ -405,6 +442,46 @@ impl Renderer {
                 _ => {}
             }
         }
+        Ok(())
+    }
+
+    /// Loads a variant of the loaded project: `edit` changes its main
+    /// network (Packs not expanded), `place` the network the engine cooks
+    /// (Packs expanded). The engine starts afresh, as for a new project, so
+    /// nothing carries over from the previous variant; project files are
+    /// not read again.
+    pub fn load_variant(
+        &mut self,
+        edit: impl FnOnce(&mut Network, &Registry) -> Result<()>,
+        place: impl FnOnce(&mut Network, &Registry) -> Result<()>,
+    ) -> Result<()> {
+        let src = self
+            .source
+            .as_ref()
+            .context("no project loaded to make a variant of")?;
+        let mut net = src.net.clone();
+        edit(&mut net, &src.registry)?;
+        let flat = src
+            .packs
+            .flatten(&net, &src.registry)
+            .map_err(crate::project::pack_error)?;
+        let (output, label, kind) = output_node(
+            &net,
+            &src.registry,
+            &flat,
+            src.node.as_deref(),
+            &[WireType::Img],
+        )?;
+        let mut cooked = flat.network;
+        place(&mut cooked, &src.registry)?;
+        let timeline = src.timeline.clone();
+        self.engine.load(cooked)?;
+        self.engine.clear_live();
+        self.timeline = timeline.map(|doc| atd_timeline::Player::offline(doc, &self.engine));
+        self.output = output;
+        self.output_label = label;
+        self.output_kind = kind;
+        self.unavailable.clear();
         Ok(())
     }
 

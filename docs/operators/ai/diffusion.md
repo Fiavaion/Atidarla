@@ -58,3 +58,4 @@ Cooks every frame (time-dependent).
 ## Examples
 
 - [Live AI](../../../examples/ai-live.atidarla/) — `diffusion1`
+- [Batch Wedge](../../../examples/batch-wedge.atidarla/) — `diffusion1`

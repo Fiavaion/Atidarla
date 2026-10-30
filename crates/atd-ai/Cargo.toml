@@ -16,6 +16,9 @@ thiserror.workspace = true
 memmap2.workspace = true
 log.workspace = true
 atd-format.workspace = true
+# Batch Graph (batch/): cache keys over networks, media bin PNGs.
+atd-core.workspace = true
+png.workspace = true
 toml_edit.workspace = true
 sha2.workspace = true
 ureq.workspace = true
