@@ -170,6 +170,8 @@ pub struct Renderer {
     warnings: Vec<String>,
     /// The loaded project's Python operators (their worker).
     python: Option<atd_py::ops::PythonOps>,
+    /// The project's timeline, evaluated at each frame's time.
+    timeline: Option<atd_timeline::Player>,
 }
 
 impl Renderer {
@@ -188,6 +190,7 @@ impl Renderer {
             unavailable: BTreeSet::new(),
             warnings: Vec::new(),
             python: None,
+            timeline: None,
         })
     }
 
@@ -236,6 +239,20 @@ impl Renderer {
             })
             .with_context(|| format!("{}", dir.display()))?;
         self.python = Some(python);
+        // Live values belong to the project they were set for.
+        self.engine.clear_live();
+        self.timeline = project
+            .timeline
+            .take()
+            .map(|doc| atd_timeline::Player::offline(doc, &self.engine));
+        if let Some(p) = &self.timeline {
+            self.warnings.extend(
+                p.timeline()
+                    .problems()
+                    .iter()
+                    .map(|e| format!("timeline.toml: {e}")),
+            );
+        }
         let [w, h] = opts.size.unwrap_or(project.resolution);
         self.engine.set_resolution(w, h);
         self.output = output;
@@ -263,6 +280,9 @@ impl Renderer {
     /// (capability flags, PRD A19) are reported as warnings.
     pub fn frame(&mut self, i: u64) -> Result<Frame> {
         self.engine.set_frame(i);
+        if let Some(p) = &mut self.timeline {
+            p.render_at(&mut self.engine, i as f64 / self.fps);
+        }
         self.engine
             .cook(&[self.output], i as f64 / self.fps)
             .with_context(|| format!("frame {i}"))?;
@@ -1040,5 +1060,70 @@ mod tests {
             !senders.iter().any(|s| s.starts_with("Atidarla Example")),
             "{senders:?}"
         );
+    }
+
+    /// FR-T1 / FR-T2 offline: a timeline track (one colour component) and
+    /// a cue (`set`, held as a live value offline) render the same twice,
+    /// the pixels follow the keyframes, and a frame rendered on its own
+    /// matches the same frame of a whole render (the cue before it fires).
+    #[test]
+    fn timeline_tracks_and_cues_render_deterministically() {
+        use atd_format::timeline::{Cue, CueAction, Key, TimelineDoc};
+        let Some(mut a) = renderer() else { return };
+        let mut b = renderer().unwrap();
+        let mut c = renderer().unwrap();
+        let mut builder = Builder::new();
+        let constant = builder.node("img.constant", "constant1", &[]);
+        let level = builder.node("img.level", "level1", &[]);
+        builder.wire(constant, level, "in");
+        let project = builder.save("timeline");
+        let mut doc = TimelineDoc::default();
+        doc.track_mut(constant, "colour", Some(0)).keys =
+            vec![Key::new(0.0, 0.0), Key::new(1.0, 1.0)];
+        doc.cues.push(Cue {
+            id: 1,
+            name: "Invert".into(),
+            t: Some(0.6),
+            when: None,
+            actions: vec![CueAction::Set {
+                node: level,
+                param: "invert".into(),
+                value: json!(true),
+            }],
+        });
+        std::fs::write(
+            project.0.join(atd_format::timeline::FILE),
+            atd_format::timeline_to_string(&doc).unwrap(),
+        )
+        .unwrap();
+        a.load(&project.0, &opts(0..61)).unwrap();
+        b.load(&project.0, &opts(0..61)).unwrap();
+        assert!(a.take_warnings().is_empty());
+        let (fa, fb) = (render(&mut a, 0..61), render(&mut b, 0..61));
+        assert_eq!(fa, fb);
+        let red = |f: &Frame| f.rgba[0];
+        // Frames at 60 fps: 0 s, 0.4 s, 0.8 s (inverted from 0.6 s), 1 s.
+        let near = |got: u8, want: f64| (f64::from(got) - want * 255.0).abs() <= 2.0;
+        for (i, want) in [
+            (0, 0.0),
+            (24, 0.4),
+            (35, 35.0 / 60.0),
+            (36, 0.4),
+            (48, 0.2),
+            (60, 0.0),
+        ] {
+            assert!(
+                near(red(&fa[i].1), want),
+                "frame {i}: red {} (want {want})",
+                red(&fa[i].1)
+            );
+        }
+        // The saved network is untouched: the cue's `set` was a live value.
+        assert!(a.engine.network().node(level).unwrap().params.is_empty());
+        // Frame 48 alone: the cue at 0.6 s has fired.
+        c.load(&project.0, &opts(48..49)).unwrap();
+        assert_eq!(render(&mut c, [48])[0].1, fa[48].1);
+        // And going back to frame 24 un-fires it.
+        assert_eq!(render(&mut c, [24])[0].1, fa[24].1);
     }
 }
