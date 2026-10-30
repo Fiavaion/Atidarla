@@ -12,12 +12,25 @@ adapter never needs its own locking.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from ..errors import UNSUPPORTED, RpcError
 from ..frames import Frame
 
 Progress = Callable[[str, float], None]
+
+
+@dataclass
+class Audio:
+    """Mono audio of an `audio.transcribe` request: little-endian f32 samples."""
+
+    sample_rate: int
+    data: bytes
+
+    @property
+    def samples(self) -> int:
+        return len(self.data) // 4
 
 
 class Adapter:
@@ -41,7 +54,11 @@ class Adapter:
 
     def process(self, state: Any, frame: Frame, params: dict) -> tuple[Frame, bool]:
         """Returns (output frame, skipped)."""
-        raise NotImplementedError
+        raise RpcError(UNSUPPORTED, f"{self.kind} takes no frames")
+
+    def transcribe(self, state: Any, audio: Audio, params: dict) -> dict:
+        """Speech-to-text (`audio.transcribe`): returns `{text, language}`."""
+        raise RpcError(UNSUPPORTED, f"{self.kind} takes no audio")
 
     def extras(self, state: Any) -> dict:
         """Extra fields for the frame result just produced (e.g. `cost_s` from a metered service)."""
@@ -94,7 +111,14 @@ def _video() -> type[Adapter]:
     return VideoAdapter
 
 
+def _whisper() -> type[Adapter]:
+    from .stt_whisper import WhisperAdapter
+
+    return WhisperAdapter
+
+
 register("builtin", _builtin)
 register("diffusion.sd", _diffusion)
 register("onnx", _onnx)
 register("video.v2v", _video)
+register("stt.whisper", _whisper)

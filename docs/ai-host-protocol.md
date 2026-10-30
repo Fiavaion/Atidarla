@@ -22,8 +22,9 @@ the host's container (FR-A1, PRD §5.1). It replaces the M0 prototype (`0.1`,
 
 Messages are JSON-RPC 2.0 objects, one per line (`\n`). A message may carry a
 binary payload: its JSON has `"payload": <bytes>` at the top level, and exactly
-that many raw bytes follow the newline. Only frame messages on the `inline`
-transport use payloads.
+that many raw bytes follow the newline. Frame messages use payloads on the
+`inline` transport only; `audio.transcribe` carries its samples as a payload
+on both transports (audio is small, so it never goes through the ring).
 
 Requests may be pipelined: the engine can have several requests in flight and
 the host answers each by `id`, possibly out of order (a `host.health` is
@@ -44,6 +45,7 @@ and `model.progress {model_id, stage, fraction}`.
 | `model.unload` | `{model_id}` | `null` |
 | `frame.submit` | `FrameSubmit` | `FrameResult` |
 | `frame.cancel` | `{seq}` | `null` |
+| `audio.transcribe` | `AudioTranscribe` | `Transcript` |
 | `session.close` | – | `null` |
 
 ```text
@@ -76,7 +78,20 @@ FrameResult  { seq, width, height, output_slot: u32|null, host_ms: f64,
                skipped: bool,           // the similarity filter reused the previous output
                cost_s?: f64,            // optional: seconds a metered cloud service billed since the previous result
                payload?: bytes }        // inline: output pixels follow
+
+AudioTranscribe { seq: u64, model_id: str, sample_rate: u32,   // 8000–192000; speech models want 16000
+                  params: object,                               // per-adapter, see below
+                  payload: bytes }                              // mono f32 little-endian samples, both transports
+Transcript      { seq, text: str, language: str|null, host_ms: f64 }
 ```
+
+`audio.transcribe` (FR-A13, added to v1 on 2026-10-30; the version string is
+unchanged because nothing existing changed, and a host without it answers
+`-32601`) runs on the model's worker in order with that model's other work,
+like a frame. The engine's Speech to Text node sends one utterance per request:
+it gates the input with a level threshold and sends what was said once the
+speaker pauses, so a request holds at most a few tens of seconds of audio.
+Adapters without speech support answer `UNSUPPORTED`.
 
 Pixels are RGBA8, unpremultiplied, rows top to bottom, tightly packed
 (`width * 4` bytes a row). On `inline` with codec `jpeg` the payload is a JPEG
@@ -99,7 +114,8 @@ Pixels are RGBA8, unpremultiplied, rows top to bottom, tightly packed
 
 | Adapter | Model ids | `FrameSubmit.params` |
 |---|---|---|
-| `builtin` | `builtin.invert`, `builtin.echo` | – (`echo` returns its input; used by tests) |
+| `builtin` | `builtin.invert`, `builtin.echo`, `builtin.stt_echo` | – (`echo` returns its input; `stt_echo` answers `audio.transcribe` with `"<n> samples at <rate> Hz, peak <p>"`; used by tests) |
+| `stt.whisper` | `whisper-base`, `whisper-small` (path = the model folder; the adapter never downloads) | `audio.transcribe` only: `language: str` (ISO code, empty = detect), `task: "transcribe"\|"translate"`, `prompt: str` (initial prompt), `beam_size: int` (1–10), `vad: bool` (faster-whisper's VAD filter). Load options `device`, `compute_type` (default `auto`). Needs the `stt` extra (faster-whisper, CTranslate2: MIT). |
 | `diffusion.sd` | e.g. `sd-turbo` (path = the model folder) | `prompts: [{text, weight}]`, `negative: str`, `seed: int`, `strength: f32` (0–1), `steps: int` (1–4), `guidance: f32`, `rcfg: "none"\|"self"\|"onetime"`, `delta: f32`, `similarity: f32` (0 = off, else η), `lora: [{path, weight}]` |
 | `onnx` | any (path = the `.onnx` file) | `task: "generic"\|"depth"\|"segment"\|"pose"\|"flow"\|"background"\|"upscale"`, `input: {name, layout, mean, std, size}` (generic only) |
 | `video.v2v` | per model; `decart/lucy-2.6` with the `cloud` extra (`options.api_key` only when `DECART_API_KEY` is not set on the host) | `prompts`, `seed` (Decart: one prompt, the highest-weight text) |

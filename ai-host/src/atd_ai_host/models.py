@@ -17,7 +17,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from .adapters import Adapter, Progress, adapter_class
+from .adapters import Adapter, Audio, Progress, adapter_class
 from .errors import MODEL_LOAD_FAILED, UNSUPPORTED, RpcError
 from .frames import Frame
 
@@ -37,9 +37,11 @@ class Job:
     request_id: Any
     model_id: str
     seq: int
-    frame: Frame
+    # A frame (`frame.submit`) or audio (`audio.transcribe`).
+    frame: Frame | None
     params: dict
     output_slot: int | None
+    audio: Audio | None = None
     received: float = field(default_factory=time.perf_counter)
     cancelled: bool = False
 
