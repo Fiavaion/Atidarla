@@ -1,0 +1,18 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "Timeline show"
+description = '''
+A 32-second show on the timeline (Timeline tab, docs/timeline.md). Press Play there.
+
+Keyframe tracks animate Noise's z (linear), the kaleidoscope's rotation (Bezier, easing) and
+segments (step), two components of Tint's colour, the mix and the brightness. Markers name
+the sections: Intro, Build, Drop, Outro.
+
+Cues: at 8 s "Colour" is armed and fires on the next peak of the pulse LFO (a condition,
+`op('pulse')['lfo'] > 0.9`), turning the noise to colour; at 16 s "Invert" holds Level's
+invert on as a live value; at 24 s "Calm" sets the noise to 2 octaves (an edit, undoable).
+"Grey" is a manual cue: press Go. Stop clears the timeline's live values.
+
+The same timeline drives offline renders: `atidarla render` evaluates it at every frame.
+'''
+resolution = [1280, 720]

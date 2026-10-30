@@ -50,9 +50,11 @@ pub struct Player {
     /// Offline: the time of the last frame rendered.
     rendered: Option<f64>,
     offline: bool,
-    /// Follow a Timecode In node's `time` channel while `locked` (the
-    /// node reads MTC or LTC on its own thread).
-    pub timecode_node: Option<NodeId>,
+    /// The Timecode In node chased (see [`Self::set_timecode_node`]).
+    timecode_node: Option<NodeId>,
+    /// Nodes to cook every frame: condition references and the Timecode
+    /// In node.
+    watched: Vec<NodeId>,
     /// Problems from the last edit a cue made.
     pub last_error: Option<String>,
 }
@@ -71,8 +73,39 @@ impl Player {
             rendered: None,
             offline: false,
             timecode_node: None,
+            watched: Vec::new(),
             last_error: None,
         }
+        .watching()
+    }
+
+    fn watching(mut self) -> Self {
+        self.rewatch();
+        self
+    }
+
+    fn rewatch(&mut self) {
+        self.watched.clear();
+        self.watched.extend_from_slice(self.timeline.watched());
+        self.watched.extend(self.timecode_node);
+    }
+
+    /// Chase a Timecode In node's `time` channel while its `locked` channel
+    /// is on (the node reads MTC or LTC on its own thread); `None` stops.
+    pub fn set_timecode_node(&mut self, node: Option<NodeId>) {
+        self.timecode_node = node;
+        self.rewatch();
+    }
+
+    pub fn timecode_node(&self) -> Option<NodeId> {
+        self.timecode_node
+    }
+
+    /// Nodes the timeline reads, to cook with the frame (conditions'
+    /// references, the chased Timecode In node): nothing else may need
+    /// them.
+    pub fn watched(&self) -> &[NodeId] {
+        &self.watched
     }
 
     /// A player for offline renders: drive it with [`Self::render_at`].
@@ -124,6 +157,7 @@ impl Player {
         }
         self.timeline = next;
         self.applied = applied;
+        self.rewatch();
         self.apply(engine);
     }
 

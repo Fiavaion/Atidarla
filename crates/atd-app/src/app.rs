@@ -77,6 +77,7 @@ struct Panels {
     /// The time the engine cooked last, in seconds.
     time: f64,
     textport: crate::textport::TextportPanel,
+    timeline: crate::timeline::TimelinePanel,
 }
 
 impl AtidarlaApp {
@@ -182,6 +183,7 @@ impl AtidarlaApp {
                 history: Default::default(),
                 time: 0.0,
                 textport: Default::default(),
+                timeline: Default::default(),
             },
             smoke: smoke.map(Smoke::new),
             start: Instant::now(),
@@ -691,7 +693,9 @@ impl AtidarlaApp {
         }
         let viewed = p.viewed;
         p.time = self.start.elapsed().as_secs_f64();
-        let cooked = match engine.cook_frame(viewed, p.time) {
+        let (tl, opened) = (&mut self.project.meta.timeline, self.project.opened);
+        p.timeline.frame(engine, tl, opened, p.time);
+        let cooked = match p.timeline.cook(engine, viewed, p.time) {
             Ok(n) => n,
             Err(e) => {
                 p.patch.status(e.to_string());
@@ -704,7 +708,7 @@ impl AtidarlaApp {
             }
             return;
         };
-        if cooked > 0 {
+        if cooked > 0 || p.timeline.playing() {
             // Something changed or is animating: keep frames coming.
             ctx.request_repaint();
         }
@@ -766,7 +770,9 @@ impl TabViewer for Panels {
                 None => placeholder(ui, "No GPU device: the engine is unavailable."),
             },
             Tab::Stage => placeholder(ui, "Clip deck, layers and outputs arrive in M3."),
-            Tab::Timeline => placeholder(ui, "Keyframes, cues and timecode arrive in M3."),
+            Tab::Timeline => self
+                .timeline
+                .ui(ui, self.engine.as_mut(), self.patch.selected),
             Tab::Parameters => match (&mut self.engine, self.patch.selected) {
                 (Some(engine), Some(node)) => {
                     egui::ScrollArea::vertical().show(ui, |ui| {

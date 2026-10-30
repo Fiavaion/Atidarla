@@ -10,6 +10,7 @@ mod project;
 mod smoke;
 mod suggest;
 mod textport;
+mod timeline;
 mod viewer;
 
 use std::process::ExitCode;

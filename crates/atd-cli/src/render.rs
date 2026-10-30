@@ -280,11 +280,14 @@ impl Renderer {
     /// (capability flags, PRD A19) are reported as warnings.
     pub fn frame(&mut self, i: u64) -> Result<Frame> {
         self.engine.set_frame(i);
+        let mut requested = vec![self.output];
         if let Some(p) = &mut self.timeline {
             p.render_at(&mut self.engine, i as f64 / self.fps);
+            // Nodes the timeline's conditions read cook with the output.
+            requested.extend_from_slice(p.watched());
         }
         self.engine
-            .cook(&[self.output], i as f64 / self.fps)
+            .cook(&requested, i as f64 / self.fps)
             .with_context(|| format!("frame {i}"))?;
         let mut errors = Vec::new();
         for n in self.engine.network().nodes() {
@@ -1125,5 +1128,51 @@ mod tests {
         assert_eq!(render(&mut c, [48])[0].1, fa[48].1);
         // And going back to frame 24 un-fires it.
         assert_eq!(render(&mut c, [24])[0].1, fa[24].1);
+    }
+
+    /// A cue's condition reads a SIG node nothing is wired to: the render
+    /// cooks it with the output, and the cue fires on the first frame after
+    /// the condition held (conditions read the previous frame's channels).
+    #[test]
+    fn timeline_conditions_read_unwired_signals() {
+        use atd_format::timeline::{Cue, CueAction, TimelineDoc};
+        let Some(mut r) = renderer() else { return };
+        let mut builder = Builder::new();
+        // sin(2π t): above 0.5 from t = 1/12 s, i.e. after frame 5 at 60 fps.
+        builder.node("sig.lfo", "lfo1", &[]);
+        let constant = builder.node(
+            "img.constant",
+            "constant1",
+            &[("colour", json!([0.2, 0.2, 0.2, 1.0]))],
+        );
+        let level = builder.node("img.level", "level1", &[]);
+        builder.wire(constant, level, "in");
+        let project = builder.save("timeline-condition");
+        let doc = TimelineDoc {
+            cues: vec![Cue {
+                id: 1,
+                name: "Peak".into(),
+                t: Some(0.0),
+                when: Some("op('lfo1')['lfo'] > 0.5".into()),
+                actions: vec![CueAction::Live {
+                    node: level,
+                    param: "brightness".into(),
+                    value: json!(2.0),
+                }],
+            }],
+            ..Default::default()
+        };
+        std::fs::write(
+            project.0.join(atd_format::timeline::FILE),
+            atd_format::timeline_to_string(&doc).unwrap(),
+        )
+        .unwrap();
+        r.load(&project.0, &opts(0..12)).unwrap();
+        let frames = render(&mut r, 0..12);
+        let red: Vec<u8> = frames.iter().map(|(_, f)| f.rgba[0]).collect();
+        let first = red.iter().position(|&v| v > 80).expect("the cue fires");
+        // Frame 6 (t = 0.1) is the first whose channels hold; frame 7 reads them.
+        assert_eq!(first, 7, "{red:?}");
+        assert!(red[..7].iter().all(|&v| v.abs_diff(51) <= 2), "{red:?}");
     }
 }

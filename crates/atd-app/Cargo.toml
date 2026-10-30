@@ -33,6 +33,7 @@ log.workspace = true
 serde_json.workspace = true
 png.workspace = true
 atd-format.workspace = true
+atd-timeline.workspace = true
 atd-py.workspace = true
 rfd.workspace = true
 pollster.workspace = true

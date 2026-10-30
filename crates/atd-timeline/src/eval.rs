@@ -133,6 +133,8 @@ pub struct Timeline {
     edits_as_live: bool,
     follow_stage: bool,
     problems: Vec<String>,
+    /// Nodes conditions read.
+    watched: Vec<NodeId>,
 }
 
 impl Timeline {
@@ -151,6 +153,7 @@ impl Timeline {
             edits_as_live: false,
             follow_stage: false,
             problems: Vec::new(),
+            watched: Vec::new(),
         };
         for (i, track) in doc.tracks.iter().enumerate() {
             let at = || format!("track node {} `{}`", track.node.0, track.param);
@@ -244,6 +247,14 @@ impl Timeline {
                 error: None,
             });
         }
+        tl.watched = tl
+            .cues
+            .iter()
+            .filter_map(|c| c.cond.as_ref())
+            .flat_map(|c| c.refs.iter().flatten().copied())
+            .collect();
+        tl.watched.sort();
+        tl.watched.dedup();
         tl.fired = Vec::with_capacity(tl.cues.len() + 1);
         tl.doc = doc;
         tl.reset();
@@ -302,6 +313,12 @@ impl Timeline {
     /// The document this timeline was bound from.
     pub fn doc(&self) -> &TimelineDoc {
         &self.doc
+    }
+
+    /// The nodes conditions read: they must cook every frame (with what
+    /// is viewed), or their channels never change.
+    pub fn watched(&self) -> &[NodeId] {
+        &self.watched
     }
 
     /// Tracks and cue actions left out, and why.
