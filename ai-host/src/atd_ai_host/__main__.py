@@ -1,63 +1,72 @@
-"""Entry point: `atd-ai-host --connect HOST:PORT` or `atd-ai-host --dev`."""
+"""atd-ai-host: run model work out of process for the Atidarla engine.
+
+atd-ai-host --connect HOST:PORT                  dial the engine's supervisor (one session)
+atd-ai-host --listen ADDR:PORT [--token T]       accept sessions (LAN, cloud, or local engine)
+atd-ai-host --dev                                listen on 127.0.0.1 and log verbosely
+atd-ai-host bench --model DIR ...                SD-Turbo benchmark (see `bench --help`)
+"""
 
 from __future__ import annotations
 
 import argparse
-import json
 import logging
-import socket
+import os
 import sys
 
-from .host import RpcError, Session
-
-log = logging.getLogger("atd_ai_host")
-
-
-def serve(conn: socket.socket) -> None:
-    conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-    session = Session()
-    reader = conn.makefile("rb")
-    try:
-        for line in reader:
-            request = json.loads(line)
-            response: dict = {"jsonrpc": "2.0", "id": request.get("id")}
-            try:
-                response["result"] = session.handle(request["method"], request.get("params"))
-            except RpcError as e:
-                response["error"] = {"code": e.code, "message": e.message}
-            except Exception as e:  # never let one bad request kill the host
-                log.exception("request failed")
-                response["error"] = {"code": -32603, "message": f"{type(e).__name__}: {e}"}
-            conn.sendall(json.dumps(response, separators=(",", ":")).encode() + b"\n")
-            if session.closed:
-                break
-    finally:
-        if session.ring is not None:
-            session.ring.close()
-        reader.close()
-        conn.close()
+from . import capabilities
+from .server import connect, is_loopback, listen, split_addr, watch_parent
+from .session import HostContext, HostLogHandler
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="atd-ai-host", description=__doc__)
-    parser.add_argument("--connect", metavar="HOST:PORT", help="connect to an engine supervisor")
-    parser.add_argument("--dev", action="store_true", help="listen on 127.0.0.1 and log verbosely")
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["bench"]:
+        from .bench import main as bench_main
+
+        return bench_main(argv[1:])
+
+    parser = argparse.ArgumentParser(
+        prog="atd-ai-host", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--connect", metavar="HOST:PORT", help="connect to an engine supervisor")
+    mode.add_argument("--listen", metavar="ADDR:PORT", help="accept sessions on this address (port 0 = any)")
+    mode.add_argument("--dev", action="store_true", help="listen on 127.0.0.1 and log verbosely")
     parser.add_argument("--port", type=int, default=0, help="port for --dev (default: any free port)")
+    parser.add_argument("--token", help="session token for --listen (default: $ATD_AI_HOST_TOKEN)")
+    parser.add_argument("--parent-pid", type=int, metavar="PID", help="exit when this process is gone")
+    parser.add_argument("--verbose", "-v", action="store_true", help="log at debug level")
+    # Tests only: report the capabilities of another vendor's GPU box (routing tests on loopback).
+    parser.add_argument("--fake-vendor", choices=["nvidia", "amd", "intel", "apple"], help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
-    logging.basicConfig(level=logging.DEBUG if args.dev else logging.WARNING, stream=sys.stderr)
+
+    logging.basicConfig(level=logging.DEBUG if args.dev or args.verbose else logging.INFO, stream=sys.stderr)
+    capabilities.FAKE_VENDOR = args.fake_vendor
+    token = args.token or os.environ.get("ATD_AI_HOST_TOKEN") or None
+    if args.parent_pid is not None:
+        watch_parent(args.parent_pid)
 
     if args.connect:
-        host, _, port = args.connect.rpartition(":")
-        serve(socket.create_connection((host, int(port))))
+        ctx = HostContext(None)
+        logging.getLogger("atd_ai_host").addHandler(HostLogHandler(ctx))
+        connect(args.connect, ctx)
         return 0
-    if args.dev:
-        with socket.create_server(("127.0.0.1", args.port)) as server:
-            print(f"atd-ai-host listening on 127.0.0.1:{server.getsockname()[1]}", flush=True)
-            while True:
-                conn, peer = server.accept()
-                log.info("session from %s", peer)
-                serve(conn)
-    parser.error("one of --connect or --dev is required")
+    if args.listen or args.dev:
+        addr = args.listen or f"127.0.0.1:{args.port}"
+        try:
+            host, _ = split_addr(addr)
+        except ValueError as e:
+            parser.error(str(e))
+        if not is_loopback(host) and not token:
+            parser.error(f"refusing to listen on {host} without --token (or ATD_AI_HOST_TOKEN)")
+        ctx = HostContext(token)
+        logging.getLogger("atd_ai_host").addHandler(HostLogHandler(ctx))
+        try:
+            listen(addr, ctx)
+        except KeyboardInterrupt:
+            return 0
+        return 0
+    parser.error("one of --connect, --listen or --dev is required")
     return 2
 
 

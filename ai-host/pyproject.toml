@@ -1,19 +1,38 @@
 [project]
 name = "atd-ai-host"
-version = "0.0.1"
-description = "Atidarla local AI Host: runs model work out of process for the Atidarla engine"
+version = "0.1.0"
+description = "Atidarla AI Host: runs model work out of process for the Atidarla engine"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 requires-python = ">=3.11"
-# The M0 prototype uses the standard library only. Model runtimes (torch,
-# TensorRT, ONNX Runtime, Core ML) arrive as optional extras in M4.
+# The base install is standard-library only: the protocol, the shm/inline
+# transports and the built-in models need nothing else. Model runtimes are
+# optional extras.
 dependencies = []
+
+[project.optional-dependencies]
+# SD-Turbo / StreamDiffusion-style img2img (adapter `diffusion.sd`).
+diffusion = [
+    "torch>=2.5",
+    "diffusers>=0.31",
+    "transformers>=4.46",
+    "safetensors>=0.4",
+    "accelerate>=1.0",
+    "numpy>=2.0",
+    "pillow>=11",
+]
+# Vision models through ONNX Runtime (adapter `onnx`) and the `jpeg` codec.
+vision = [
+    "onnxruntime>=1.20",
+    "numpy>=2.0",
+    "pillow>=11",
+]
 
 [project.scripts]
 atd-ai-host = "atd_ai_host.__main__:main"
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "onnx>=1.17", "numpy>=2.0"]
 
 [build-system]
 requires = ["hatchling>=1.25"]
@@ -24,3 +43,6 @@ packages = ["src/atd_ai_host"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
