@@ -4,7 +4,8 @@
 //! **Status:** device bring-up, adapter reporting and GPU-vendor detection
 //! (M0); M1 pre-work: the texture pool ([`pool`]), full-screen passes
 //! ([`fullscreen`]) and the cooking [`engine`]; M2 pre-work: geometry
-//! values, the attribute buffer pool and compute building blocks ([`geo`]).
+//! values, the attribute buffer pool and compute building blocks ([`geo`]);
+//! M3: output mapping for `cmp.window` ([`output`]).
 
 pub mod engine;
 pub mod expr;
@@ -12,6 +13,7 @@ pub mod fullscreen;
 pub mod geo;
 pub mod isf;
 pub mod mat;
+pub mod output;
 pub mod pool;
 pub mod timer;
 

@@ -47,3 +47,4 @@ All platforms.
 - [Simulations](../../../examples/simulations.atidarla/) — `screen`, `all`
 - [Time effects](../../../examples/time-effects.atidarla/) — `compare`
 - [Timeline show](../../../examples/timeline-show.atidarla/) — `mix`
+- [Two outputs](../../../examples/two-outputs.atidarla/) — `sky_clouds`, `scene`

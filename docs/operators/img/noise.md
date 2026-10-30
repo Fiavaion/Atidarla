@@ -47,3 +47,4 @@ All platforms.
 - [Stage deck](../../../examples/stage-deck.atidarla/) — `tunnel_noise`, `grid_noise`
 - [Texture sharing](../../../examples/texture-sharing.atidarla/) — `pattern`
 - [Timeline show](../../../examples/timeline-show.atidarla/) — `clouds`
+- [Two outputs](../../../examples/two-outputs.atidarla/) — `clouds`

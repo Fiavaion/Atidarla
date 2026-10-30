@@ -34,9 +34,6 @@ fn now(engine: &Engine, deck: &Deck, time: f64) -> f64 {
 }
 
 impl StagePanel {
-    /// Cooks one frame like [`Engine::cook_frame`] (the viewed node and
-    /// every sink), plus the Stage deck, so the show keeps playing whatever
-    /// is viewed; first runs one-shot returns and the autopilot.
     /// Advances the Stage one frame (autopilot, one-shot returns) and
     /// returns the deck's mixer, which must cook whatever node is viewed.
     pub fn frame(&mut self, engine: &mut Engine, time: f64) -> Option<NodeId> {

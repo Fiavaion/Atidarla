@@ -46,3 +46,4 @@ All platforms.
 - [Pack: RGB Delay](../../../examples/pack-rgb-delay.atidarla/) — `bar`, `triangle`
 - [Simulations](../../../examples/simulations.atidarla/) — `dot`, `seed`
 - [Stage deck](../../../examples/stage-deck.atidarla/) — `circle`, `star`, `bar`, `dots`, `burst`, `frame`
+- [Two outputs](../../../examples/two-outputs.atidarla/) — `sun`

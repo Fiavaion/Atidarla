@@ -36,6 +36,8 @@ const SAMPLE_FLAGS: [&str; 7] = [
 pub enum Tab {
     Patch,
     Stage,
+    /// Output windows: slices, warps, masks, soft edges (FR-S6).
+    Outputs,
     Timeline,
     Parameters,
     Viewer,
@@ -85,6 +87,7 @@ struct Panels {
     extra: Vec<NodeId>,
     /// Recording the viewed image to a movie (FR-S10).
     record: crate::record::RecordPanel,
+    outputs: crate::outputs::OutputsPanel,
 }
 
 impl AtidarlaApp {
@@ -131,6 +134,7 @@ impl AtidarlaApp {
             atd_ops_pnt::library(&mut library);
             atd_ops_mat::library(&mut library);
             atd_ops_msh::library(&mut library);
+            atd_ops_cmp::library(&mut library);
             let mut registry = builtin_registry();
             load_isf(&mut registry, &mut library);
             let mut engine = Engine::new(
@@ -173,7 +177,7 @@ impl AtidarlaApp {
             vec![Tab::Operators, Tab::Platform],
             vec![Tab::Viewer, Tab::Parameters],
             vec![Tab::Timeline],
-            vec![Tab::Patch, Tab::Stage],
+            vec![Tab::Patch, Tab::Stage, Tab::Outputs],
         );
         Self {
             dock,
@@ -196,6 +200,7 @@ impl AtidarlaApp {
                 timeline: Default::default(),
                 extra: Vec::new(),
                 record: Default::default(),
+                outputs: Default::default(),
             },
             smoke: smoke.map(Smoke::new),
             start: Instant::now(),
@@ -312,6 +317,7 @@ impl eframe::App for AtidarlaApp {
                     for tab in [
                         Tab::Patch,
                         Tab::Stage,
+                        Tab::Outputs,
                         Tab::Timeline,
                         Tab::Viewer,
                         Tab::Platform,
@@ -749,6 +755,7 @@ impl AtidarlaApp {
         p.extra.clear();
         p.extra.extend(deck);
         p.extra.extend_from_slice(p.timeline.watched());
+        p.extra.extend_from_slice(p.outputs.prepare(engine));
         let cooked = match engine.cook_frame_with(viewed, &p.extra, p.time) {
             Ok(n) => n,
             Err(e) => {
@@ -756,6 +763,10 @@ impl AtidarlaApp {
                 0
             }
         };
+        if let Some(rs) = frame.wgpu_render_state() {
+            p.outputs.present(engine, rs, cooked);
+        }
+        p.outputs.show_windows(ctx, engine, cooked);
         let Some(viewed) = viewed else {
             if cooked > 0 {
                 ctx.request_repaint();
@@ -791,6 +802,7 @@ fn tab_title(tab: Tab) -> &'static str {
     match tab {
         Tab::Patch => "Patch",
         Tab::Stage => "Stage",
+        Tab::Outputs => "Outputs",
         Tab::Timeline => "Timeline",
         Tab::Parameters => "Parameters",
         Tab::Viewer => "Viewer",
@@ -835,6 +847,10 @@ impl TabViewer for Panels {
             Tab::Timeline => self
                 .timeline
                 .ui(ui, self.engine.as_mut(), self.patch.selected),
+            Tab::Outputs => match &mut self.engine {
+                Some(engine) => self.outputs.ui(ui, engine),
+                None => placeholder(ui, "No GPU device: the engine is unavailable."),
+            },
             Tab::Parameters => match (&mut self.engine, self.patch.selected) {
                 (Some(engine), Some(node)) => {
                     egui::ScrollArea::vertical().show(ui, |ui| {
