@@ -170,7 +170,9 @@ impl Resolver for GateResolver {
     }
 }
 
-fn agent(opts: &DownloadOptions, refused: Arc<Mutex<Option<String>>>) -> Agent {
+/// An HTTPS agent whose every connection resolves through [`gate`]; a host
+/// Sovereign mode refused is recorded in `refused`.
+pub(crate) fn agent(opts: &DownloadOptions, refused: Arc<Mutex<Option<String>>>) -> Agent {
     let tls = TlsConfig::builder()
         .provider(TlsProvider::Rustls)
         .root_certs(RootCerts::PlatformVerifier)

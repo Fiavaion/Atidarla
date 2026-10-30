@@ -290,7 +290,7 @@ pub fn default_local_command() -> HostCommand {
     HostCommand::python_module(python, root.join("src"))
 }
 
-fn random_token() -> String {
+pub(crate) fn random_token() -> String {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let mut h = Sha256::new();
     h.update(format!(
@@ -399,7 +399,11 @@ fn run_host(inner: &Arc<Inner>, name: &str, generation: u64) {
         std::thread::sleep(TICK);
         let r = running.as_mut().expect("running");
         let mut failed: Option<String> = None;
-        if let Some(child) = &mut r.child
+        if sovereign_blocks(&spec) {
+            failed = Some("Sovereign mode was turned on".into());
+        }
+        if failed.is_none()
+            && let Some(child) = &mut r.child
             && let Ok(Some(status)) = child.try_wait()
         {
             failed = Some(format!("the host process exited ({status})"));
@@ -442,7 +446,22 @@ fn run_host(inner: &Arc<Inner>, name: &str, generation: u64) {
     }
 }
 
+/// A local process that is a cloud target (`cloud:decart`: the host itself
+/// talks to the internet, beyond the egress gate) may not run in Sovereign
+/// mode.
+fn sovereign_blocks(spec: &HostSpec) -> bool {
+    matches!(spec.kind, HostKind::Local(_))
+        && spec.name.starts_with("cloud:")
+        && crate::egress::sovereign()
+}
+
 fn start(spec: &HostSpec, token: Option<&str>) -> Result<(Running, String, Capabilities), String> {
+    if sovereign_blocks(spec) {
+        return Err(format!(
+            "Sovereign mode blocks {}: it reaches a service on the internet",
+            spec.name
+        ));
+    }
     let (child, addr) = match &spec.kind {
         HostKind::Local(cmd) => {
             let (child, addr) = spawn_local(cmd, token)?;
