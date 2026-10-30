@@ -9,6 +9,7 @@ use atd_core::graph::{Edit, Network, Node, NodeId};
 use atd_core::pack::{Flat, PackError, PackSet};
 use atd_core::registry::{Availability, Registry};
 use atd_gpu::engine::{Engine, EngineConfig, OpLibrary};
+use atd_ops_ai::comfy::ProjectComfy;
 use atd_ops_pnt::project::ProjectKernels;
 
 /// What `check` verifies beyond loading.
@@ -53,15 +54,36 @@ pub(crate) fn kernel_ops(
     Ok(kernels)
 }
 
-/// A network that does not validate, with unknown Python and kernel
-/// operator types explained (a missing file, an operator not declared).
+/// Reads a project's `comfy/` workflows (their cached object_info, no
+/// network) and registers their operators; the first error in a file is an
+/// error.
+pub(crate) fn comfy_ops(
+    dir: &Path,
+    registry: &mut Registry,
+    library: &mut OpLibrary,
+) -> Result<ProjectComfy> {
+    let comfy = ProjectComfy::open(dir);
+    if let Some(e) = comfy.errors().first() {
+        bail!("{e}");
+    }
+    comfy.register(registry, library);
+    Ok(comfy)
+}
+
+/// A network that does not validate, with unknown Python, kernel and
+/// ComfyUI workflow operator types explained (a missing file, an operator
+/// not declared).
 pub(crate) fn explain(
     e: atd_core::graph::GraphError,
     ops: &atd_py::ops::PythonOps,
     kernels: &ProjectKernels,
+    comfy: &ProjectComfy,
 ) -> anyhow::Error {
     if let atd_core::graph::GraphError::UnknownType(t) = &e
-        && let Some(why) = ops.explain(t).or_else(|| kernels.explain(t))
+        && let Some(why) = ops
+            .explain(t)
+            .or_else(|| kernels.explain(t))
+            .or_else(|| comfy.explain(t))
     {
         return anyhow::anyhow!("{e}: {why}");
     }
@@ -136,6 +158,8 @@ pub(crate) struct Loaded {
     pub python: atd_py::ops::PythonOps,
     /// The project's kernel operators (`kernels/*.atk`).
     pub kernels: ProjectKernels,
+    /// The project's ComfyUI workflow operators (`comfy/*.json`).
+    pub comfy: ProjectComfy,
 }
 
 /// Loads `dir`, registers its shaders and Packs, and validates every network.
@@ -149,11 +173,12 @@ pub(crate) fn load_checked(dir: &Path) -> Result<Loaded> {
     }
     let python = python_ops(dir, &mut registry, &mut library)?;
     let kernels = kernel_ops(dir, &mut registry, &mut library)?;
+    let comfy = comfy_ops(dir, &mut registry, &mut library)?;
     let registry = project.packs.register(&registry).map_err(pack_error)?;
     for (id, net) in &project.networks {
         net.clone()
             .validated(&registry)
-            .map_err(|e| explain(e, &python, &kernels))
+            .map_err(|e| explain(e, &python, &kernels, &comfy))
             .with_context(|| format!("networks/{id}.toml"))?;
     }
     Ok(Loaded {
@@ -163,6 +188,7 @@ pub(crate) fn load_checked(dir: &Path) -> Result<Loaded> {
         shaders,
         python,
         kernels,
+        comfy,
     })
 }
 
@@ -193,6 +219,7 @@ fn check_one(dir: &Path, gpu: Option<&atd_gpu::GpuContext>, opts: CheckOptions) 
         shaders,
         mut python,
         kernels,
+        comfy,
     } = load_checked(dir)?;
     canonical(
         dir,
@@ -242,6 +269,10 @@ fn check_one(dir: &Path, gpu: Option<&atd_gpu::GpuContext>, opts: CheckOptions) 
     let kernel_count = kernels.schemas().count();
     if kernel_count > 0 {
         summary += &format!(", {kernel_count} kernel operators");
+    }
+    let comfy_count = comfy.schemas().count();
+    if comfy_count > 0 {
+        summary += &format!(", {comfy_count} ComfyUI workflow operators");
     }
     let Some(gpu) = gpu else {
         return Ok(summary);

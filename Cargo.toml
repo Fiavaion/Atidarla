@@ -72,6 +72,11 @@ zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 # store (platform verifier), so no bundled root list and no native-tls.
 ureq = { version = "3.5", default-features = false, features = ["rustls-no-provider", "platform-verifier"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+# ComfyUI client (atd-ai::comfy): plain HTTP and WebSocket to a local or LAN
+# server through the egress gate. ureq 2 for its resolver hook (the gate
+# pins the resolved address); to move to ureq 3 with the model downloads.
+ureq2 = { package = "ureq", version = "2.12", default-features = false }
+tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

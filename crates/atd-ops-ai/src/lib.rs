@@ -3,6 +3,7 @@
 //! Governor, plus Control Prep, which prepares control images on the GPU.
 
 pub mod clip;
+pub mod comfy;
 pub mod control;
 pub mod node;
 pub mod schemas;

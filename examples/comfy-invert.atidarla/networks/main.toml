@@ -1,0 +1,20 @@
+# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 2
+
+[[node]]
+id = 0
+name = "ramp"
+type = "img.ramp"
+pos = [0.0, 0.0]
+params.colour_a = [0.1, 0.2, 0.6, 1.0]
+params.colour_b = [1.0, 0.8, 0.3, 1.0]
+params.type = "radial"
+
+[[node]]
+id = 1
+name = "invert"
+type = "comfy.invert"
+pos = [220.0, 0.0]
+inputs.in0 = { node = 0, output = "out" }
+params.auto_run = true

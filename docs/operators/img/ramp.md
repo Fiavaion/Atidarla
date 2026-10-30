@@ -30,6 +30,7 @@ All platforms.
 ## Examples
 
 - [Beat switcher](../../../examples/beat-switcher.atidarla/) — `gradient`
+- [ComfyUI Invert](../../../examples/comfy-invert.atidarla/) — `ramp`
 - [Image processing](../../../examples/image-processing.atidarla/) — `palette`
 - [Keying](../../../examples/keying.atidarla/) — `backdrop`
 - [Pack: Beat Flash](../../../examples/pack-beat-flash.atidarla/) — `wheel`

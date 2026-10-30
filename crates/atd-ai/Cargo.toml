@@ -20,6 +20,9 @@ toml_edit.workspace = true
 sha2.workspace = true
 ureq.workspace = true
 rustls.workspace = true
+# ComfyUI client (comfy.rs): HTTP and WebSocket events.
+ureq2.workspace = true
+tungstenite.workspace = true
 
 [lints]
 workspace = true

@@ -447,6 +447,15 @@ impl AtidarlaApp {
         {
             self.project.python_ask = true;
         }
+        if ui
+            .add_enabled(has_engine, egui::Button::new("Import ComfyUI Workflow…"))
+            .on_hover_text(
+                "Add a ComfyUI workflow (API format) to this project as an operator; reads the node list from a ComfyUI server at 127.0.0.1:8188 (docs/comfy.md)",
+            )
+            .clicked()
+        {
+            self.project.import_comfy();
+        }
         ui.separator();
         if ui.button("Quit").clicked() {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);

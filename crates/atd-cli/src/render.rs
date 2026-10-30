@@ -316,6 +316,11 @@ impl Renderer {
         let kernels = self
             .engine
             .extend(|r, l| crate::project::kernel_ops(dir, r, l))?;
+        // ComfyUI workflows run on the server their nodes name; each frame
+        // waits for its run.
+        let comfy = self
+            .engine
+            .extend(|r, l| crate::project::comfy_ops(dir, r, l))?;
         // Pack instances are expanded into the nodes inside them
         // (`docs/packs.md`); the engine cooks the flat network.
         let registry = project
@@ -337,7 +342,7 @@ impl Renderer {
             .load(flat.network)
             .map_err(|e| match e {
                 atd_gpu::engine::EngineError::Graph(g) => {
-                    crate::project::explain(g, &python, &kernels)
+                    crate::project::explain(g, &python, &kernels, &comfy)
                 }
                 other => other.into(),
             })
@@ -564,6 +569,11 @@ pub fn classify(type_id: &str) -> Option<Class> {
         // Project kernel operators (`kernels/*.atk`): compiled on a worker
         // thread, the file read once; a Points kernel's state lives on the
         // wire.
+        return Some(Waits);
+    }
+    if type_id.starts_with(atd_ops_ai::comfy::TYPE_PREFIX) {
+        // ComfyUI workflows (`docs/comfy.md`): offline each frame whose
+        // parameters or inputs changed waits for its run on the server.
         return Some(Waits);
     }
     if type_id == "ai.control_prep" || type_id == "ai.prompt" {
@@ -996,6 +1006,68 @@ mod tests {
             assert_eq!(fa, fb, "{node}");
             assert_ne!(fa[0].1, fa[7].1, "{node} animates");
         }
+    }
+
+    /// The ComfyUI example (`docs/comfy.md`) renders offline against a
+    /// ComfyUI server (the mock, which really inverts): each frame waits for
+    /// its run, the frame is the ramp inverted byte for byte, and frames
+    /// whose inputs and parameters did not change do not run again.
+    #[test]
+    fn a_comfyui_workflow_renders_offline_against_a_server() {
+        let Some(mut r) = renderer() else { return };
+        assert_eq!(classify("comfy.invert"), Some(Class::Waits));
+        let mock = crate::mock_comfy::MockComfy::start();
+        let dir = std::env::temp_dir().join(format!("atd-render-comfy-{}", std::process::id()));
+        let _cleanup = TempProject(dir.clone());
+        let src = example("comfy-invert");
+        for sub in ["", "networks", "comfy"] {
+            std::fs::create_dir_all(dir.join(sub)).unwrap();
+            for f in std::fs::read_dir(src.join(sub)).unwrap().flatten() {
+                if f.path().is_file() {
+                    std::fs::copy(f.path(), dir.join(sub).join(f.file_name())).unwrap();
+                }
+            }
+        }
+        let main = dir.join("networks/main.toml");
+        let text = std::fs::read_to_string(&main).unwrap().replace(
+            "params.auto_run = true",
+            &format!(
+                "params.auto_run = true\nparams.server = \"{}\"",
+                mock.server()
+            ),
+        );
+        std::fs::write(&main, text).unwrap();
+
+        let ramp = RenderOptions {
+            node: Some("ramp".into()),
+            ..opts(0..1)
+        };
+        r.load(&dir, &ramp).unwrap();
+        let input = r.frame(0).unwrap();
+        r.load(&dir, &opts(0..3)).unwrap();
+        let frames = render(&mut r, 0..3);
+        let want: Vec<u8> = input
+            .rgba
+            .chunks(4)
+            .flat_map(|p| [255 - p[0], 255 - p[1], 255 - p[2], 255])
+            .collect();
+        assert_eq!((frames[0].1.width, frames[0].1.height), (96, 54));
+        assert_eq!(frames[0].1.rgba, want, "the ramp, inverted by the server");
+        assert_eq!(frames[1].1, frames[0].1);
+        assert_eq!(frames[2].1, frames[0].1);
+        assert_eq!(mock.prompts().len(), 1, "unchanged frames do not run again");
+
+        // Without a server the render stops and says why.
+        let dead = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = dead.local_addr().unwrap();
+        drop(dead);
+        let text = std::fs::read_to_string(&main)
+            .unwrap()
+            .replace(&mock.server(), &addr.to_string());
+        std::fs::write(&main, text).unwrap();
+        r.load(&dir, &opts(0..1)).unwrap();
+        let e = format!("{:#}", r.frame(0).unwrap_err());
+        assert!(e.contains("invert: server not reachable at"), "{e}");
     }
 
     /// The Python operators example (`docs/python-ops.md`) renders to the
