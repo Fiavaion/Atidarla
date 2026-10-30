@@ -5,6 +5,7 @@
 //!   project.toml          name, description, output resolution
 //!   networks/main.toml    the patch: nodes, inputs, parameters
 //!   packs/<name>/         the project's copy of each Pack it uses (see [`pack`])
+//!   timeline.toml         keyframe tracks, markers and cues (optional, see [`timeline`])
 //!   media/ shaders/ ...   files the patch refers to by relative path
 //!   .cache/               binaries, ignored by Git
 //! ```
@@ -21,6 +22,7 @@
 
 mod network;
 pub mod pack;
+pub mod timeline;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -31,6 +33,7 @@ use toml_edit::{Array, DocumentMut, Item, Value};
 
 pub use network::{network_from_str, network_to_string};
 pub use pack::{Library, load_pack, pack_from_str, pack_to_string, save_pack};
+pub use timeline::{TimelineDoc, timeline_from_str, timeline_to_string};
 
 /// The file format version this build reads and writes.
 pub const FORMAT: i64 = 1;
@@ -80,6 +83,8 @@ pub struct Project {
     /// The project's Pack definitions (`packs/<name>/`). Check them with
     /// [`PackSet::register`] before use.
     pub packs: PackSet,
+    /// The timeline (`timeline.toml`); `None` when the project has none.
+    pub timeline: Option<TimelineDoc>,
 }
 
 impl Project {
@@ -91,6 +96,7 @@ impl Project {
             resolution: [1280, 720],
             networks: BTreeMap::from([(MAIN.to_owned(), Network::default())]),
             packs: PackSet::default(),
+            timeline: None,
         }
     }
 
@@ -174,6 +180,7 @@ pub fn project_from_str(source: &str) -> Result<Project, FormatError> {
         resolution,
         networks: BTreeMap::new(),
         packs: PackSet::default(),
+        timeline: None,
     })
 }
 
@@ -243,11 +250,17 @@ pub fn load(dir: &Path) -> Result<Project, FormatError> {
         }
         project.packs.insert(def);
     }
+    let path = dir.join(timeline::FILE);
+    if path.exists() {
+        let text = std::fs::read_to_string(&path).map_err(io(&path))?;
+        project.timeline = Some(timeline_from_str(&text).map_err(|e| e.in_file(timeline::FILE))?);
+    }
     Ok(project)
 }
 
 /// Writes a project folder, creating it if needed. Network files no longer
-/// in the project are removed; other files in the folder are left alone.
+/// in the project are removed, and `timeline.toml` when the project has no
+/// timeline; other files in the folder are left alone.
 pub fn save(dir: &Path, project: &Project) -> Result<(), FormatError> {
     for id in project.networks.keys() {
         if !valid_network_id(id) {
@@ -260,6 +273,10 @@ pub fn save(dir: &Path, project: &Project) -> Result<(), FormatError> {
     for (id, net) in &project.networks {
         let text = network_to_string(net).map_err(|e| e.in_file(&format!("networks/{id}.toml")))?;
         files.push((Path::new("networks").join(format!("{id}.toml")), text));
+    }
+    if let Some(tl) = &project.timeline {
+        let text = timeline_to_string(tl).map_err(|e| e.in_file(timeline::FILE))?;
+        files.push((PathBuf::from(timeline::FILE), text));
     }
     let networks = dir.join("networks");
     std::fs::create_dir_all(&networks).map_err(io(&networks))?;
@@ -280,6 +297,10 @@ pub fn save(dir: &Path, project: &Project) -> Result<(), FormatError> {
         if stale {
             std::fs::remove_file(&path).map_err(io(&path))?;
         }
+    }
+    let tl = dir.join(timeline::FILE);
+    if project.timeline.is_none() && tl.exists() {
+        std::fs::remove_file(&tl).map_err(io(&tl))?;
     }
     let packs = dir.join("packs");
     for def in project.packs.iter() {
@@ -312,3 +333,6 @@ mod tests;
 
 #[cfg(test)]
 mod pack_tests;
+
+#[cfg(test)]
+mod timeline_tests;
