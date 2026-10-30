@@ -90,6 +90,23 @@ impl Param {
     }
 }
 
+/// Makes `dst` equal to `src`, reusing `dst`'s storage where the shapes
+/// match: numbers and booleans are overwritten, arrays of the same length
+/// element by element. So updating a live number or colour every frame
+/// allocates nothing; other changes clone.
+pub fn assign_value(dst: &mut Value, src: &Value) {
+    match (&mut *dst, src) {
+        (Value::Number(d), Value::Number(s)) => d.clone_from(s),
+        (Value::Bool(d), Value::Bool(s)) => *d = *s,
+        (Value::Array(d), Value::Array(s)) if d.len() == s.len() => {
+            for (d, s) in d.iter_mut().zip(s) {
+                assign_value(d, s);
+            }
+        }
+        _ => *dst = src.clone(),
+    }
+}
+
 /// A reference to one channel of a SIG node's output.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ChannelRef {
@@ -470,21 +487,27 @@ impl Network {
     /// Nodes that depend on `node` through a wire or a channel binding, in ID
     /// order, without duplicates.
     pub fn downstream_of(&self, node: NodeId) -> BTreeSet<NodeId> {
+        self.downstream_iter(node).collect()
+    }
+
+    /// The nodes of [`Self::downstream_of`], possibly repeated and in no
+    /// set order. Does not allocate.
+    pub fn downstream_iter(&self, node: NodeId) -> impl Iterator<Item = NodeId> + '_ {
         let wired = self
             .inputs
             .iter()
-            .filter(|(_, from)| from.node == node)
+            .filter(move |(_, from)| from.node == node)
             .map(|(to, _)| to.node);
         let bound = self
             .nodes
             .values()
-            .filter(|n| {
+            .filter(move |n| {
                 n.params
                     .values()
                     .any(|p| p.bind.as_ref().is_some_and(|b| b.node == node))
             })
             .map(|n| n.id);
-        wired.chain(bound).collect()
+        wired.chain(bound)
     }
 
     /// The parameter value of a node, falling back to the schema default.

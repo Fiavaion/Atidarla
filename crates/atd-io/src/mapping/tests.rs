@@ -503,3 +503,33 @@ fn osc_over_loopback_reaches_a_mapping() {
     // Numeric arguments only: [9, 0.5]; arg 1 is 0.5 → 1.0.
     assert_eq!(fake.get("x"), &json!(1.0));
 }
+
+/// What a mapping wrote is kept for saving across edits of the mapping,
+/// and released once no mapping drives the parameter.
+#[test]
+fn written_and_released_follow_the_mappings() {
+    let mut maps = Mappings::default();
+    let id = maps.add(midi_cc(7), target("x", None), [0.0, 1.0]);
+    let mut rt = MappingRuntime::new();
+    let mut fake = Fake::new(&[("x", float(), json!(0.0))]);
+    fake.frame(&mut rt, &maps);
+    assert_eq!(rt.written().count(), 0, "nothing written yet");
+    rt.hub().push_midi("d", cc(1, 7, 127));
+    fake.frame(&mut rt, &maps);
+    let written: Vec<(String, f64)> = rt.written().map(|(t, y)| (t.param.clone(), y)).collect();
+    assert_eq!(written, [("x".to_owned(), 1.0)]);
+    maps.mappings[0].output = [0.0, 2.0];
+    fake.frame(&mut rt, &maps);
+    assert_eq!(rt.written().count(), 1, "kept across a range edit");
+    assert_eq!(rt.released().count(), 0, "still driven");
+    maps.remove(id);
+    fake.frame(&mut rt, &maps);
+    assert_eq!(rt.written().count(), 0);
+    let released: Vec<(NodeId, String, Value)> = rt
+        .released()
+        .map(|(n, p, v)| (n, p.to_owned(), v.clone()))
+        .collect();
+    assert_eq!(released, [(N, "x".to_owned(), json!(1.0))]);
+    fake.frame(&mut rt, &maps);
+    assert_eq!(rt.released().count(), 0, "released once");
+}

@@ -464,13 +464,13 @@ fn live_values_override_without_editing() {
     assert_eq!(pixel(&e, fill), [255, 0, 0, 255]);
     let saved = e.network().clone();
 
-    e.set_live(fill, "colour", Some(json!([0.0, 1.0, 0.0, 1.0])));
+    e.set_live(fill, "colour", Some(&json!([0.0, 1.0, 0.0, 1.0])));
     e.cook(&[fill], 1.0).unwrap();
     assert_eq!(pixel(&e, fill), [0, 255, 0, 255]);
     assert_eq!(e.network(), &saved, "a live value is not an edit");
     let cooks = e.stat(fill).unwrap().cooks;
     // The same value again changes nothing and cooks nothing.
-    e.set_live(fill, "colour", Some(json!([0.0, 1.0, 0.0, 1.0])));
+    e.set_live(fill, "colour", Some(&json!([0.0, 1.0, 0.0, 1.0])));
     e.cook(&[fill], 2.0).unwrap();
     assert_eq!(e.stat(fill).unwrap().cooks, cooks);
 
@@ -479,8 +479,49 @@ fn live_values_override_without_editing() {
     assert_eq!(pixel(&e, fill), [255, 0, 0, 255]);
 
     // Removing the node drops its live values.
-    e.set_live(fill, "colour", Some(json!([0.0, 0.0, 1.0, 1.0])));
+    e.set_live(fill, "colour", Some(&json!([0.0, 0.0, 1.0, 1.0])));
     assert_eq!(e.live_values().iter().count(), 1);
     e.edit("remove", [Edit::RemoveNode { id: fill }]).unwrap();
     assert_eq!(e.live_values().iter().count(), 0);
+}
+
+/// A writer releases only the live value it set: another writer's later
+/// value stays.
+#[test]
+fn clear_live_if_leaves_another_writers_value() {
+    let Some(mut e) = engine() else {
+        return no_gpu();
+    };
+    let fill = add(&mut e, "img.fill", "fill1");
+    let mine = json!([0.0, 1.0, 0.0, 1.0]);
+    let theirs = json!([0.0, 0.0, 1.0, 1.0]);
+    e.set_live(fill, "colour", Some(&mine));
+    e.set_live(fill, "colour", Some(&theirs));
+    assert!(!e.clear_live_if(fill, "colour", &mine));
+    assert_eq!(e.live_values().get(fill, "colour"), Some(&theirs));
+    assert!(e.clear_live_if(fill, "colour", &theirs));
+    assert_eq!(e.live_values().get(fill, "colour"), None);
+}
+
+/// The revision moves with every network change and not with live values.
+#[test]
+fn revision_counts_network_changes() {
+    let Some(mut e) = engine() else {
+        return no_gpu();
+    };
+    let r0 = e.revision();
+    let fill = add(&mut e, "img.fill", "fill1");
+    let r1 = e.revision();
+    assert!(r1 > r0, "edit");
+    e.set_live(fill, "colour", Some(&json!([0.0, 1.0, 0.0, 1.0])));
+    e.cook(&[fill], 0.0).unwrap();
+    assert_eq!(e.revision(), r1, "live values and cooks are not changes");
+    e.undo().unwrap();
+    let r2 = e.revision();
+    assert!(r2 > r1, "undo");
+    e.redo().unwrap();
+    assert!(e.revision() > r2, "redo");
+    let r3 = e.revision();
+    e.load(e.network().clone()).unwrap();
+    assert!(e.revision() > r3, "load");
 }

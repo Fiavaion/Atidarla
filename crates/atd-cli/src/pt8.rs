@@ -89,7 +89,7 @@ pub fn run(gpu: &GpuContext, trials: usize) -> anyhow::Result<Pt8> {
             )
         });
         for (n, p, v) in rt.writes() {
-            engine.set_live(n, p, Some(v.clone()));
+            engine.set_live(n, p, Some(v));
         }
         engine.cook_frame(Some(node), t)?;
         let tex = engine.result(node).context("no output")?;

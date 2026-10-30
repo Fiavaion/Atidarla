@@ -8,7 +8,7 @@
 //! live value, so a frame depends on the cues before its time, not on what
 //! was rendered before it.
 
-use atd_core::graph::{Edit, NodeId, Param};
+use atd_core::graph::{Edit, NodeId, Param, assign_value};
 use atd_format::timeline::TimelineDoc;
 use atd_gpu::engine::Engine;
 use serde_json::Value;
@@ -149,7 +149,9 @@ impl Player {
                 .position(|s| s.node == old.node && s.param == old.param)
             {
                 Some(i) => applied[i] = Some(value),
-                None => engine.set_live(old.node, &old.param, None),
+                None => {
+                    engine.clear_live_if(old.node, &old.param, &value);
+                }
             }
         }
         if self.transport.state() != PlayState::Stopped {
@@ -236,7 +238,7 @@ impl Player {
     }
 
     /// Stops: clears every live value the timeline set and forgets fired
-    /// cues.
+    /// cues. A value another writer (a mapping) set since stays.
     pub fn stop(&mut self, engine: &mut Engine) {
         self.transport.stop();
         self.clear(engine);
@@ -244,8 +246,8 @@ impl Player {
 
     fn clear(&mut self, engine: &mut Engine) {
         for (slot, value) in self.timeline.slots().iter().zip(&mut self.applied) {
-            if value.take().is_some() {
-                engine.set_live(slot.node, &slot.param, None);
+            if let Some(v) = value.take() {
+                engine.clear_live_if(slot.node, &slot.param, &v);
             }
         }
         self.timeline.reset();
@@ -289,13 +291,28 @@ impl Player {
         }
     }
 
-    /// Gives the engine every slot's value; only changes are sent.
+    /// Gives the engine every slot's value; only changes are sent. A
+    /// number or colour changing every frame allocates nothing.
     fn apply(&mut self, engine: &mut Engine) {
         for (s, slot) in self.timeline.slots().iter().enumerate() {
             let want = self.timeline.value(s);
-            if want != self.applied[s].as_ref() {
-                engine.set_live(slot.node, &slot.param, want.cloned());
-                self.applied[s] = want.cloned();
+            if want == self.applied[s].as_ref() {
+                continue;
+            }
+            match (want, &mut self.applied[s]) {
+                (Some(w), Some(a)) => {
+                    engine.set_live(slot.node, &slot.param, Some(w));
+                    assign_value(a, w);
+                }
+                (Some(w), a) => {
+                    engine.set_live(slot.node, &slot.param, Some(w));
+                    *a = Some(w.clone());
+                }
+                (None, a) => {
+                    if let Some(prev) = a.take() {
+                        engine.clear_live_if(slot.node, &slot.param, &prev);
+                    }
+                }
             }
         }
     }

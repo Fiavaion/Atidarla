@@ -27,7 +27,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use atd_core::graph::{Network, NodeId};
+use atd_core::graph::{Network, NodeId, assign_value};
 use atd_core::registry::{ParamKind, Registry};
 use atd_format::mappings::{Curve, Mapping, Mappings, MidiControl, Mode, Source, Target};
 use rosc::{OscPacket, OscType};
@@ -571,8 +571,12 @@ struct MapState {
     engaged: bool,
     /// The last output a pick-up mapping computed (to see it pass).
     prev: Option<f64>,
-    /// The value this mapping last wrote.
+    /// The value this mapping last wrote (reset when something else moves
+    /// the parameter, for pick-up).
     written: Option<f64>,
+    /// The output this mapping last wrote, kept until the mapping or its
+    /// target changes: what saving stores ([`MappingRuntime::written`]).
+    sent: Option<f64>,
     /// Toggle state.
     on: Option<bool>,
 }
@@ -603,6 +607,12 @@ pub struct MappingRuntime {
     routes: Vec<Route>,
     route_snap: Vec<RouteSlot>,
     out: Vec<Write>,
+    /// Per mapped (node, parameter): the whole live value mappings last
+    /// set on it.
+    held: Vec<(NodeId, String, Value)>,
+    /// Values of parameters no mapping drives any more, to release this
+    /// frame (see [`Self::released`]).
+    released: Vec<(NodeId, String, Value)>,
 }
 
 impl MappingRuntime {
@@ -738,19 +748,43 @@ impl MappingRuntime {
         if self.synced == maps.mappings {
             return;
         }
-        // Keep the state of mappings that did not change.
+        // Keep the state of mappings that did not change, and what an
+        // edited mapping last wrote while its target stays.
         let state = maps
             .mappings
             .iter()
             .map(|m| {
-                self.synced
+                if let Some(i) = self.synced.iter().position(|s| s == m) {
+                    return self.state[i];
+                }
+                let sent = self
+                    .synced
                     .iter()
-                    .position(|s| s == m)
-                    .map_or_else(MapState::default, |i| self.state[i])
+                    .position(|s| s.id == m.id && s.target == m.target)
+                    .and_then(|i| self.state[i].sent);
+                MapState {
+                    sent,
+                    ..MapState::default()
+                }
             })
             .collect();
         self.state = state;
         self.synced = maps.mappings.clone();
+        // A parameter no mapping drives any more is released, or it would
+        // stay frozen at the last value.
+        let mut i = 0;
+        while i < self.held.len() {
+            let (node, param, _) = &self.held[i];
+            if maps
+                .mappings
+                .iter()
+                .any(|m| m.target.node == *node && m.target.param == *param)
+            {
+                i += 1;
+            } else {
+                self.released.push(self.held.swap_remove(i));
+            }
+        }
         let mut st = self.hub.lock();
         st.patterns = maps
             .mappings
@@ -783,6 +817,7 @@ impl MappingRuntime {
         maps: &Mappings,
         lookup: impl Fn(NodeId, &str) -> Option<(&'e ParamKind, &'e Value)>,
     ) {
+        self.released.clear();
         self.sync(maps);
         self.out.clear();
         {
@@ -827,6 +862,7 @@ impl MappingRuntime {
                 continue;
             };
             self.state[i].written = as_number(kind, &value, t.component);
+            self.state[i].sent = Some(y);
             match pending {
                 Some(p) => self.out[p].value = value,
                 None => self.out.push(Write {
@@ -836,6 +872,7 @@ impl MappingRuntime {
                 }),
             }
         }
+        self.hold();
         for r in 0..self.route_snap.len().min(self.routes.len()) {
             let slot = self.route_snap[r];
             if !slot.fresh || slot.n == 0 {
@@ -864,6 +901,51 @@ impl MappingRuntime {
                 });
             }
         }
+    }
+
+    /// Remembers the values mappings write this frame (allocates only
+    /// for a parameter written the first time, or a value changing shape).
+    fn hold(&mut self) {
+        for w in &self.out {
+            let Origin::Mapping(i) = w.from else { continue };
+            let param = &self.synced[i].target.param;
+            match self
+                .held
+                .iter_mut()
+                .find(|(n, p, _)| *n == w.node && p == param)
+            {
+                Some((_, _, v)) => assign_value(v, &w.value),
+                None => self.held.push((w.node, param.clone(), w.value.clone())),
+            }
+        }
+    }
+
+    /// Parameters no mapping drives since this frame's update (a mapping
+    /// was deleted or retargeted), with the value mappings last set: clear
+    /// each live value if it is still that one (`Engine::clear_live_if`).
+    pub fn released(&self) -> impl Iterator<Item = (NodeId, &str, &Value)> {
+        self.released.iter().map(|(n, p, v)| (*n, p.as_str(), v))
+    }
+
+    /// Per mapping that has written since it was added (or its target
+    /// last changed): its target and the output it last wrote. Saving
+    /// stores these, and only these, as parameter values.
+    pub fn written(&self) -> impl Iterator<Item = (&Target, f64)> {
+        self.synced
+            .iter()
+            .zip(&self.state)
+            .filter_map(|(m, st)| Some((&m.target, st.sent?)))
+    }
+
+    /// Forgets what mappings wrote (another project was opened, and its
+    /// live values cleared).
+    pub fn forget_written(&mut self) {
+        for st in &mut self.state {
+            st.sent = None;
+            st.written = None;
+        }
+        self.held.clear();
+        self.released.clear();
     }
 
     fn param(&self, from: Origin) -> &str {

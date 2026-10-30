@@ -439,7 +439,8 @@ impl AtidarlaApp {
 
     fn save(&mut self) {
         if let Some(engine) = &mut self.panels.engine {
-            self.project.save(engine);
+            let control = &self.panels.control;
+            self.project.save(engine, |e| control.stored_values(e));
         }
     }
 
@@ -464,7 +465,8 @@ impl AtidarlaApp {
         let Some(engine) = &mut self.panels.engine else {
             return;
         };
-        if let Some(view) = self.project.poll(engine) {
+        let control = &self.panels.control;
+        if let Some(view) = self.project.poll(engine, |e| control.stored_values(e)) {
             self.show_loaded(Some(view));
         }
         let engine = self.panels.engine.as_mut().expect("checked above");
