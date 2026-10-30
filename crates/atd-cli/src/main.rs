@@ -2,6 +2,7 @@
 
 mod bench;
 mod docs;
+mod export;
 mod isf_import;
 mod kernel;
 mod project;
@@ -72,6 +73,34 @@ enum Command {
         /// needs one fails. See docs/python-ops.md.
         #[arg(long)]
         allow_python_ops: bool,
+    },
+    /// Export a project as one portable show bundle (FR-S9): the project
+    /// folder with every file its nodes use from outside it copied into
+    /// media/, parameters rewritten as relative paths, and bundle.toml
+    /// listing every file's SHA-256 and the platform capabilities nodes
+    /// need. The copy is verified as `verify-show` does. See
+    /// docs/show-export.md.
+    ExportShow {
+        /// Project folder (`*.atidarla`).
+        project: PathBuf,
+        /// Folder to write the bundle into, as <OUT>/<project folder name>.
+        out: PathBuf,
+        /// Also write <OUT>/<project folder name>.zip.
+        #[arg(long)]
+        zip: bool,
+        /// Verify without a GPU (structure, paths and hashes only).
+        #[arg(long)]
+        no_gpu: bool,
+    },
+    /// Verify a show bundle on this machine: path parameters are relative
+    /// and exist with their exact case, every file matches its SHA-256 in
+    /// bundle.toml, and `check` passes (with --gpu, every node cooks).
+    VerifyShow {
+        /// The bundle folder.
+        bundle: PathBuf,
+        /// Also cook every node on a GPU.
+        #[arg(long)]
+        gpu: bool,
     },
     /// Run a project headless, optionally as a kiosk with watchdog (FR-H2, M3).
     Run { project: PathBuf },
@@ -234,6 +263,13 @@ fn main() -> ExitCode {
             target,
             emit_wgsl,
         } => kernel::run(&file, target.as_deref(), emit_wgsl),
+        Command::ExportShow {
+            project,
+            out,
+            zip,
+            no_gpu,
+        } => export::run(&project, &out, export::ExportOptions { zip, gpu: !no_gpu }),
+        Command::VerifyShow { bundle, gpu } => export::verify(&bundle, gpu),
         Command::Run { .. } => return not_yet("run", "M3 (FR-H2)"),
         Command::Bake { .. } => return not_yet("bake", "M2"),
         Command::Serve { .. } => return not_yet("serve", "M5 (FR-H3)"),

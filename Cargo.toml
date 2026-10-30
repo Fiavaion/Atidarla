@@ -65,6 +65,8 @@ skrifa = "0.44"
 epaint_default_fonts = "0.37"
 toml_edit = "0.25"
 rfd = "0.17"
+sha2 = "0.10"
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
