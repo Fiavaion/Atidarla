@@ -259,6 +259,7 @@ pub struct Renderer {
     platform: PlatformInfo,
     output: NodeId,
     output_label: String,
+    output_kind: WireType,
     fps: f64,
     /// Nodes already reported as not available on this platform.
     unavailable: BTreeSet<NodeId>,
@@ -283,6 +284,7 @@ impl Renderer {
             platform,
             output: NodeId(0),
             output_label: String::new(),
+            output_kind: WireType::Img,
             fps: DEFAULT_FPS,
             unavailable: BTreeSet::new(),
             warnings: Vec::new(),
@@ -295,6 +297,13 @@ impl Renderer {
     /// Loads the project at `dir` (replacing any loaded before; the texture
     /// pool stays warm) and picks the node to render.
     pub fn load(&mut self, dir: &Path, opts: &RenderOptions) -> Result<()> {
+        self.load_as(dir, opts, &[WireType::Img])
+    }
+
+    /// [`load`](Self::load) with the output picked among the node types in
+    /// `wants` (first one with a node wins when `opts.node` is unset);
+    /// [`output_kind`](Self::output_kind) tells which was picked.
+    pub fn load_as(&mut self, dir: &Path, opts: &RenderOptions, wants: &[WireType]) -> Result<()> {
         let mut project = atd_format::load(dir)?;
         let net = project
             .networks
@@ -334,7 +343,8 @@ impl Renderer {
             .packs
             .flatten(&net, &registry)
             .map_err(crate::project::pack_error)?;
-        let (output, label) = output_node(&net, &registry, &flat, opts.node.as_deref())?;
+        let (output, label, kind) =
+            output_node(&net, &registry, &flat, opts.node.as_deref(), wants)?;
         self.fps = opts.fps;
         self.engine.set_mode(CookMode::Offline { fps: opts.fps });
         self.engine.set_project_dir(Some(dir.to_owned()));
@@ -379,6 +389,7 @@ impl Renderer {
         self.engine.set_resolution(w, h);
         self.output = output;
         self.output_label = label;
+        self.output_kind = kind;
         self.unavailable.clear();
         let net = self.engine.network();
         for node in net.nodes() {
@@ -397,10 +408,9 @@ impl Renderer {
         Ok(())
     }
 
-    /// Cooks frame `i` (at `i / fps` seconds) and reads back the output.
-    /// Fails on a node error; operators this platform does not run
-    /// (capability flags, PRD A19) are reported as warnings.
-    pub fn frame(&mut self, i: u64) -> Result<Frame> {
+    /// Cooks frame `i` (at `i / fps` seconds) with the output node and what
+    /// the timeline watches; fails on a node error.
+    fn cook(&mut self, i: u64) -> Result<()> {
         self.engine.set_frame(i);
         let mut requested = vec![self.output];
         if let Some(p) = &mut self.timeline {
@@ -436,6 +446,33 @@ impl Renderer {
         if !errors.is_empty() {
             bail!("frame {i}: node errors: {}", errors.join("; "));
         }
+        Ok(())
+    }
+
+    /// Cooks frame `i` and converts the output GEO node's geometry to a CPU
+    /// mesh (MSH networks keep CPU copies of every attribute).
+    pub fn mesh(&mut self, i: u64) -> Result<atd_ops_msh::mesh::Mesh> {
+        self.cook(i)?;
+        let geo = self.engine.geometry(self.output).with_context(|| {
+            format!(
+                "frame {i}: {} has no geometry (is it a GEO node that cooked?)",
+                self.output_name()
+            )
+        })?;
+        atd_ops_msh::mesh::Mesh::from_geometry(geo, None)
+            .map_err(|e| anyhow::anyhow!("frame {i}: {}: {e}", self.output_name()))
+    }
+
+    /// The type of the node [`load_as`](Self::load_as) picked.
+    pub fn output_kind(&self) -> WireType {
+        self.output_kind
+    }
+
+    /// Cooks frame `i` (at `i / fps` seconds) and reads back the output.
+    /// Fails on a node error; operators this platform does not run
+    /// (capability flags, PRD A19) are reported as warnings.
+    pub fn frame(&mut self, i: u64) -> Result<Frame> {
+        self.cook(i)?;
         let texture = self.engine.result(self.output).with_context(|| {
             format!(
                 "frame {i}: {} has no image (is it an IMG node that cooked?)",
@@ -465,22 +502,31 @@ impl Renderer {
 }
 
 /// The node to render, as a node of the flat network and a name for
-/// people: `name` if given (an IMG node of the project, a Pack instance
-/// with an IMG output, or a node inside one as `glow1/blur1`), otherwise
-/// the node the app's viewer shows first: the last IMG node nothing reads
-/// from, else the last IMG node. (The viewer's rule, `atd-app/src/
-/// project.rs`, limited to IMG nodes.)
+/// people: `name` if given (a node of the project whose output type is in
+/// `wants`, a Pack instance with such an output, or a node inside one as
+/// `glow1/blur1`), otherwise the node the app's viewer shows first: the
+/// last node of the first type in `wants` that has one and that nothing
+/// reads from, else the last such node. (The viewer's rule, `atd-app/src/
+/// project.rs`, limited to `wants`.) `render` wants IMG only; `bake` wants
+/// GEO, then IMG.
 fn output_node(
     net: &Network,
     registry: &Registry,
     flat: &Flat,
     name: Option<&str>,
-) -> Result<(NodeId, String)> {
-    let is_img = |net: &Network, id: NodeId| {
+    wants: &[WireType],
+) -> Result<(NodeId, String, WireType)> {
+    let kind_of = |net: &Network, id: NodeId| {
         net.node(id)
             .and_then(|n| registry.get(&n.type_id))
             .and_then(|s| s.outputs.first())
-            .is_some_and(|o| o.wire == WireType::Img)
+            .map(|o| o.wire)
+            .filter(|w| wants.contains(w))
+    };
+    let what = if wants == [WireType::Img] {
+        "IMG"
+    } else {
+        "GEO or IMG"
     };
     if let Some(name) = name {
         let found = net
@@ -496,43 +542,57 @@ fn output_node(
         let Some((node, within)) = found else {
             let names: Vec<&str> = net
                 .nodes()
-                .filter(|n| is_img(net, n.id))
+                .filter(|n| kind_of(net, n.id).is_some())
                 .map(|n| n.name.as_str())
                 .collect();
             bail!(
-                "--node {name}: no such node (IMG nodes: {})",
+                "--node {name}: no such node ({what} nodes: {})",
                 names.join(", ")
             );
         };
-        if !is_img(within, node.id) {
+        let Some(kind) = kind_of(within, node.id) else {
             bail!(
-                "--node {name}: {} is not an IMG node, so it has no image to render",
-                node.type_id
+                "--node {name}: {} is not an {what} node, so it has nothing to {}",
+                node.type_id,
+                if wants == [WireType::Img] {
+                    "render"
+                } else {
+                    "bake"
+                }
             );
-        }
+        };
         let id = flat
             .view(node.id)
             .with_context(|| format!("--node {name}: the Pack has no output to render"))?;
-        return Ok((id, name.to_owned()));
+        return Ok((id, name.to_owned(), kind));
     }
     let read: BTreeSet<NodeId> = net.wires().map(|w| w.from.node).collect();
-    let ids: Vec<NodeId> = net
-        .nodes()
-        .map(|n| n.id)
-        .filter(|&id| is_img(net, id))
-        .collect();
-    let id = ids
-        .iter()
-        .rev()
-        .copied()
-        .find(|id| !read.contains(id))
-        .or_else(|| ids.last().copied())
-        .context("the project has no IMG node to render; add one, or pick one with --node")?;
+    let mut picked = None;
+    for &want in wants {
+        let ids: Vec<NodeId> = net
+            .nodes()
+            .map(|n| n.id)
+            .filter(|&id| kind_of(net, id) == Some(want))
+            .collect();
+        picked = ids
+            .iter()
+            .rev()
+            .copied()
+            .find(|id| !read.contains(id))
+            .or_else(|| ids.last().copied());
+        if picked.is_some() {
+            break;
+        }
+    }
+    let id = picked.with_context(|| {
+        format!("the project has no {what} node to render; add one, or pick one with --node")
+    })?;
+    let kind = kind_of(net, id).expect("picked by kind");
     let label = net.node(id).map(|n| n.name.clone()).unwrap_or_default();
     let flat_id = flat
         .view(id)
         .with_context(|| format!("{label}: the Pack has no output to render"))?;
-    Ok((flat_id, label))
+    Ok((flat_id, label, kind))
 }
 
 /// How an operator behaves in an offline render (`docs/render.md` has the
