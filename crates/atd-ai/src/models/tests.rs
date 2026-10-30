@@ -19,6 +19,8 @@ fn the_catalogue_parses_and_every_entry_is_pinned_and_classed() {
         "dwpose",
         "raft",
         "swin2sr-x4",
+        "whisper-base",
+        "whisper-small",
     ] {
         assert!(cat.get(id).is_some(), "{id} missing");
     }
@@ -58,6 +60,13 @@ fn the_catalogue_parses_and_every_entry_is_pinned_and_classed() {
     );
     assert_eq!(licence_class("taesd"), Some(LicenceClass::CommercialSafe));
     assert_eq!(licence_class("nope"), None);
+    // Speech-to-text (FR-A13): faster-whisper conversions, MIT.
+    for id in ["whisper-base", "whisper-small"] {
+        let m = cat.get(id).unwrap();
+        assert_eq!(m.adapter, "stt.whisper", "{id}");
+        assert_eq!(m.licence.class, LicenceClass::CommercialSafe, "{id}");
+        assert_eq!(m.main_file().path, "model.bin", "{id}");
+    }
 }
 
 #[test]
