@@ -34,15 +34,14 @@ fn temp(name: &str) -> PathBuf {
 }
 
 fn git(repo: &Path, args: &[&str]) -> Output {
-    let out = Command::new("git")
+    Command::new("git")
         .arg("-C")
         .arg(repo)
         .args(args)
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .output()
-        .expect("git runs");
-    out
+        .expect("git runs")
 }
 
 fn ok(repo: &Path, args: &[&str]) {

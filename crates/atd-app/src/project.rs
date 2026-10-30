@@ -597,7 +597,7 @@ fn absolute_paths(engine: &Engine) -> Vec<Edit> {
     })
 }
 
-fn portable_paths(engine: &Engine, dir: &Path) -> Network {
+pub(crate) fn portable_paths(engine: &Engine, dir: &Path) -> Network {
     let mut net = engine.network().clone();
     let edits = path_edits(engine, &net, |path| {
         let rel = path.strip_prefix(dir).ok().filter(|_| path.is_absolute())?;

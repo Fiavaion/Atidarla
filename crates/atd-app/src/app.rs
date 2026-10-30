@@ -92,6 +92,10 @@ struct Panels {
     models: crate::models_panel::ModelsPanel,
     /// Sovereign mode, spend cap and AI Hosts (FR-A2, FR-A7, FR-A8).
     ai_hosts: crate::ai_hosts::AiHostsPanel,
+    /// Compare with a folder or Git revision (FR-F2).
+    diff: crate::diff_view::DiffView,
+    /// Three-way merge and conflict resolution (FR-F3).
+    merge: crate::merge::MergePanel,
 }
 
 impl AtidarlaApp {
@@ -208,6 +212,8 @@ impl AtidarlaApp {
                 outputs: Default::default(),
                 models: Default::default(),
                 ai_hosts: Default::default(),
+                diff: Default::default(),
+                merge: Default::default(),
             },
             smoke: smoke.map(Smoke::new),
             start: Instant::now(),
@@ -364,6 +370,20 @@ impl eframe::App for AtidarlaApp {
                         self.panels.ai_hosts.open = true;
                     }
                     if ui
+                        .button("Diff")
+                        .on_hover_text("Compare the open project with a folder or Git revision")
+                        .clicked()
+                    {
+                        self.panels.diff.open = true;
+                    }
+                    if ui
+                        .button("Merge")
+                        .on_hover_text("Three-way merge, or resolve a conflicted project")
+                        .clicked()
+                    {
+                        self.panels.merge.open = true;
+                    }
+                    if ui
                         .button(tab_title(Tab::Textport))
                         .on_hover_text("Python console over the open project")
                         .clicked()
@@ -430,6 +450,19 @@ impl eframe::App for AtidarlaApp {
         p.models.window(ui.ctx(), &mut meta.ai, &meta.models);
         p.ai_hosts.window(ui.ctx(), &mut meta.ai);
         p.ai_hosts.confirm(ui.ctx(), &mut meta.ai);
+        p.diff.window(ui.ctx(), p.engine.as_ref(), &self.project);
+        let merged = p.merge.window(ui.ctx(), p.engine.as_ref(), &self.project);
+        if let (Some(merged), Some(engine)) = (merged, p.engine.as_mut()) {
+            p.merge.status = Some(
+                match crate::merge::apply_to_open(engine, &mut self.project, merged) {
+                    Ok(()) => (
+                        "Merged into the open project (Edit > Undo reverts the patch).".into(),
+                        false,
+                    ),
+                    Err(e) => (e, true),
+                },
+            );
+        }
         self.cook_and_present(ui.ctx(), frame);
         self.textport_frame(ui.ctx());
         if let Some(smoke) = &mut self.smoke {
