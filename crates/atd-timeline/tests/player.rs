@@ -107,8 +107,10 @@ fn playing_tracks_set_live_values_without_allocating() {
     )
     .unwrap();
 
-    let mut doc = TimelineDoc::default();
-    doc.length = 100.0;
+    let mut doc = TimelineDoc {
+        length: 100.0,
+        ..TimelineDoc::default()
+    };
     for (node, param, component) in [
         (level, "brightness", None),
         (colour, "colour", Some(0)),
@@ -164,8 +166,10 @@ fn stop_leaves_values_another_writer_set() {
         return;
     };
     let level = add(&mut e, "img.level");
-    let mut doc = TimelineDoc::default();
-    doc.length = 10.0;
+    let mut doc = TimelineDoc {
+        length: 10.0,
+        ..TimelineDoc::default()
+    };
     for param in ["brightness", "gamma"] {
         let t = doc.track_mut(level, param, None);
         t.set_key(0.0, 0.5);
