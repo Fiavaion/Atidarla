@@ -22,7 +22,10 @@
 //! Path parameters (movies, audio, fonts) may be relative: they are
 //! relative to the project folder (`Params::resolve` in `atd-gpu`).
 
+pub mod diff;
+pub mod git;
 pub mod mappings;
+pub mod merge;
 pub mod models;
 mod network;
 pub mod pack;
@@ -219,8 +222,14 @@ fn io(path: &Path) -> impl FnOnce(std::io::Error) -> FormatError + '_ {
     }
 }
 
-/// Reads a project folder.
+/// Reads a project folder. A network file still holding a merge conflict
+/// block (left by the Git merge driver, see [`merge`]) is an error: open
+/// it with [`merge::open_conflicted`] and resolve it first.
 pub fn load(dir: &Path) -> Result<Project, FormatError> {
+    load_with(dir, false)
+}
+
+pub(crate) fn load_with(dir: &Path, allow_conflicts: bool) -> Result<Project, FormatError> {
     let path = dir.join("project.toml");
     let text = std::fs::read_to_string(&path).map_err(io(&path))?;
     let mut project = project_from_str(&text).map_err(|e| e.in_file("project.toml"))?;
@@ -246,6 +255,14 @@ pub fn load(dir: &Path) -> Result<Project, FormatError> {
             });
         }
         let text = std::fs::read_to_string(&path).map_err(io(&path))?;
+        if !allow_conflicts && merge::has_conflict_block(&text) {
+            return Err(FormatError::InFile {
+                file,
+                message: "unresolved merge conflicts: resolve them in the app (View > Merge) \
+                          or with `atidarla merge` (docs/merge.md)"
+                    .into(),
+            });
+        }
         let net = network_from_str(&text).map_err(|e| e.in_file(&file))?;
         project.networks.insert(id, net);
     }
@@ -385,3 +402,6 @@ mod timeline_tests;
 
 #[cfg(test)]
 mod models_tests;
+
+#[cfg(test)]
+mod merge_tests;

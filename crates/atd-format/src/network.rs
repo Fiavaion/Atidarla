@@ -274,7 +274,7 @@ pub(crate) fn string(s: &str) -> Value {
     Value::from(s)
 }
 
-fn param_to_toml(param: &Json) -> Result<Value, String> {
+pub(crate) fn param_to_toml(param: &Json) -> Result<Value, String> {
     let value = &param["value"];
     let expr = param.get("expr").and_then(Json::as_str);
     let bind = param.get("bind").filter(|b| !b.is_null());
@@ -300,7 +300,7 @@ fn param_to_toml(param: &Json) -> Result<Value, String> {
     Ok(Value::InlineTable(t))
 }
 
-fn param_from_toml(item: &Item) -> Result<Json, String> {
+pub(crate) fn param_from_toml(item: &Item) -> Result<Json, String> {
     let Some(t) = item.as_table_like() else {
         let v = item.as_value().ok_or("not a value")?;
         return Ok(json!({ "value": toml_to_json(v)? }));
