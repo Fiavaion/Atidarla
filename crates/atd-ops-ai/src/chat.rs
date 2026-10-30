@@ -236,6 +236,14 @@ impl ChatOp {
 impl SigOp for ChatOp {
     fn cook(&mut self, ctx: &mut SigCtx<'_>) -> Result<(), String> {
         let p = ctx.params;
+        if p.mode().is_offline() {
+            // A sink offline (docs/render.md): nothing is sent or published.
+            let mut w = ctx.output.writer();
+            for name in ["busy", "new_reply", "replies", "error"] {
+                w.push(name, 0.0);
+            }
+            return Ok(());
+        }
         if let Err(e) = self.configure(&p) {
             ctx.output.writer().keep_previous();
             return Err(e);

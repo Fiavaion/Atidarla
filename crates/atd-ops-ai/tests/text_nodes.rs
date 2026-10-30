@@ -16,7 +16,7 @@ use atd_ai::refhost::{RefHostOptions, serve};
 use atd_ai::supervisor::{HostKind, HostSpec, Supervisor};
 use atd_core::graph::{Edit, Network, Node, NodeId, Param};
 use atd_core::registry::Registry;
-use atd_gpu::engine::{Channels, Params, SigCtx, SigInputs, SigOp};
+use atd_gpu::engine::{Channels, CookMode, Params, SigCtx, SigInputs, SigOp};
 use atd_ops_ai::{chat, stt, text};
 use serde_json::{Value, json};
 
@@ -131,6 +131,10 @@ impl Rig {
 
     /// Cooks once with `input` (if any) on input 0.
     fn cook(&mut self, input: Option<&Channels>) -> Result<(), String> {
+        self.cook_in(CookMode::Live, input)
+    }
+
+    fn cook_in(&mut self, mode: CookMode, input: Option<&Channels>) -> Result<(), String> {
         match input {
             Some(c) => {
                 self.sig.entry(self.src).or_default().copy_from(c);
@@ -143,7 +147,7 @@ impl Rig {
         let mut ctx = SigCtx {
             inputs: SigInputs::new(&sources, &self.sig),
             output: &mut self.out,
-            params: Params::new(&self.net, &self.reg, &self.sig, self.id),
+            params: Params::new(&self.net, &self.reg, &self.sig, self.id).with_mode(mode),
             time: 0.0,
             dt: 1.0 / 60.0,
             frame: 0,
@@ -389,4 +393,42 @@ fn sovereign_mode_refuses_anthropic_with_a_node_error() {
     );
     assert_eq!(rig.value("error"), 1.0);
     assert!(text::get("test-sovereign").is_none());
+}
+
+#[test]
+fn offline_renders_send_and_publish_nothing() {
+    let (url, seen) = fake_ollama();
+    let offline = CookMode::Offline { fps: 60.0 };
+    let mut chat = Rig::new(
+        "ai.llm_chat",
+        &[
+            ("endpoint", json!(url)),
+            ("prompt", json!("hi")),
+            ("send", json!(true)),
+            ("publish", json!("test-offline-reply")),
+        ],
+    );
+    let mut stt = Rig::new(
+        "ai.stt",
+        &[
+            ("model", json!("builtin.stt_echo")),
+            ("hang_ms", json!(50.0)),
+            ("min_ms", json!(0.0)),
+            ("publish", json!("test-offline-speech")),
+        ],
+    );
+    let (mut loud, mut quiet) = (Channels::default(), Channels::default());
+    block(&mut loud, 0.5);
+    block(&mut quiet, 0.0);
+    for i in 0..60 {
+        chat.cook_in(offline, None).unwrap();
+        let input = if i < 20 { &loud } else { &quiet };
+        stt.cook_in(offline, Some(input)).unwrap();
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert!(seen.lock().unwrap().is_empty());
+    assert_eq!((chat.value("busy"), chat.value("replies")), (0.0, 0.0));
+    assert_eq!((stt.value("active"), stt.value("count")), (0.0, 0.0));
+    assert!(text::get("test-offline-speech").is_none());
+    assert!(text::get("test-offline-reply").is_none());
 }
