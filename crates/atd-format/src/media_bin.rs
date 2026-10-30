@@ -154,6 +154,11 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     (yoe + era * 400 + i64::from(m <= 2), m, d)
 }
 
+/// `created` as people read it: `2026-10-30T12:00:00Z`.
+pub fn created_text(secs: u64) -> String {
+    datetime(secs).to_string()
+}
+
 /// Seconds since 1970 as a UTC TOML datetime.
 fn datetime(secs: u64) -> Datetime {
     let days = (secs / 86_400) as i64;

@@ -7,6 +7,7 @@ mod canvas;
 mod channels;
 mod dock;
 mod mappings;
+mod media_bin;
 mod models_panel;
 mod outputs;
 mod params;
