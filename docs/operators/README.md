@@ -173,7 +173,7 @@ No operators yet.
 
 - [Window](cmp/window.md) — An output to a projector or screen: maps its input through slices (source rectangle to a warped destination: corner pin, grid or Bezier warp), masks and soft edges, or shows a test pattern, at the output's resolution. The app opens a native window per enabled Window on the chosen display; headless runs and renders produce the mapped image only.
 
-## AI (11)
+## AI (12)
 
 - [Background Remove](ai/background.md) — Removes the background: the input with the subject's mask in alpha. Runs with ONNX Runtime on an AI Host, using the best execution provider there (Core ML, CUDA, TensorRT, DirectML or CPU); asynchronous, governed like every AI node.
 - [Control Prep](ai/control_prep.md) — Prepares a control image for diffusion conditioning, on the GPU: Canny-style edges (thin, with hysteresis), soft edges, line art (dark lines on white), scribble (thick lines) or a threshold. Feed it to the Diffusion node's `control` input.
@@ -183,6 +183,7 @@ No operators yet.
 - [ONNX Inference](ai/onnx.md) — Runs an ONNX model of your choice on the input. Runs with ONNX Runtime on an AI Host, using the best execution provider there (Core ML, CUDA, TensorRT, DirectML or CPU); asynchronous, governed like every AI node.
 - [Optical Flow](ai/optical_flow.md) — Estimates optical flow between consecutive frames: red and green carry the horizontal and vertical motion around mid-grey. Runs with ONNX Runtime on an AI Host, using the best execution provider there (Core ML, CUDA, TensorRT, DirectML or CPU); asynchronous, governed like every AI node.
 - [Pose](ai/pose.md) — Finds body keypoints and draws the skeleton over black. Runs with ONNX Runtime on an AI Host, using the best execution provider there (Core ML, CUDA, TensorRT, DirectML or CPU); asynchronous, governed like every AI node.
+- [Prompt Clip](ai/prompt.md) — An AI clip for the Stage: wire it into a layer slot and the AI nodes that follow the deck (their `Prompts From` names the deck's Mixer) take its prompt, seed and LoRA. The clips playing on crossfader sides A and B are blended by the crossfader. Shows its input (or black) as its picture.
 - [Segment](ai/segment.md) — Segments people and objects: the mask is in alpha, classes are coloured. Runs with ONNX Runtime on an AI Host, using the best execution provider there (Core ML, CUDA, TensorRT, DirectML or CPU); asynchronous, governed like every AI node.
 - [Upscale](ai/upscale.md) — Upscales the input with a super-resolution model. Runs with ONNX Runtime on an AI Host, using the best execution provider there (Core ML, CUDA, TensorRT, DirectML or CPU); asynchronous, governed like every AI node.
 - [Video Model](ai/video_model.md) — Restyles live video with a streaming video-to-video model (FR-A11), on a local 24 GB+ NVIDIA host, a LAN host or a cloud provider; asynchronous, governed like every AI node.

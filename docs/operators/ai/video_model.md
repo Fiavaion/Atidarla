@@ -27,9 +27,10 @@ Cooks every frame (time-dependent).
 | `height` | Height | int | `512` | 8 – 2048 | Height of the frames sent to the model. |
 | `policy` | Governor | menu | `"blend"` | `hold`, `blend`, `flow`, `passthrough` | How the output fills the frames between AI results, at the project frame rate: `hold` shows the newest result; `blend` cross-fades from the previous result to the newest over one AI interval; `flow` interpolates along the motion between them; `passthrough` shows the input with the effect below whenever no result is fresh. |
 | `effect` | Effect | float | `0.5` | 0 – 1 | Strength of the desaturate-and-tint effect on the input shown before the first result (and when stale under `passthrough`). |
-| `in_flight` | In Flight | int | `2` | 1 – 4 | Frames sent to the host at once. More hides network latency; fewer keeps the result closer to the input. |
+| `in_flight` | In Flight | int | `1` | 1 – 4 | Frames sent to the host at once. More hides network latency; fewer keeps the result closer to the input. |
 | `budget_ms` | Latency Budget | float | `0.0` | 0 – 5000 | When the round trip stays above this many milliseconds for 3 s, the node moves to the next host on its route; 0 turns it off. |
 | `model` | Model | string | `"lucy-2.6"` |  | Streaming video model (a cloud provider's model name, or a local model id). |
+| `prompts_from` | Prompts From | string | `""` |  | The name of a Stage deck's Mixer: the Prompt Clips playing on its crossfader sides A and B become prompts 1 and 2, blended by the crossfader, with the leading clip's seed, negative and LoRA (AI clips). Empty: the prompts below. |
 | `prompt1` | Prompt 1 | string | `"a watercolour painting"` |  | A prompt of the Prompt Blend: the model sees the weighted mix of the prompts' embeddings. |
 | `weight1` | Weight 1 | float | `1.0` | 0 – 1 | This prompt's share of the blend (weights are normalised). Bind it to a channel or the crossfader to morph between prompts. |
 | `prompt2` | Prompt 2 | string | `""` |  | A prompt of the Prompt Blend: the model sees the weighted mix of the prompts' embeddings. |
