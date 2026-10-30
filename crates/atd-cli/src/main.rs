@@ -5,6 +5,7 @@ mod docs;
 mod isf_import;
 mod kernel;
 mod project;
+mod pt8;
 mod render;
 
 use std::path::PathBuf;
