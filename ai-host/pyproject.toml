@@ -27,6 +27,12 @@ vision = [
     "numpy>=2.0",
     "pillow>=11",
 ]
+# Decart realtime video-to-video (adapter `video.v2v`, model `decart/lucy-2.6`):
+# Decart's MIT SDK with its WebRTC (LiveKit, Apache-2.0) extra. Needs the
+# user's own DECART_API_KEY; see docs/cloud.md.
+cloud = [
+    "decart[realtime]==0.2.4",
+]
 
 [project.scripts]
 atd-ai-host = "atd_ai_host.__main__:main"

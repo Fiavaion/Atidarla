@@ -1,8 +1,9 @@
-"""`video.v2v`: video-to-video world models (interface only; backends arrive later).
+"""`video.v2v`: video-to-video world models.
 
 A backend registers itself in `BACKENDS` under its model id prefix (e.g.
-"decart"). Without an installed backend the adapter is not advertised and
-`model.load` answers UNSUPPORTED.
+"decart" for `decart/lucy-2.6`). Without an installed backend the adapter is
+not advertised and `model.load` answers UNSUPPORTED. Decart's backend
+(`cloud.decart`) installs itself when the `cloud` extra is present.
 """
 
 from __future__ import annotations
@@ -14,6 +15,16 @@ from ..frames import Frame
 from . import Adapter, Progress
 
 BACKENDS: dict[str, Callable[[str, str | None, dict, Progress], Adapter]] = {}
+
+
+def _install_backends() -> None:
+    from ..cloud import decart
+
+    if decart.sdk_available():
+        BACKENDS["decart"] = decart.DecartBackend
+
+
+_install_backends()
 
 
 class VideoAdapter(Adapter):
@@ -36,6 +47,9 @@ class VideoAdapter(Adapter):
 
     def process(self, state, frame: Frame, params: dict) -> tuple[Frame, bool]:
         return self._impl.process(state, frame, params)
+
+    def extras(self, state) -> dict:
+        return self._impl.extras(state)
 
     def close(self) -> None:
         self._impl.close()

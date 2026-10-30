@@ -43,6 +43,10 @@ class Adapter:
         """Returns (output frame, skipped)."""
         raise NotImplementedError
 
+    def extras(self, state: Any) -> dict:
+        """Extra fields for the frame result just produced (e.g. `cost_s` from a metered service)."""
+        return {}
+
     def close(self) -> None:
         pass
 
