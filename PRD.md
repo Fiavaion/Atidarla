@@ -1,6 +1,6 @@
 # Atidarla — PRD.md
 
-**Version:** 1.3 (A9, A12, A24–A52 ratified 2026-10-30; see §0) · **Date:** 30 October 2026 · **Owner:** Mark
+**Version:** 1.4 (A9, A12, A13, A14, A20, A24–A52 ratified 2026-10-30; A57–A61 decided for M4; see §0) · **Date:** 30 October 2026 · **Owner:** Mark
 **Companion:** `RESEARCH.md` v1.0 (evidence for every decision below; section refs as `R§n`)
 **Supersedes:** NascD PRD v0.4 (11 July 2026)
 **Execution:** Claude Code, milestone by milestone (M0–M6, then M7+ horizon). Each milestone ends only when every acceptance criterion passes.
@@ -27,14 +27,14 @@ Status key: **Ratified** = decided by Mark · **Carried** = ratified for NascD a
 | A10 | Eight operator families mapped to TouchDesigner: **IMG** (TOP), **SIG** (CHOP), **PNT** (POP, GPU), **MSH** (SOP, CPU topology), **MAT**, **DAT**, **CMP** (COMP), **AI**; PNT and MSH share one GEO wire type with automatic GPU/CPU residency; **~200 operators by v1.0** (registry §6) | Ratified 2026-10-15 (replaces ~176-op NascD registry and the ~125 draft) | R§2.2, R§2.3, Mark |
 | A11 | Project format = **folder of text files** (one file per network/Pack, stable IDs); binary only for caches | Ratified 2026-10-16 (revises NascD `.nascdata`) | Gap 5; layout §5.5, TOML |
 | A12 | **Kernel DSL** (VEX-flavoured) lowered via typed IR to WGSL; raw WGSL escape-hatch node | Ratified 2026-10-30 (Mark) | R§5.4 |
-| A13 | Adopt differentiators **D1–D10, D12–D14 for v1.0**; **D11 (multi-machine), D15 (web player) in M7** | Proposed | R§7 |
-| A14 | Ableton Link and NDI ship as **optional plugins** (licence isolation, dynamic load) | Proposed | R§5.2 |
+| A13 | Adopt differentiators **D1–D10, D12–D14 for v1.0**; **D11 (multi-machine), D15 (web player) in M7** | Ratified 2026-10-30 | R§7 |
+| A14 | Ableton Link and NDI ship as **optional plugins** (licence isolation, dynamic load) | Ratified 2026-10-30 | R§5.2 |
 | A15 | Carried NascD additions: ISF import, HAP-first codecs, headless/offline bake, OSCQuery, built-in MCP server | Carried (NascD D3) | |
 | A16 | Lab performance baseline **RTX 4070 12 GB**; low-spec guard rail = GTX 1660-class / Apple M1 with AI disabled | Carried | |
 | A17 | No telemetry; crash reports opt-in, written locally first | Carried | |
 | A18 | **Platform priority: Windows and macOS are the supported targets; Linux is nice-to-have** — kept compiling where cheap, never gates a milestone | Ratified 2026-10-15 | Mark |
 | A19 | **Platform-exclusive capabilities are allowed** when hardware or SDKs require it (e.g. NVIDIA real-time diffusion, Kinect/Orbbec, Spout vs Syphon); each is declared in the operator registry as a capability flag, shown in the UI, and degrades gracefully (route to LAN/cloud, hide, or substitute) on other platforms | Ratified 2026-10-15 (follows A7) | Mark |
-| A20 | **In-house dock widget in `atd-app`** until `egui_dock` supports egui 0.37 (it and `egui_tiles` target 0.36 as of 2026-10-15); same API shape so it can be swapped back. Keeps the A5 pins (egui 0.37, wgpu 30) intact | Proposed 2026-10-15 (M0) | `docs/milestones/M0.md` |
+| A20 | **In-house dock widget in `atd-app`** until `egui_dock` supports egui 0.37 (it and `egui_tiles` target 0.36 as of 2026-10-15); same API shape so it can be swapped back. Keeps the A5 pins (egui 0.37, wgpu 30) intact | Ratified 2026-10-30 (proposed 2026-10-15, M0) | `docs/milestones/M0.md` |
 | A21 | **M1 AC2 corpus = the public ISF collection as it exists** (Vidvox/ISF-Files at `395072d`, 327 shaders), replacing the "500 shaders" in §9; the ≥90% bar is unchanged | Ratified 2026-10-16 | The collection has 327 shaders; `docs/milestones/M1.md` |
 | A22 | **Expressions (FR-P2) in two tiers:** a native expression subset (arithmetic, maths functions, `time`/`frame`, `me.digits`, parameter and channel references) evaluated in Rust on the cook path; any other expression runs as Python on the Python worker thread, its result latched for the next frame (one frame late, marked in the UI). The render thread never waits on Python (rule 1) | Ratified 2026-10-16 | `docs/milestones/M1.md` |
 | A23 | **Video packaging:** FFmpeg as an **LGPL build** (no `--enable-gpl`/`--enable-nonfree`), **dynamically linked** and shipped as replaceable shared libraries beside the app; hardware decode through the platform APIs (D3D11VA/NVDEC on Windows, VideoToolbox on macOS) with software fallback. HAP stays native (no FFmpeg) | Ratified 2026-10-16 | A4, rule 3; `docs/milestones/M1.md` |
@@ -71,6 +71,11 @@ Status key: **Ratified** = decided by Mark · **Carried** = ratified for NascD a
 | A54 | **Stage and Timeline over one graph (A9):** a layer is an IMG operator (`img.layer`) whose inputs are clip slots and whose `target` parameter is what plays; a deck is `img.mixer`; clips are ordinary IMG nodes or Packs wired into slots; launching is a parameter edit (undoable, saved, recordable, deterministic offline); quantised launch reads the clock (`sig.beat`) inside the layer's cook. MIDI/OSC mappings and timeline tracks write **live values** (`Engine::set_live`), which win over binding, expression and stored value and are neither edits nor saved. Timeline and mappings are text files in the project (`timeline.toml`, `mappings.toml`) | Decided 2026-10-30 by Claude under A9, for Mark's review | `docs/milestones/M3.md` |
 | A55 | **Syphon (macOS Share In/Out) and capability alternatives:** the official Syphon framework (BSD-3-Clause, notice in `third-party/Syphon/`) is fetched at a pinned commit and built unmodified by `atd-interop`'s build script on macOS, and loaded at run time with `dlopen` (bundle `Contents/Frameworks`, beside the executable, or `ATD_SYPHON_FRAMEWORK`), so binaries start without it and the nodes say why. A capability flag's OS token may list alternatives (`win\|mac`); Share In/Out declare `win\|mac` with the Hide fallback elsewhere | Decided 2026-10-30 by Claude, for Mark's review | `docs/spikes/a-texture-sharing.md`, `docs/milestones/M1.md` |
 | A56 | The engine fuses straight runs of per-point stages (`GeoOp::point_stage`) whose inner results cannot be read into one kernel; stage code is shared with the unfused kernels and inputs pass through an opaque XOR, so fused output is byte-identical. Reason: Design D9 after S3; 30 Transforms at 2M points 5.7-6.7× faster on an M5 Pro. | Decided 2026-10-30 under A49, for Mark's review | Source: docs/milestones/m2/pnt-batch.md |
+| A57 | **AI Host Protocol v1** (`docs/ai-host-protocol.md`): JSON-RPC lines with an optional binary payload after a line (`"payload": n`), pipelined requests answered by id, host notifications; transports `shm` (local ring) and `inline` (LAN and cloud: RGBA8 or JPEG on the socket); token required whenever a host listens beyond loopback; adapters (`builtin`, `diffusion.sd`, `onnx`, `video.v2v`) named in `model.load`. Reason: one protocol for local, LAN and Runpod hosts (A60); spike (d) showed the transport is not the bottleneck. | Decided 2026-10-30 under FR-A1, for Mark's review | `docs/milestones/M4.md` |
+| A58 | **Prompt Blend is built into every prompt-taking AI node** (four prompts with weights, sent as `prompts: [{text, weight}]`; the host caches each embedding and blends), not a separate node with its own wire: §5.4 has no prompt wire type, and weights are ordinary parameters, so SIG binds, expressions, live values and the crossfader (AI clips, FR-A5) drive them. | Decided 2026-10-30 under FR-A4, for Mark's review | `docs/milestones/M4.md` |
+| A59 | **First cloud targets: Decart and a self-hosted Runpod pod** running the AI Host container (same protocol as LAN). Daydream waits until its API terms and Scope licence are clear; fal later. Resolves open question 3. | Ratified 2026-10-30 (Mark) | §12 |
+| A60 | **The reference LAN host is Atidarla's own AI Host** (`atd-ai-host --listen`); Meitheal or any other estate can speak the same protocol. Resolves open question 4. | Ratified 2026-10-30 (Mark) | §12 |
+| A61 | **Model files live in a per-user cache** (`~/Library/Caches/Atidarla/models` on macOS, `%LOCALAPPDATA%\Atidarla\models` on Windows, `$XDG_CACHE_HOME/atidarla/models` on Linux; `ATD_MODELS_DIR` overrides), never in a project or the repo; licence acceptance is recorded per user beside it; a project lists the models it needs (id, licence class, checksum) in `project.toml`. Mark accepted the SD-Turbo community licence for benchmarking on 2026-10-30. | Decided 2026-10-30 under FR-A12, for Mark's review | `docs/milestones/M4.md` |
 
 ---
 
@@ -427,8 +432,8 @@ Linux as a supported platform (A18) · Multi-machine frame-locked sync and outpu
 ---
 
 ## 12. Open questions (resolve during M0)
-1. Ratify the remaining Proposed decisions (A13, A14, A20; the others were ratified by 2026-10-30).
+1. ~~Ratify the remaining Proposed decisions~~ All ratified by 2026-10-30.
 2. Confirm PT-3 after the RTX 4070 benchmark.
-3. Which cloud providers to support first (proposal: Decart + self-hosted Runpod container; Daydream once its API terms and Scope licence are clear).
-4. Should the NCAD AI estate (Meitheal orchestrator) be the reference LAN host implementation?
+3. ~~Which cloud providers to support first~~ Decart + self-hosted Runpod (A59).
+4. ~~Meitheal as the reference LAN host?~~ No: Atidarla's own AI Host; Meitheal can speak the protocol (A60).
 5. Company GitHub org name and repo slug.
