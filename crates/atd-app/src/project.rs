@@ -28,7 +28,13 @@ pub enum Action {
 enum Dialog {
     Open(Receiver<Option<PathBuf>>),
     SaveAs(Receiver<Option<PathBuf>>),
+    /// A ComfyUI workflow to import into the open project.
+    ComfyWorkflow(Receiver<Option<PathBuf>>),
 }
+
+/// A ComfyUI workflow import running on its own thread (it reads the
+/// server's object_info).
+type ComfyImport = Receiver<Result<atd_ops_ai::comfy::Imported, String>>;
 
 /// The open project and its unsaved-change state.
 #[derive(Debug)]
@@ -55,6 +61,10 @@ pub struct ProjectState {
     /// The open project's kernel operators (`kernels/*.atk`,
     /// docs/kernel-dsl.md).
     pub kernels: Option<atd_ops_pnt::project::ProjectKernels>,
+    /// The open project's ComfyUI workflow operators (`comfy/*.json`,
+    /// docs/comfy.md).
+    pub comfy: Option<atd_ops_ai::comfy::ProjectComfy>,
+    comfy_import: Option<ComfyImport>,
     /// Counts projects opened or started; the textport starts afresh when
     /// it changes.
     pub opened: u64,
@@ -75,6 +85,8 @@ impl ProjectState {
             python: None,
             python_ask: false,
             kernels: None,
+            comfy: None,
+            comfy_import: None,
             opened: 0,
         }
     }
@@ -119,6 +131,7 @@ impl ProjectState {
                 engine.extend(|r, _| {
                     atd_py::ops::clear_custom(r);
                     atd_ops_pnt::project::clear_custom(r);
+                    atd_ops_ai::comfy::clear_custom(r);
                 });
                 let opened = self.opened + 1;
                 *self = Self::untitled(engine.network());
@@ -140,9 +153,13 @@ impl ProjectState {
                     view,
                     python,
                     kernels,
+                    comfy,
                 }) => {
                     self.saved = engine.network().clone();
                     self.message = Some((format!("Opened {}", dir.display()), false));
+                    if let Some(e) = comfy.errors().first() {
+                        self.message = Some((e.to_string(), true));
+                    }
                     if let Some(e) = kernels.errors().first() {
                         self.message = Some((e.to_string(), true));
                     }
@@ -154,6 +171,7 @@ impl ProjectState {
                     self.saved_mappings = meta.mappings.clone();
                     self.saved_timeline = meta.timeline.clone();
                     self.kernels = (!kernels.is_empty()).then_some(kernels);
+                    self.comfy = (!comfy.is_empty()).then_some(comfy);
                     self.meta = meta;
                     self.dir = Some(dir);
                     self.opened += 1;
@@ -221,6 +239,60 @@ impl ProjectState {
         }
     }
 
+    /// Asks for a ComfyUI workflow (API format) and imports it into the
+    /// open project as operator `comfy.<name>` (docs/comfy.md). The server
+    /// is ComfyUI's default address; `atidarla comfy import --server` takes
+    /// another.
+    pub fn import_comfy(&mut self) {
+        if self.dir.is_none() {
+            self.message = Some((
+                "Save the project first: an imported workflow is stored in its comfy/ folder"
+                    .into(),
+                true,
+            ));
+            return;
+        }
+        if self.dialog.is_some() || self.comfy_import.is_some() {
+            return;
+        }
+        let pick = rfd::AsyncFileDialog::new()
+            .set_title("Import ComfyUI workflow (API format, from Workflow > Export (API))")
+            .add_filter("ComfyUI workflow (.json)", &["json"])
+            .pick_file();
+        self.dialog = Some(Dialog::ComfyWorkflow(spawn(pick)));
+    }
+
+    /// Registers the operators of a finished import, so the new one can be
+    /// added to the patch.
+    fn poll_comfy_import(&mut self, engine: &mut Engine) {
+        let Some(rx) = &self.comfy_import else { return };
+        let result = match rx.try_recv() {
+            Ok(r) => r,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => Err("the import stopped".into()),
+        };
+        self.comfy_import = None;
+        match (result, &self.dir) {
+            (Ok(imported), Some(dir)) => {
+                let comfy = atd_ops_ai::comfy::ProjectComfy::open(dir);
+                engine.extend(|r, l| comfy.register(r, l));
+                self.message = Some(match comfy.errors().first() {
+                    Some(e) => (e.to_string(), true),
+                    None => (
+                        format!(
+                            "Imported {} ({} parameters, {} image inputs): add it to the patch like any operator",
+                            imported.type_id, imported.params, imported.images
+                        ),
+                        false,
+                    ),
+                });
+                self.comfy = Some(comfy);
+            }
+            (Ok(_), None) => {}
+            (Err(e), _) => self.message = Some((format!("ComfyUI import: {e}"), true)),
+        }
+    }
+
     /// Handles a dialog that has been answered. Returns the node to view
     /// after an open.
     /// `store` is as for [`Self::save`].
@@ -229,9 +301,22 @@ impl ProjectState {
         engine: &mut Engine,
         store: impl FnOnce(&Engine) -> Vec<Edit>,
     ) -> Option<NodeId> {
+        self.poll_comfy_import(engine);
         let (rx, open) = match &self.dialog {
             Some(Dialog::Open(rx)) => (rx, true),
             Some(Dialog::SaveAs(rx)) => (rx, false),
+            Some(Dialog::ComfyWorkflow(rx)) => {
+                let picked = match rx.try_recv() {
+                    Ok(picked) => picked,
+                    Err(TryRecvError::Empty) => return None,
+                    Err(TryRecvError::Disconnected) => None,
+                };
+                self.dialog = None;
+                if let (Some(file), Some(dir)) = (picked, self.dir.clone()) {
+                    self.start_comfy_import(file, dir);
+                }
+                return None;
+            }
             None => return None,
         };
         let picked = match rx.try_recv() {
@@ -270,6 +355,32 @@ impl ProjectState {
             let store = store(engine);
             self.save_to(engine, &dir, store);
             None
+        }
+    }
+}
+
+impl ProjectState {
+    /// Imports `file` into the project at `dir` on its own thread.
+    fn start_comfy_import(&mut self, file: PathBuf, dir: PathBuf) {
+        let (tx, rx) = channel();
+        let spawned = std::thread::Builder::new()
+            .name("atd-comfy-import".into())
+            .spawn(move || {
+                let server = atd_ops_ai::comfy::DEFAULT_SERVER;
+                let _ = tx.send(atd_ops_ai::comfy::import(&file, &dir, server, None));
+            });
+        match spawned {
+            Ok(_) => {
+                self.comfy_import = Some(rx);
+                self.message = Some((
+                    format!(
+                        "Importing the workflow (reading {})…",
+                        atd_ops_ai::comfy::DEFAULT_SERVER
+                    ),
+                    false,
+                ));
+            }
+            Err(e) => self.message = Some((format!("ComfyUI import: {e}"), true)),
         }
     }
 }
@@ -330,6 +441,9 @@ pub struct Opened {
     /// Its kernel operators (`kernels/*.atk`): registered and watched for
     /// hot reload.
     pub kernels: atd_ops_pnt::project::ProjectKernels,
+    /// Its ComfyUI workflow operators (`comfy/*.json`), from the cached
+    /// object_info: opening reaches no server.
+    pub comfy: atd_ops_ai::comfy::ProjectComfy,
 }
 
 /// Loads the project at `dir` into `engine`.
@@ -353,16 +467,24 @@ pub fn open(engine: &mut Engine, dir: &Path) -> Result<Opened, String> {
     for e in kernels.errors() {
         log::warn!("{}: {e}", dir.display());
     }
+    let comfy = atd_ops_ai::comfy::ProjectComfy::open(dir);
+    for e in comfy.errors() {
+        log::warn!("{}: {e}", dir.display());
+    }
     // Validate against the new project's operators before replacing the
     // old project's, so a project that does not open leaves the patch as it was.
     let mut registry = engine.registry().clone();
     atd_py::ops::clear_custom(&mut registry);
     atd_ops_pnt::project::clear_custom(&mut registry);
+    atd_ops_ai::comfy::clear_custom(&mut registry);
     for op in python.ops() {
         let _ = registry.replace_custom(op.schema.clone(), atd_core::registry::PYTHON_CUSTOM);
     }
     for schema in kernels.schemas() {
         let _ = registry.replace_custom(schema.clone(), atd_core::registry::KERNEL_CUSTOM);
+    }
+    for schema in comfy.schemas() {
+        let _ = registry.replace_custom(schema.clone(), atd_core::registry::COMFY_CUSTOM);
     }
     // Pack instances are operators of the project's own Packs.
     let registry = project
@@ -371,9 +493,10 @@ pub fn open(engine: &mut Engine, dir: &Path) -> Result<Opened, String> {
         .map_err(|e| format!("{}: {e}", dir.display()))?;
     if let Err(e) = net.clone().validated(&registry) {
         let why = match &e {
-            atd_core::graph::GraphError::UnknownType(t) => {
-                python.explain(t).or_else(|| kernels.explain(t))
-            }
+            atd_core::graph::GraphError::UnknownType(t) => python
+                .explain(t)
+                .or_else(|| kernels.explain(t))
+                .or_else(|| comfy.explain(t)),
             _ => None,
         };
         return Err(match why {
@@ -396,6 +519,7 @@ pub fn open(engine: &mut Engine, dir: &Path) -> Result<Opened, String> {
         );
     }
     engine.extend(|r, l| kernels.register(r, l));
+    engine.extend(|r, l| comfy.register(r, l));
     if let Err(e) = kernels.watch() {
         log::warn!(
             "{}: kernel operators will not hot-reload: {e}",
@@ -427,6 +551,7 @@ pub fn open(engine: &mut Engine, dir: &Path) -> Result<Opened, String> {
         view,
         python,
         kernels,
+        comfy,
     })
 }
 
@@ -622,8 +747,9 @@ pub(crate) mod tests {
             view,
             python,
             kernels,
+            comfy,
         } = open(&mut e, &first).unwrap();
-        assert!(python.is_empty() && kernels.is_empty());
+        assert!(python.is_empty() && kernels.is_empty() && comfy.is_empty());
         assert_eq!(meta.name, "First");
         assert_eq!(e.config().width, 320);
         assert_eq!(file_param(&e, "inside"), "media/clip.mov");
@@ -703,6 +829,38 @@ pub(crate) mod tests {
         state.run(&mut e, Action::New);
         assert!(e.registry().get("kernel.grade").is_none());
         assert!(state.kernels.is_none());
+    }
+
+    /// Opening the ComfyUI example registers `comfy.invert` from its
+    /// cached object_info, without reaching a server; another project
+    /// clears it.
+    #[test]
+    fn opening_comfy_workflows_registers_their_operators() {
+        let Some(mut e) = engine() else { return };
+        let example =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/comfy-invert.atidarla");
+        let mut state = ProjectState::untitled(&Network::default());
+        let view = state.run(&mut e, Action::OpenDir(example));
+        let msg = state.message.clone().unwrap();
+        assert!(view.is_some() && !msg.1, "{}", msg.0);
+        assert!(state.comfy.is_some());
+        let invert = e.registry().get("comfy.invert").expect("comfy.invert");
+        assert_eq!(
+            e.registry().provenance("comfy.invert"),
+            Some(atd_core::registry::COMFY_CUSTOM)
+        );
+        assert!(
+            invert
+                .params
+                .iter()
+                .any(|p| p.name == "save_image_filename_prefix")
+        );
+        state.run(&mut e, Action::New);
+        assert!(e.registry().get("comfy.invert").is_none());
+        assert!(state.comfy.is_none());
+        // Importing needs a saved project.
+        state.import_comfy();
+        assert!(state.message.as_ref().is_some_and(|m| m.1));
     }
 
     #[test]

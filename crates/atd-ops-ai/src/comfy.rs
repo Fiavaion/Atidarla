@@ -26,9 +26,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::time::{Duration, Instant};
 
-use atd_ai::comfy::{
-    self as api, Client, DEFAULT_SERVER, Derived, Job, Param, Upload, Widget, Workflow,
-};
+pub use atd_ai::comfy::DEFAULT_SERVER;
+use atd_ai::comfy::{self as api, Client, Derived, Job, Param, Upload, Widget, Workflow};
 use atd_core::registry::{
     COMFY_CUSTOM, OpFamily, OperatorSchema, ParamSchema, Registry, SocketSchema, WireType,
 };

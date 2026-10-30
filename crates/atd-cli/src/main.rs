@@ -9,6 +9,11 @@ mod project;
 mod pt8;
 mod render;
 
+/// The mock ComfyUI server of `atd-ops-ai`'s tests, for the render test.
+#[cfg(test)]
+#[path = "../../atd-ops-ai/tests/mock_comfy/mod.rs"]
+mod mock_comfy;
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -183,6 +188,11 @@ enum Command {
         #[arg(long, requires = "gpu")]
         thumbs: Option<PathBuf>,
     },
+    /// ComfyUI workflows as project operators (FR-A10). See docs/comfy.md.
+    Comfy {
+        #[command(subcommand)]
+        command: ComfyCommand,
+    },
     /// Compile a Kernel DSL file (experimental, PRD A12) and print its errors,
     /// bindings and parameters, or the generated WGSL. See docs/kernel-dsl.md.
     Kernel {
@@ -194,6 +204,29 @@ enum Command {
         /// Print the generated WGSL instead of the summary.
         #[arg(long)]
         emit_wgsl: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ComfyCommand {
+    /// Import an API-format workflow (ComfyUI: Workflow > Export (API)) into
+    /// a project as operator comfy.<name>: reads the server's object_info
+    /// and writes comfy/<name>.json and comfy/<name>.info.json, so the
+    /// project opens without the server. The server must be on this machine
+    /// or the LAN (Sovereign mode).
+    Import {
+        /// The workflow file (`*.json`, API format).
+        workflow: PathBuf,
+        /// Project folder (`*.atidarla`).
+        #[arg(long)]
+        project: PathBuf,
+        /// The ComfyUI server, host:port.
+        #[arg(long, default_value = atd_ops_ai::comfy::DEFAULT_SERVER)]
+        server: String,
+        /// Operator name (lower-case letters, digits, _); default: from the
+        /// file name.
+        #[arg(long)]
+        name: Option<String>,
     },
 }
 
@@ -277,6 +310,31 @@ fn main() -> ExitCode {
             target,
             emit_wgsl,
         } => kernel::run(&file, target.as_deref(), emit_wgsl),
+        Command::Comfy {
+            command:
+                ComfyCommand::Import {
+                    workflow,
+                    project,
+                    server,
+                    name,
+                },
+        } => atd_ops_ai::comfy::import(&workflow, &project, &server, name.as_deref())
+            .map(|i| {
+                println!(
+                    "imported {}: wrote {} and {}; {} parameters, {} image inputs{}",
+                    i.type_id,
+                    i.files[0],
+                    i.files[1],
+                    i.params,
+                    i.images,
+                    if i.has_output {
+                        ""
+                    } else {
+                        " (no SaveImage or PreviewImage node: the output stays empty)"
+                    }
+                );
+            })
+            .map_err(anyhow::Error::msg),
         Command::ExportShow {
             project,
             out,
