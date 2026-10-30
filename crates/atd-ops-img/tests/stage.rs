@@ -251,3 +251,51 @@ fn mixer_composites_layers_through_the_crossfader() {
     set(&mut e, mixer, "master", json!(0.5));
     near(cook_px(&mut e, mixer, 0.0, 0), [128, 0, 64, 255]);
 }
+
+/// A layer cooks only the clips it shows: a clip in another slot does not
+/// cook while it waits, even when an edit dirties it, and shows its current
+/// state in the frame it is launched.
+#[test]
+fn only_the_playing_clip_cooks() {
+    let mut e = engine_or_skip!();
+    let red = add(
+        &mut e,
+        "img.constant",
+        &[("colour", json!([1.0, 0.0, 0.0, 1.0]))],
+    );
+    let waiting = add(
+        &mut e,
+        "img.constant",
+        &[("colour", json!([0.0, 0.0, 1.0, 1.0]))],
+    );
+    let layer = add(&mut e, "img.layer", &[("target", json!(0))]);
+    wire(&mut e, red, layer, "clip0");
+    wire(&mut e, waiting, layer, "clip5");
+    near(cook_px(&mut e, layer, 0.0, 0), RED);
+    // The first frame cooks every clip once: the layer's operator is
+    // created during that cook, after the plan.
+    let cooks = |e: &Engine, n| e.stat(n).map_or(0, |s| s.cooks);
+    let (before, red_before) = (cooks(&e, waiting), cooks(&e, red));
+    for (i, c) in [[0.0, 1.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0]]
+        .iter()
+        .enumerate()
+    {
+        set(&mut e, waiting, "colour", json!(c));
+        near(cook_px(&mut e, layer, 0.1 * (i + 1) as f64, 0), RED);
+    }
+    assert_eq!(
+        cooks(&e, waiting),
+        before,
+        "edits to a waiting clip do not cook it"
+    );
+    set(&mut e, layer, "target", json!(5));
+    near(cook_px(&mut e, layer, 0.5, 0), [255, 255, 255, 255]);
+    assert_eq!(cooks(&e, waiting), before + 1, "cooked in the launch frame");
+    set(&mut e, red, "colour", json!([0.5, 0.0, 0.0, 1.0]));
+    cook_px(&mut e, layer, 0.6, 0);
+    assert_eq!(
+        cooks(&e, red),
+        red_before,
+        "the clip that stopped does not cook"
+    );
+}

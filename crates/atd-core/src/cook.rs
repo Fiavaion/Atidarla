@@ -79,6 +79,8 @@ pub struct Scheduler {
     /// [`Scheduler::continuous`]).
     continuous: HashSet<NodeId>,
     stack: Vec<(NodeId, Step)>,
+    /// Per node, a bit per input (schema order) it will not read this frame.
+    idle: HashMap<NodeId, u64>,
 }
 
 impl Scheduler {
@@ -108,6 +110,19 @@ impl Scheduler {
     pub fn forget(&mut self, node: NodeId) {
         self.dirty.remove(&node);
         self.stats.remove(&node);
+        self.idle.remove(&node);
+    }
+
+    /// Declares the inputs `node` will not read in the next plans: a bit per
+    /// input in schema order (inputs past 64 are always read). Their sources
+    /// are not cooked on its account (a Stage layer cooks only the clips it
+    /// shows). Zero clears it.
+    pub fn set_idle_inputs(&mut self, node: NodeId, mask: u64) {
+        if mask == 0 {
+            self.idle.remove(&node);
+        } else {
+            self.idle.insert(node, mask);
+        }
     }
 
     pub fn is_dirty(&self, node: NodeId) -> bool {
@@ -173,6 +188,13 @@ impl Scheduler {
                     .and_then(|s| s.inputs.iter().find(|i| i.name == input))
                     .is_some_and(|i| i.feedback)
             };
+            let idle_mask = self.idle.get(&n).copied().unwrap_or(0);
+            let is_idle = |input: &str| {
+                idle_mask != 0
+                    && schema
+                        .and_then(|s| s.inputs.iter().position(|i| i.name == input))
+                        .is_some_and(|i| i < 64 && idle_mask & (1 << i) != 0)
+            };
 
             let extra = self.extra.get(&n);
             if step == Step::Expand {
@@ -181,6 +203,9 @@ impl Scheduler {
                 let mut needs =
                     continuous || self.dirty.contains(&n) || !self.stats.contains_key(&n);
                 for (input, src) in net.inputs_of(n) {
+                    if is_idle(input) {
+                        continue;
+                    }
                     if is_feedback(input) {
                         needs = true;
                         continuous = true;
@@ -230,7 +255,10 @@ impl Scheduler {
             // Push inputs in reverse so they are visited in input-name order.
             let first = self.stack.len();
             for (input, src) in net.inputs_of(n) {
-                if !is_feedback(input) && self.marks.get(&src.node) != Some(&Mark::Done) {
+                if !is_feedback(input)
+                    && !is_idle(input)
+                    && self.marks.get(&src.node) != Some(&Mark::Done)
+                {
                     self.stack.push((src.node, Step::Visit));
                 }
             }

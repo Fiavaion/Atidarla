@@ -321,6 +321,18 @@ fn read_clock(ctx: &CookCtx<'_>) -> Option<Clock> {
 }
 
 impl GpuOp for Layer {
+    /// Only the clips it shows: the playing one, the outgoing one during a
+    /// transition and the target (so a launch shows its first frame in the
+    /// same cook, and a quantised launch prerolls), plus the clock. The
+    /// other clips do not cook.
+    fn needed_inputs(&self, params: &Params<'_>) -> Option<u64> {
+        let bit = |s: Option<u8>| s.map_or(0, |i| 1u64 << i);
+        let target = params.i64("target");
+        let target = (0..SLOTS as i64).contains(&target).then_some(target as u8);
+        let s = &self.state;
+        Some(bit(s.playing) | bit(s.from) | bit(target) | 1u64 << SLOTS)
+    }
+
     fn output_size(
         &self,
         _params: &Params<'_>,

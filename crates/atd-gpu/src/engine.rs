@@ -573,6 +573,15 @@ pub trait GpuOp: Send {
     fn status(&self) -> Option<&str> {
         None
     }
+
+    /// The inputs this operator will read in the coming frame, a bit per
+    /// input in schema order; `None` (the default) reads them all. Sources
+    /// of the others are not cooked on its account this frame (a Stage
+    /// layer with 16 clips cooks only those it shows). Asked before every
+    /// plan, so it must be cheap and allocate nothing.
+    fn needed_inputs(&self, _params: &Params<'_>) -> Option<u64> {
+        None
+    }
 }
 
 /// SIG inputs of a node, by input index. Does not allocate.
@@ -1418,6 +1427,20 @@ impl Engine {
             }
             None if !py_jobs.is_empty() => exprs.no_python(),
             None => {}
+        }
+        for (&id, op) in gpu_ops.iter() {
+            let params = Params {
+                net,
+                registry,
+                sig,
+                node: id,
+                project_dir: project_dir.as_deref(),
+                exprs: Some(exprs),
+                live: Some(live),
+                mode,
+            };
+            let idle = op.needed_inputs(&params).map_or(0, |needed| !needed);
+            scheduler.set_idle_inputs(id, idle);
         }
         scheduler.plan(net, registry, requested, plan)?;
         // Offline every frame is exactly one step long, the first included.
