@@ -13,6 +13,7 @@ mod channel_image;
 pub mod compute;
 mod fluid;
 pub mod isf;
+pub mod kernel;
 mod movie;
 pub mod nca;
 mod ops;
@@ -134,6 +135,7 @@ pub fn register(registry: &mut Registry) {
             text::schema(),
             analyze::schema(),
             wgsl::schema(),
+            kernel::schema(),
             compute::schema(),
             share::out_schema(),
             share::in_schema(),
@@ -153,6 +155,7 @@ pub fn library(library: &mut OpLibrary) {
     library.add(movie::schema().type_id, movie::create);
     library.add(text::schema().type_id, text::create);
     library.add(wgsl::schema().type_id, wgsl::create);
+    library.add(kernel::schema().type_id, kernel::create);
     library.add(compute::schema().type_id, compute::create);
     library.add(share::out_schema().type_id, share::create_out);
     library.add(share::in_schema().type_id, share::create_in);
@@ -188,7 +191,7 @@ mod tests {
         register(&mut registry);
         assert_eq!(
             registry.len(),
-            DEFS.len() + DEFS2.len() + STATEFUL.len() + 10
+            DEFS.len() + DEFS2.len() + STATEFUL.len() + 11
         );
         for op in registry.iter() {
             assert!(op.cook_budget_us > 0, "{} has a cook budget", op.type_id);
@@ -230,6 +233,7 @@ mod tests {
         assert!(lib.contains(&text::schema().type_id));
         assert!(lib.contains(&analyze::schema().type_id));
         assert!(lib.contains(&wgsl::schema().type_id));
+        assert!(lib.contains(&kernel::schema().type_id));
         assert!(lib.contains(&compute::schema().type_id));
         assert!(lib.contains(&share::out_schema().type_id));
         assert!(lib.contains(&share::in_schema().type_id));

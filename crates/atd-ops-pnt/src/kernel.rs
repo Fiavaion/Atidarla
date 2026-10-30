@@ -1,5 +1,7 @@
 //! `pnt.kernel`: a per-point kernel written in the Kernel DSL (A12,
-//! `docs/kernel-dsl.md`), inline or in a `.atk` file that reloads when saved.
+//! `docs/kernel-dsl.md`), inline or in a `.atk` file that reloads when saved;
+//! and the nodes of a project's `kernels/<name>.atk` operators, which run the
+//! same [`PointsRunner`] with their parameters as the `ch()` values.
 //!
 //! Compiling (the `atd-kernel` front end, naga, then the driver) runs on a
 //! worker thread and a file is read by its own thread, so neither touches the
@@ -12,9 +14,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
-use std::time::Duration;
 
 use atd_core::geo::{AttrClass, AttrType, Scalar, header};
 use atd_core::registry::{OperatorSchema, ParamSchema};
@@ -22,6 +22,9 @@ use atd_gpu::engine::{GeoCtx, GeoOp};
 use atd_gpu::geo::Geometry;
 use atd_gpu::geo::kernels::BindGroupCache;
 use atd_kernel::{Access, AttrSchema, CompileOptions, Compiled, FrameGlobals, Target};
+use atd_ops_img::kernel::{
+    ChValues, KernelSource, ProjectSource, SharedSource, Text, defaults, fill_values, render_errors,
+};
 
 use crate::kit::{self, Missing};
 
@@ -36,7 +39,7 @@ pub fn schema() -> OperatorSchema {
     let mut s = crate::pnt(
         "kernel",
         "Kernel",
-        "A point kernel in the Kernel DSL (VEX-flavoured, see the Kernel DSL reference): runs once for every point, reading and writing attributes as `@name` (`v@v`, `f@age`, …; missing ones are created at zero), with `@Time`, `@TimeInc`, `@Frame`, noise, `point()` and `nearpoints()`. `ch(\"name\", default)` parameters take their defaults here. Put it inside a Solver loop and its attributes persist from frame to frame; editing the code keeps the simulation running. The last kernel that compiled keeps running while you edit; errors name the line and column.",
+        "A point kernel in the Kernel DSL (VEX-flavoured, see the Kernel DSL reference): runs once for every point, reading and writing attributes as `@name` (`v@v`, `f@age`, …; missing ones are created at zero), with `@Time`, `@TimeInc`, `@Frame`, noise, `point()` and `nearpoints()`. `ch(\"name\", default)` parameters take their defaults here; a kernel file in the project's `kernels/` folder becomes an operator with controls for them. Put it inside a Solver loop and its attributes persist from frame to frame; editing the code keeps the simulation running. The last kernel that compiled keeps running while you edit; errors name the line and column.",
         &[("in", false)],
         vec![
             ParamSchema::string("code", "Code", DEFAULT)
@@ -53,15 +56,16 @@ pub fn schema() -> OperatorSchema {
 
 pub fn create(device: &wgpu::Device) -> Box<dyn GeoOp> {
     Box::new(Kernel {
-        device: device.clone(),
-        program: None,
-        error: None,
-        requested: None,
-        building: None,
-        watcher: None,
-        file_text: None,
-        code: None,
-        bufs: Vec::with_capacity(MAX_ATTRS),
+        source: KernelSource::default(),
+        runner: PointsRunner::new(device),
+    })
+}
+
+/// A node of a project Points kernel operator reading `shared`.
+pub fn create_project(device: &wgpu::Device, shared: Arc<SharedSource>) -> Box<dyn GeoOp> {
+    Box::new(ProjectKernel {
+        source: ProjectSource::new(shared),
+        runner: PointsRunner::new(device),
     })
 }
 
@@ -72,7 +76,7 @@ struct Program {
     layouts: [wgpu::BindGroupLayout; 2],
     uniforms: wgpu::Buffer,
     ubytes: Vec<u8>,
-    /// `ch()` values by slot (their defaults).
+    /// `ch()` values by slot.
     values: Vec<[f32; 4]>,
     groups: [BindGroupCache; 2],
     /// Per attribute binding: the operator's copy of a snapshot's input.
@@ -151,12 +155,7 @@ fn build(device: &wgpu::Device, source: Arc<str>, schema: Vec<AttrSchema>, key: 
     let mut opts = CompileOptions::new(Target::Points);
     opts.input_schema = Some(schema);
     opts.max_storage_buffers = device.limits().max_storage_buffers_per_shader_stage;
-    let compiled = atd_kernel::compile(&source, &opts).map_err(|ds| {
-        ds.iter()
-            .map(|d| d.render("kernel", &source))
-            .collect::<Vec<_>>()
-            .join("\n")
-    })?;
+    let compiled = atd_kernel::compile(&source, &opts).map_err(|ds| render_errors(&ds, &source))?;
     let b = &compiled.bindings;
     if !b.images.is_empty() {
         return Err("`texture()` needs image inputs, which Kernel does not have yet".into());
@@ -231,10 +230,7 @@ fn build(device: &wgpu::Device, source: Arc<str>, schema: Vec<AttrSchema>, key: 
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let mut values = vec![[0.0; 4]; compiled.params.len()];
-        for p in &compiled.params {
-            values[p.slot as usize] = p.default;
-        }
+        let values = defaults(&compiled);
         Program {
             ubytes: vec![0; b.uniform_size as usize],
             snapshots: vec![None; b.attributes.len()],
@@ -254,50 +250,9 @@ fn build(device: &wgpu::Device, source: Arc<str>, schema: Vec<AttrSchema>, key: 
     }
 }
 
-/// Reads a kernel file whenever it changes.
-struct Watcher {
-    path: String,
-    stop: Arc<AtomicBool>,
-    rx: Receiver<Result<Arc<str>, String>>,
-}
-
-impl Drop for Watcher {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-    }
-}
-
-fn watch(path: String, file: std::path::PathBuf) -> Watcher {
-    let (tx, rx) = channel();
-    let stop = Arc::new(AtomicBool::new(false));
-    let flag = stop.clone();
-    let label = path.clone();
-    let spawned = std::thread::Builder::new()
-        .name("atd-kernel-watch".into())
-        .spawn(move || {
-            let mut last: Option<Result<Arc<str>, String>> = None;
-            while !flag.load(Ordering::Relaxed) {
-                let now = std::fs::read_to_string(&file)
-                    .map(Arc::from)
-                    .map_err(|e| format!("{label}: {e}"));
-                if last.as_ref() != Some(&now) {
-                    if tx.send(now.clone()).is_err() {
-                        return;
-                    }
-                    last = Some(now);
-                }
-                std::thread::sleep(Duration::from_millis(250));
-            }
-        });
-    if let Err(e) = spawned {
-        let (tx, rx) = channel();
-        let _ = tx.send(Err(format!("cannot start file watcher: {e}")));
-        return Watcher { path, stop, rx };
-    }
-    Watcher { path, stop, rx }
-}
-
-pub struct Kernel {
+/// Runs Points kernels: compiles each new source (and input schema) on a
+/// worker thread and dispatches the last one that compiled.
+pub struct PointsRunner {
     device: wgpu::Device,
     /// The last kernel that compiled.
     program: Option<Program>,
@@ -305,59 +260,28 @@ pub struct Kernel {
     /// Key of the compile last started, and its result channel.
     requested: Option<u64>,
     building: Option<Receiver<Built>>,
-    watcher: Option<Watcher>,
-    /// The file's latest text.
-    file_text: Option<Result<Arc<str>, String>>,
-    /// The inline code (kept so cooking allocates nothing).
-    code: Option<Arc<str>>,
     /// This frame's attribute buffers, in binding order (reused).
     bufs: Vec<wgpu::Buffer>,
 }
 
-impl Kernel {
-    /// The source to run, waiting for the file offline; `Err` when the file
-    /// cannot be read.
-    fn source(&mut self, ctx: &mut GeoCtx<'_>) -> Result<Arc<str>, String> {
-        let p = ctx.params;
-        let file = p.str("file");
-        if file.is_empty() {
-            self.watcher = None;
-            self.file_text = None;
-            let code = p.str("code");
-            if self.code.as_deref() != Some(code) {
-                self.code = Some(Arc::from(code));
-            }
-            return Ok(self.code.clone().expect("set above"));
-        }
-        if self.watcher.as_ref().is_none_or(|w| w.path != file) {
-            self.watcher = Some(watch(file.to_owned(), p.resolve(file)));
-            self.file_text = None;
-        }
-        let w = self.watcher.as_ref().expect("set above");
-        let mode = p.mode();
-        if mode.is_offline() {
-            // Offline the file is read once, as it was when the render
-            // started.
-            if self.file_text.is_none() {
-                self.file_text = Some(
-                    mode.receive(&w.rx)
-                        .unwrap_or_else(|_| Err("kernel file watcher stopped".into())),
-                );
-            }
-        } else {
-            while let Ok(text) = w.rx.try_recv() {
-                self.file_text = Some(text);
-            }
-            // Keep looking for saves.
-            ctx.cook_again = true;
-        }
-        match &self.file_text {
-            Some(text) => text.clone(),
-            None => Err("reading the kernel file".into()),
+impl PointsRunner {
+    pub fn new(device: &wgpu::Device) -> Self {
+        Self {
+            device: device.clone(),
+            program: None,
+            error: None,
+            requested: None,
+            building: None,
+            bufs: Vec::with_capacity(MAX_ATTRS),
         }
     }
 
-    fn run(&mut self, ctx: &mut GeoCtx<'_>, g: &mut Geometry) -> Result<(), String> {
+    fn run(
+        &mut self,
+        ctx: &mut GeoCtx<'_>,
+        g: &mut Geometry,
+        values: ChValues<'_>,
+    ) -> Result<(), String> {
         let Some(p) = self.program.as_mut() else {
             return Ok(());
         };
@@ -399,6 +323,7 @@ impl Kernel {
             width: 0,
             height: 0,
         };
+        fill_values(&p.compiled, values, &mut p.values);
         p.compiled
             .write_uniforms(&globals, &p.values, &mut p.ubytes);
         ctx.queue.write_buffer(&p.uniforms, 0, &p.ubytes);
@@ -416,10 +341,15 @@ impl Kernel {
         pass.dispatch_workgroups_indirect(&hdr, header::DISPATCH_OFFSET);
         Ok(())
     }
-}
 
-impl GeoOp for Kernel {
-    fn cook(&mut self, ctx: &mut GeoCtx<'_>) -> Result<(), String> {
+    /// Runs `source` (compiling it first when it or the input's attributes
+    /// are new) over the input, with `values` as its `ch()` values.
+    pub fn cook(
+        &mut self,
+        ctx: &mut GeoCtx<'_>,
+        source: Text,
+        values: ChValues<'_>,
+    ) -> Result<(), String> {
         let Some(mut g) = ctx.take_input(0) else {
             ctx.output.clear();
             return Ok(());
@@ -427,7 +357,7 @@ impl GeoOp for Kernel {
         // A file that cannot be read (an editor's save in progress, say)
         // leaves the last kernel running.
         let mut file_error = None;
-        let source = match self.source(ctx) {
+        let source = match source {
             Ok(s) => s,
             Err(e) => match &self.program {
                 Some(p) => {
@@ -495,7 +425,7 @@ impl GeoOp for Kernel {
             }
         }
         let ran = if g.points() > 0 && self.program.as_ref().is_some_and(|p| fits(p, &g, key)) {
-            self.run(ctx, &mut g)
+            self.run(ctx, &mut g, values)
         } else {
             Ok(())
         };
@@ -507,12 +437,8 @@ impl GeoOp for Kernel {
         }
     }
 
-    fn keeps_output_on_error(&self) -> bool {
-        // A failed edit reports its error while the last kernel runs on.
-        true
-    }
-
-    fn status(&self) -> Option<&str> {
+    /// Whether a compile is running, for [`GeoOp::status`].
+    pub fn status(&self) -> Option<&str> {
         match (&self.building, &self.program) {
             (Some(_), _) => Some("compiling"),
             (None, Some(_)) if self.error.is_some() => {
@@ -520,5 +446,50 @@ impl GeoOp for Kernel {
             }
             _ => None,
         }
+    }
+}
+
+/// `pnt.kernel`: an inline or file Points kernel.
+struct Kernel {
+    source: KernelSource,
+    runner: PointsRunner,
+}
+
+impl GeoOp for Kernel {
+    fn cook(&mut self, ctx: &mut GeoCtx<'_>) -> Result<(), String> {
+        let text = self.source.get(ctx.params, &mut ctx.cook_again);
+        self.runner.cook(ctx, text, ChValues::Defaults)
+    }
+
+    fn keeps_output_on_error(&self) -> bool {
+        // A failed edit reports its error while the last kernel runs on.
+        true
+    }
+
+    fn status(&self) -> Option<&str> {
+        self.runner.status()
+    }
+}
+
+/// A project's `kernels/<name>.atk` operator: the file's kernel with the
+/// node's parameters as its `ch()` values.
+struct ProjectKernel {
+    source: ProjectSource,
+    runner: PointsRunner,
+}
+
+impl GeoOp for ProjectKernel {
+    fn cook(&mut self, ctx: &mut GeoCtx<'_>) -> Result<(), String> {
+        let text = self.source.get();
+        let params = ctx.params;
+        self.runner.cook(ctx, text, ChValues::Params(params))
+    }
+
+    fn keeps_output_on_error(&self) -> bool {
+        true
+    }
+
+    fn status(&self) -> Option<&str> {
+        self.runner.status()
     }
 }

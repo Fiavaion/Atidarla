@@ -38,6 +38,7 @@ mod neighbours;
 mod noise;
 mod particles;
 mod points;
+pub mod project;
 mod render;
 mod select;
 mod solver;
