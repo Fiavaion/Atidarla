@@ -5,6 +5,18 @@
 
 [graph]
 all-features = false
+# The platforms Atidarla ships on (CLAUDE.md rule 6; Linux best-effort).
+# Dependencies that exist only for other targets (wasm32, Android) are not
+# checked: e.g. rustls-platform-verifier pulls webpki-root-certs
+# (CDLA-Permissive-2.0) only on wasm32.
+targets = [
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+]
 
 [advisories]
 version = 2

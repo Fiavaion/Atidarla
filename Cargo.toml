@@ -68,6 +68,10 @@ toml_edit = "0.25"
 rfd = "0.17"
 sha2 = "0.10"
 zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+# Model downloads (FR-A12): rustls with the ring provider and the OS trust
+# store (platform verifier), so no bundled root list and no native-tls.
+ureq = { version = "3.5", default-features = false, features = ["rustls-no-provider", "platform-verifier"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
