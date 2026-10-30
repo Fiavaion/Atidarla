@@ -20,6 +20,7 @@ serde_json.workspace = true
 pollster.workspace = true
 atd-ops-img.workspace = true
 atd-interop.workspace = true
+atd-stage.workspace = true
 
 [lints]
 workspace = true

@@ -7,6 +7,7 @@
 
 use atd_core::graph::{Edit, NodeId, Param};
 use atd_gpu::engine::Engine;
+use atd_stage::ai::{Feeds, LiveValue};
 use atd_stage::{Deck, LaunchMode, Launcher, LayerStatus, Stage};
 use egui::{Color32, RichText, Ui};
 use serde_json::json;
@@ -25,6 +26,10 @@ pub struct StagePanel {
     /// The Stage model and the engine revision it was read at: read again
     /// only when the network changes, so a frame allocates nothing.
     model: Option<(u64, Stage)>,
+    /// AI clip feeds (FR-A5) for the model's revision.
+    feeds: Option<(u64, Feeds)>,
+    /// Crossfaders this frame, by mixer (keeps its capacity).
+    crossfaders: Vec<(NodeId, f64)>,
 }
 
 /// The deck's beat position: its clock's `beat` + `beat_phase`, or
@@ -65,8 +70,53 @@ impl StagePanel {
             let edits = self.launcher.tick(deck, now(engine, deck, time));
             self.apply(engine, "Stage autopilot", edits);
         }
+        self.feed_ai(engine, &model, time);
         self.model = Some(model);
         self.deck
+    }
+
+    /// Feeds the Prompt Clips playing on each deck to the AI nodes that
+    /// follow it, as live values (AI clips, FR-A5).
+    fn feed_ai(&mut self, engine: &mut Engine, model: &(u64, Stage), time: f64) {
+        let mut feeds = match self.feeds.take() {
+            Some(f) if f.0 == model.0 => f,
+            _ => (
+                model.0,
+                Feeds::read(engine.network(), engine.registry(), &model.1),
+            ),
+        };
+        if !feeds.1.feeds.is_empty() {
+            self.crossfaders.clear();
+            for f in &feeds.1.feeds {
+                if let Some(x) = engine
+                    .live_values()
+                    .get(f.mixer, "crossfader")
+                    .and_then(|v| v.as_f64())
+                {
+                    self.crossfaders.push((f.mixer, x));
+                }
+            }
+            let beat = model.1.deck().map_or(time * 2.0, |d| now(engine, d, time));
+            let stage = &model.1;
+            let crossfaders = &self.crossfaders;
+            feeds.1.frame(
+                beat,
+                |m| crossfaders.iter().find(|c| c.0 == m).map(|c| c.1),
+                |layer| {
+                    stage
+                        .decks
+                        .iter()
+                        .find_map(|d| d.layer(layer))
+                        .and_then(|l| l.target)
+                },
+                |node, param, v| match v {
+                    LiveValue::Value(v) => engine.set_live(node, param, Some(v)),
+                    LiveValue::Float(f) => engine.set_live(node, param, Some(&json!(f))),
+                    LiveValue::Int(i) => engine.set_live(node, param, Some(&json!(i))),
+                },
+            );
+        }
+        self.feeds = Some(feeds);
     }
 
     /// Whether the Stage needs frames although nothing changes on screen:
