@@ -4,6 +4,7 @@ mod app;
 mod canvas;
 mod channels;
 mod dock;
+mod mappings;
 mod params;
 mod patch;
 mod project;
@@ -20,11 +21,16 @@ fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let open = (!args.is_empty() && !args[0].starts_with('-'))
         .then(|| std::path::PathBuf::from(args.remove(0)));
+    let oscquery = args
+        .iter()
+        .position(|a| a == "--oscquery")
+        .map(|i| args.remove(i))
+        .is_some();
     let smoke = match smoke::SmokeArgs::parse(args) {
         Ok(smoke) => smoke,
         Err(e) => {
             eprintln!(
-                "error: {e}\nusage: atidarla-app [project.atidarla] [--smoke [frames]] [--screenshot out.png]"
+                "error: {e}\nusage: atidarla-app [project.atidarla] [--oscquery] [--smoke [frames]] [--screenshot out.png]"
             );
             return ExitCode::from(2);
         }
@@ -56,7 +62,7 @@ fn main() -> ExitCode {
     let result = eframe::run_native(
         "Atidarla",
         options,
-        Box::new(|cc| Ok(Box::new(app::AtidarlaApp::new(cc, smoke, open)))),
+        Box::new(|cc| Ok(Box::new(app::AtidarlaApp::new(cc, smoke, open, oscquery)))),
     );
     match result {
         Ok(()) => ExitCode::SUCCESS,

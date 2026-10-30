@@ -39,6 +39,8 @@ pub struct ProjectState {
     pub meta: Project,
     /// The network as last opened or saved.
     saved: Network,
+    /// The mappings as last opened or saved.
+    saved_mappings: atd_format::Mappings,
     dialog: Option<Dialog>,
     /// An action waiting for "discard unsaved changes?".
     pub confirm: Option<Action>,
@@ -60,6 +62,7 @@ impl ProjectState {
             dir: None,
             meta: Project::new("Untitled"),
             saved: net.clone(),
+            saved_mappings: Default::default(),
             dialog: None,
             confirm: None,
             message: None,
@@ -70,7 +73,7 @@ impl ProjectState {
     }
 
     pub fn dirty(&self, engine: &Engine) -> bool {
-        *engine.network() != self.saved
+        *engine.network() != self.saved || self.meta.mappings != self.saved_mappings
     }
 
     /// The window title: project name, and a dot when there are unsaved
@@ -128,6 +131,7 @@ impl ProjectState {
                     }
                     self.python_ask = !python.is_empty() && !python.is_allowed();
                     self.python = (!python.is_empty()).then_some(python);
+                    self.saved_mappings = meta.mappings.clone();
                     self.meta = meta;
                     self.dir = Some(dir);
                     self.opened += 1;
@@ -171,9 +175,15 @@ impl ProjectState {
             self.message = Some((PACKS_READ_ONLY.into(), true));
             return;
         }
+        // Mapped parameters keep what the controls set (docs/mappings.md).
+        if let Err(e) = crate::mappings::write_back(engine, &self.meta.mappings) {
+            self.message = Some((e, true));
+            return;
+        }
         match save(engine, &self.meta, dir) {
             Ok(()) => {
                 self.saved = engine.network().clone();
+                self.saved_mappings = self.meta.mappings.clone();
                 self.dir = Some(dir.to_owned());
                 self.message = Some((format!("Saved {}", dir.display()), false));
             }
@@ -652,6 +662,56 @@ mod tests {
         assert_eq!(
             std::fs::read(dir.join("networks/main.toml")).unwrap(),
             before
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn saving_stores_mapped_live_values_and_the_mappings() {
+        use atd_format::mappings::{Source, Target};
+        let Some(mut e) = engine() else { return };
+        let id = e.alloc_id();
+        e.edit(
+            "add",
+            [Edit::AddNode {
+                node: Node::new(id, "img.constant", "constant1"),
+            }],
+        )
+        .unwrap();
+        let mut state = ProjectState::untitled(e.network());
+        state.meta.name = "Mapped".into();
+        state.meta.mappings.add(
+            Source::Osc {
+                address: "/red".into(),
+                arg: 0,
+            },
+            Target {
+                node: id,
+                param: "colour".into(),
+                component: Some(0),
+            },
+            [0.0, 1.0],
+        );
+        assert!(state.dirty(&e), "a new mapping is an unsaved change");
+        e.set_live(id, "colour", Some(json!([0.5, 0.0, 0.0, 1.0])));
+        let dir =
+            std::env::temp_dir().join(format!("atd-app-mapped-{}.atidarla", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        state.save_to(&mut e, &dir);
+        assert_eq!(
+            state.message.as_ref().map(|m| m.1),
+            Some(false),
+            "{:?}",
+            state.message
+        );
+        assert!(!state.dirty(&e));
+        let project = atd_format::load(&dir).unwrap();
+        assert_eq!(project.mappings, state.meta.mappings);
+        let node = project.main().unwrap().node(id).unwrap();
+        assert_eq!(node.params["colour"].value, json!([0.5, 0.0, 0.0, 1.0]));
+        assert!(
+            e.live_values().get(id, "colour").is_some(),
+            "still live after saving"
         );
         std::fs::remove_dir_all(&dir).ok();
     }

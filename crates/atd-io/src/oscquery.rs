@@ -30,7 +30,7 @@ use atd_core::graph::{Network, NodeId};
 use atd_core::registry::{ParamKind, Registry};
 use serde_json::{Map, Value, json};
 
-use crate::mapping::{Route, mappable};
+use crate::mapping::{Route, Waker, mappable};
 
 /// How long a request waits for the app to publish current values.
 pub const FRESH_WAIT: Duration = Duration::from_millis(100);
@@ -284,6 +284,7 @@ struct Shared {
     published: Condvar,
     want: AtomicBool,
     stop: AtomicBool,
+    waker: Mutex<Option<Waker>>,
 }
 
 /// How to run the server.
@@ -384,6 +385,12 @@ impl OscQueryServer {
         self.shared.want.load(Ordering::Relaxed)
     }
 
+    /// Sets what to call when a request wants values (so an idle UI runs
+    /// a frame and publishes).
+    pub fn set_waker(&self, waker: Option<Waker>) {
+        *self.shared.waker.lock().unwrap_or_else(|e| e.into_inner()) = waker;
+    }
+
     /// Replaces the advertised parameters.
     pub fn publish(&self, list: Vec<Advertised>) {
         let mut s = self
@@ -454,6 +461,10 @@ fn serve(mut stream: TcpStream, sh: &Shared, name: &str, osc_port: u16) -> io::R
         let mut s = sh.snapshot.lock().unwrap_or_else(|e| e.into_inner());
         let seen = s.generation;
         sh.want.store(true, Ordering::Relaxed);
+        let waker = sh.waker.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Some(w) = waker {
+            (w.0)();
+        }
         let until = Instant::now() + FRESH_WAIT;
         while s.generation == seen {
             let left = until.saturating_duration_since(Instant::now());

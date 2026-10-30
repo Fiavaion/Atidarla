@@ -279,6 +279,18 @@ impl HubState {
 #[derive(Debug, Clone, Default)]
 pub struct ControlHub {
     state: Arc<Mutex<HubState>>,
+    waker: Arc<Mutex<Option<Waker>>>,
+}
+
+/// Called (on the I/O thread) after each message, so an idle UI can
+/// schedule a frame (`egui::Context::request_repaint`).
+#[derive(Clone)]
+pub struct Waker(pub Arc<dyn Fn() + Send + Sync>);
+
+impl std::fmt::Debug for Waker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Waker")
+    }
 }
 
 /// A channel-voice message as (control, channel, value, note gate).
@@ -344,6 +356,8 @@ impl ControlHub {
         });
         st.learn(&learnable);
         st.log(text, learnable);
+        drop(st);
+        self.wake();
     }
 
     /// An OSC message with its numeric arguments (others are skipped).
@@ -373,6 +387,20 @@ impl ControlHub {
         });
         st.learn(&learnable);
         st.log(text, learnable);
+        drop(st);
+        self.wake();
+    }
+
+    /// Sets what to call after each message.
+    pub fn set_waker(&self, waker: Option<Waker>) {
+        *self.waker.lock().unwrap_or_else(|e| e.into_inner()) = waker;
+    }
+
+    fn wake(&self) {
+        let w = self.waker.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Some(w) = w {
+            (w.0)();
+        }
     }
 
     /// Messages received since start.

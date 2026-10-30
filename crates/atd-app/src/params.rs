@@ -18,7 +18,13 @@ use egui::{DragValue, Ui};
 use serde_json::{Value, json};
 
 /// Shows the parameters of `node`; returns an error message if an edit failed.
-pub fn ui(ui: &mut Ui, engine: &mut Engine, node: NodeId) -> Option<String> {
+/// Right-clicking a label learns a MIDI/OSC mapping (`control`).
+pub fn ui(
+    ui: &mut Ui,
+    engine: &mut Engine,
+    node: NodeId,
+    control: &mut crate::mappings::Control,
+) -> Option<String> {
     let Some(n) = engine.network().node(node) else {
         ui.weak("Select a node to edit its parameters.");
         return None;
@@ -69,6 +75,7 @@ pub fn ui(ui: &mut Ui, engine: &mut Engine, node: NodeId) -> Option<String> {
                     ParamKind::Float { .. } | ParamKind::Int { .. } | ParamKind::Toggle
                 );
                 let label = ui.label(&p.label).on_hover_text(&p.help);
+                control.param_label(&label, node, p);
                 // Channel export by drag (FR-P2): drop a channel (from the
                 // channel viewer, or a wire dragged out of a SIG node) here.
                 let dropped = if bindable {
