@@ -520,7 +520,7 @@ mod tests {
     fn capture_reads_frames_back_in_order() {
         let Some((device, queue)) = device() else {
             assert!(
-                std::env::var("ATD_REQUIRE_GPU").is_err(),
+                !std::env::var("ATD_REQUIRE_GPU").is_ok_and(|v| !v.is_empty() && v != "0"),
                 "ATD_REQUIRE_GPU is set but there is no GPU adapter"
             );
             return;

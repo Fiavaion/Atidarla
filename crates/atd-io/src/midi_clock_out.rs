@@ -235,8 +235,15 @@ mod tests {
         assert_eq!(sent.last().unwrap().0, [0xFC], "then Stop, once");
         assert_eq!(sent.iter().filter(|(m, _)| m == &[0xFC]).count(), 1);
         let t = pulses(&sent);
+        // A shared runner can starve the clock thread for a while; it then
+        // drops behind rather than bursting, so allow 15% there.
+        let slack = if strict() {
+            2.5
+        } else {
+            (expected * 0.15).max(2.5)
+        };
         assert!(
-            (t.len() as f64 - expected).abs() <= 2.5,
+            (t.len() as f64 - expected).abs() <= slack,
             "{} pulses in {:.3} s (expected {expected:.1})",
             t.len(),
             expected / 48.0
@@ -253,7 +260,10 @@ mod tests {
             nominal * 1e3,
             worst * 1e3
         );
-        assert!((span - nominal).abs() / nominal < 0.01, "{span}");
+        // A burst per frame would put the mean far off; 1% on real hardware,
+        // 5% on a shared runner.
+        let tol = if strict() { 0.01 } else { 0.05 };
+        assert!((span - nominal).abs() / nominal < tol, "{span}");
         // A busy machine (a shared CI runner) can delay one wake-up by several
         // ms; a burst per frame would be 16 ms or more off every time, which
         // the average above catches. The worst single interval is checked on
