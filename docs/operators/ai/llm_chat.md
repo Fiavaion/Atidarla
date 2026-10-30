@@ -27,7 +27,7 @@ Sink: requested every frame even when nothing downstream is viewed, because it h
 |---|---|---|---|---|---|
 | `provider` | Provider | menu | `"ollama"` | `ollama`, `openai_compat`, `anthropic` | Who answers: `ollama` (local, the default), `openai_compat` (any server with `/v1/chat/completions`; `OPENAI_API_KEY` from the environment if set) or `anthropic` (internet; needs `ANTHROPIC_API_KEY` in the environment and Sovereign mode off). |
 | `endpoint` | Endpoint | string | `""` |  | Base URL of the server; empty: the provider's default (`http://127.0.0.1:11434` for Ollama, `http://127.0.0.1:8080` for OpenAI-compatible, `https://api.anthropic.com`). A LAN address is allowed in Sovereign mode; an internet address is not. |
-| `model` | Model | string | `""` |  | Model name; empty: the provider's default (`qwen2.5-coder:7b` on Ollama, `claude-haiku-4-5` on Anthropic, whatever the OpenAI-compatible server loaded). |
+| `model` | Model | string | `""` |  | Model name; empty: the provider's default (`qwen2.5-coder:7b` on Ollama, `claude-haiku-5-5` on Anthropic, whatever the OpenAI-compatible server loaded). |
 | `system` | System Prompt | string | `"You are part of a live visual performance. Answer in one short sentence."` |  | Instructions the model follows for every prompt. |
 | `prompt` | Prompt | string | `""` |  | The prompt. With `Prompt From` set, it is put before the incoming text (an instruction such as "Turn this into an image prompt:"). |
 | `prompt_from` | Prompt From | string | `""` |  | The `Publish As` name of another node (Speech to Text, LLM Chat): each new text it publishes is sent. Empty: only the prompt above. |

@@ -30,7 +30,7 @@ pub const OLLAMA_MODEL: &str = "qwen2.5-coder:7b";
 pub const OPENAI_COMPAT_ENDPOINT: &str = "http://127.0.0.1:8080";
 pub const ANTHROPIC_ENDPOINT: &str = "https://api.anthropic.com";
 /// The default Anthropic model: fast and inexpensive for live use.
-pub const ANTHROPIC_MODEL: &str = "claude-haiku-4-5";
+pub const ANTHROPIC_MODEL: &str = "claude-haiku-5-5";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 
 /// Who answers.

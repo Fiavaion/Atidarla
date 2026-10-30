@@ -35,7 +35,7 @@ pub fn schema() -> OperatorSchema {
                 "Base URL of the server; empty: the provider's default (`http://127.0.0.1:11434` for Ollama, `http://127.0.0.1:8080` for OpenAI-compatible, `https://api.anthropic.com`). A LAN address is allowed in Sovereign mode; an internet address is not.",
             ),
             ParamSchema::string("model", "Model", "").help(
-                "Model name; empty: the provider's default (`qwen2.5-coder:7b` on Ollama, `claude-haiku-4-5` on Anthropic, whatever the OpenAI-compatible server loaded).",
+                "Model name; empty: the provider's default (`qwen2.5-coder:7b` on Ollama, `claude-haiku-5-5` on Anthropic, whatever the OpenAI-compatible server loaded).",
             ),
             ParamSchema::string("system", "System Prompt", "You are part of a live visual performance. Answer in one short sentence.")
                 .multiline()
