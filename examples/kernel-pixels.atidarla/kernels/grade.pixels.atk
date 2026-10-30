@@ -1,0 +1,10 @@
+// A colour grade: lift, gain and gamma, then a vignette.
+vec3 lift = chv("lift", {0, 0, 0});         // Raises the shadows of each channel.
+vec3 gain = chv("gain", {1, 1, 1});         // Scales the highlights of each channel.
+float gamma = ch("gamma", 1.0, 0.1, 4.0);   // Above 1 brightens the midtones.
+float vignette = ch("vignette", 0.3, 0, 1); // How much the corners darken.
+vec3 c = @Cd.rgb * gain + lift * (1 - @Cd.rgb);
+c = pow(max(c, 0), 1 / gamma);
+float d = distance(@P, {0.5, 0.5});
+c *= 1 - vignette * smoothstep(0.3, 0.8, d);
+@Cd = vec4(c, @Cd.a);
