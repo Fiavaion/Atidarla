@@ -36,9 +36,9 @@ Done on this branch:
   chain: `atd-app`/`atd-cli` `ffmpeg` → `atd-ops-img/ffmpeg` → `atd-io/ffmpeg`. Off by default.
 - CI job `FFmpeg` builds, lints and tests it on Windows (BtbN LGPL shared 9.0), macOS
   (Homebrew) and Linux (apt). Hardware decode was checked on 2026-10-16: `d3d11va` on the
-  RTX 5070 Ti PC, `videotoolbox` on the macOS runner (see the M1 log).
+  RTX 5070 Ti PC, `videotoolbox` on the macOS runner, and on 2026-10-30 `videotoolbox` for
+  H.264, VP9 and ProRes on a real Mac (Apple M5 Pro; see the M1 log).
 - **Left: packaging (M6)**: ship FFmpeg's LGPL DLLs/dylibs beside the app, replaceable (A23).
-  **Not yet checked on a real Mac** (only the CI runner): `videotoolbox` on Apple hardware.
 
 To run it locally on Windows: download BtbN's `ffmpeg-n9.0-latest-win64-lgpl-shared-9.0.zip`
 (into the ignored `.scratch/`), then set `FFMPEG_DIR` to the unpacked folder, add its `bin\` to
