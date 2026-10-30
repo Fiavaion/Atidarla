@@ -12,9 +12,13 @@
 
 pub mod client;
 pub mod egress;
+pub mod link;
 pub mod protocol;
+pub mod refhost;
 pub mod ring;
+pub mod router;
+pub mod supervisor;
 
-pub use client::{HostClient, HostCommand};
+pub use client::{ClientError, FramePath, HostClient, HostCommand, Pending};
 pub use protocol::PROTOCOL_VERSION;
 pub use ring::{FrameRing, RingLayout};

@@ -38,6 +38,10 @@ pub enum EgressError {
     Connect { host: String, source: io::Error },
 }
 
+/// Serialises tests that flip the process-wide flags.
+#[cfg(test)]
+pub(crate) static TEST_FLAGS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 static SOVEREIGN: AtomicBool = AtomicBool::new(true);
 static REFUSED: AtomicU64 = AtomicU64::new(0);
 
@@ -168,6 +172,7 @@ mod tests {
     // One test touches the process-wide flag, so tests cannot race on it.
     #[test]
     fn sovereign_mode_refuses_the_internet_before_connecting() {
+        let _flags = TEST_FLAGS.lock().unwrap_or_else(|e| e.into_inner());
         set_sovereign(true);
         let before = refused();
         let err = connect("203.0.113.9", 443, Duration::from_millis(50)).unwrap_err();
