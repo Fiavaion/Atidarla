@@ -133,9 +133,9 @@ pub fn valid_host_name(name: &str) -> bool {
 
 /// A host address: `host:port` with a port number, no spaces.
 pub fn valid_host_addr(addr: &str) -> bool {
-    addr.rsplit_once(':').is_some_and(|(host, port)| {
-        !host.is_empty() && port.parse::<u16>().is_ok_and(|p| p > 0)
-    }) && !addr.chars().any(char::is_whitespace)
+    addr.rsplit_once(':')
+        .is_some_and(|(host, port)| !host.is_empty() && port.parse::<u16>().is_ok_and(|p| p > 0))
+        && !addr.chars().any(char::is_whitespace)
 }
 
 /// A model ID: lower-case letters, digits, `-`, `_` and `.`, so it is a
@@ -206,7 +206,12 @@ pub(crate) fn read(root: &Table) -> Result<(AiSettings, BTreeMap<String, ModelPi
         let t = table_like(item, "[ai]")?;
         only_keys(
             t,
-            &["commercial_safe_only", "sovereign", "spend_cap_usd", "hosts"],
+            &[
+                "commercial_safe_only",
+                "sovereign",
+                "spend_cap_usd",
+                "hosts",
+            ],
             "[ai]",
         )?;
         let flag = |key: &str, default: bool| match t.get(key) {
