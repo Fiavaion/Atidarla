@@ -7,7 +7,9 @@
 //!   [`spout`] speaks the Spout 2.007 protocol on top of it, with one GPU
 //!   copy into or out of Spout's legacy-shared D3D11 texture.
 //! - **macOS (Metal):** textures backed by an `IOSurface`, shareable by
-//!   `IOSurfaceID` or mach port; the basis of Syphon, see [`metal`].
+//!   `IOSurfaceID` or mach port, see [`metal`]. [`syphon`] publishes and
+//!   receives Syphon frames through the official Syphon framework, with one
+//!   GPU copy on the wgpu queue.
 //! - **Everywhere:** [`readback`] copies a texture to CPU memory, the
 //!   fallback when no zero-copy path exists (RESEARCH §4.8).
 //!
@@ -25,6 +27,9 @@ pub mod spout;
 
 #[cfg(target_os = "macos")]
 pub mod metal;
+
+#[cfg(target_os = "macos")]
+pub mod syphon;
 
 /// Errors from the interop layer.
 #[derive(Debug, thiserror::Error)]

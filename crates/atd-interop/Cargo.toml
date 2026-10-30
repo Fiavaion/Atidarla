@@ -1,6 +1,6 @@
 [package]
 name = "atd-interop"
-description = "Atidarla per-OS GPU texture sharing via wgpu-hal (DX12 shared handles, IOSurface) with readback fallback"
+description = "Atidarla per-OS GPU texture sharing via wgpu-hal (DX12 shared handles and Spout, IOSurface and Syphon) with readback fallback"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -29,7 +29,9 @@ windows = { version = "0.62", features = [
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-core-foundation = { version = "0.3", features = ["CFDictionary", "CFNumber", "CFString"] }
+block2 = "0.6"
+objc2-core-foundation = { version = "0.3", features = ["CFDictionary", "CFNumber", "CFString", "CFRunLoop", "CFCGTypes"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSDictionary", "NSString", "NSObject", "NSEnumerator"] }
 objc2-io-surface = { version = "0.3", features = ["IOSurfaceRef", "IOSurfaceTypes", "objc2-core-foundation"] }
 objc2-metal = { version = "0.3", features = [
     "MTLDevice",
@@ -37,6 +39,10 @@ objc2-metal = { version = "0.3", features = [
     "MTLResource",
     "MTLPixelFormat",
     "MTLAllocation",
+    "MTLCommandQueue",
+    "MTLCommandBuffer",
+    "MTLCommandEncoder",
+    "MTLBlitCommandEncoder",
     "objc2-io-surface",
 ] }
 
@@ -45,3 +51,9 @@ pollster.workspace = true
 
 [lints]
 workspace = true
+
+# Runs its check off the main thread while the main thread runs its run
+# loop, which Syphon's directory needs (see the file).
+[[test]]
+name = "syphon_directory"
+harness = false
