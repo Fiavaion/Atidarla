@@ -30,6 +30,7 @@ mod attr;
 mod emitter;
 mod field;
 mod foreach;
+mod fuse;
 mod kit;
 mod neighbours;
 mod noise;
@@ -133,6 +134,7 @@ pub fn library(library: &mut OpLibrary) {
         library.add_geo(schema().type_id, *create);
     }
     library.add(render::schema().type_id, render::create);
+    library.set_point_fuser(fuse::create);
     for id in field::ids() {
         library.add_geo(format!("pnt.{id}"), move |d| field::create(d, id));
     }

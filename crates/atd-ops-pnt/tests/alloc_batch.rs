@@ -247,6 +247,20 @@ fn batch_chains_steady_state_allocations() {
         e.cook(&out, t).unwrap();
         t += 1.0 / 60.0;
     }
+    // Fused pipelines are built on a worker thread: warm up until they are
+    // in use (Bend + Wave in chain 2 fuse).
+    for _ in 0..5000 {
+        if !e.pending() {
+            break;
+        }
+        e.cook(&out, t).unwrap();
+        t += 1.0 / 60.0;
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert!(!e.pending(), "fused pipelines built");
+    e.cook(&out, t).unwrap();
+    t += 1.0 / 60.0;
+    assert!(e.fused_last_frame() >= 2, "a fused run is part of the test");
     for node in [
         sys, emit, floor, colour, cut, rand, nrm, links, solver, age, begin, end, begin2, end2, r1,
         r2, r3, r4, r5, r6,

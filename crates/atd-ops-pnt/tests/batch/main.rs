@@ -5,6 +5,7 @@
 mod attributes;
 mod fields;
 mod foreach;
+mod fusion;
 mod neighbours;
 mod shaping;
 mod solver;

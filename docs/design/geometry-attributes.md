@@ -17,7 +17,7 @@
 | D6 | Simulation state | Lives on the wire (a GEO feedback loop through a Solver node), not inside operators | Designer |
 | D7 | Spawn and death | Fixed capacity, compacted every frame by an integer prefix sum while the state is copied (stable, deterministic order); no atomics decide where a particle goes | Designer |
 | D8 | Draw path | Instanced quads with vertex pulling from storage buffers, sized by an indirect draw | Designer |
-| D9 | Deformer stacks | Hand the buffer over in place first; fuse runs of per-point operators into one dispatch only if spike S3 shows it is needed | Designer, after S3 |
+| D9 | Deformer stacks | Hand the buffer over in place first; fuse runs of per-point operators into one dispatch only if spike S3 shows it is needed (it did: built 2026-10-30, §9) | Designer, after S3 |
 | D10 | Kernel and WGSL contract | The schema, layout and binding generator live in `atd-core`/`atd-gpu`. A Kernel (A12) and a `pnt.wgsl` node with `#bind` (FR-K5) are both clients | Designer; A12 itself is Mark's |
 | D11 | Files | Networks stay text. Generated geometry is never saved. Bakes are rebuildable caches in `.cache/`; assets leave through glTF/PLY | Designer; bake policy needs Mark (Q3) |
 | D12 | Limits | Rely only on wgpu `Limits::default()` (the WebGPU defaults), which is what the app and CLI request today; ask for more where the adapter offers it | Designer |
@@ -121,7 +121,7 @@ The engine needs a third branch next to IMG and SIG in `Engine::cook`, chosen wh
 - **Ownership hand-over** (new, a small addition to the plan output). Before node *B* cooks, the engine gives *B* sole ownership of input *A*'s value when *A* cooked this frame, *B* is *A*'s only consumer, *A* is not requested (viewed or exported), and *A* will cook again next frame anyway (it is in the plan because it is time-dependent or downstream of something time-dependent, not because of a one-off edit). Then *B* writes `P` in place. Otherwise *B* copies on write. To do this the scheduler should report *why* each node is in the plan (a bitset, reused, so nothing allocates).
 - **Simulation (Solver Block).** The state is the `GEO` on a feedback wire. A `pnt.solver` node has an `init` input and a `prev` feedback input. On frame 0, on Reset, or when `prev` has no result it passes `init`; otherwise it passes `prev`. This uses the feedback semantics the scheduler already has (test `feedback_loops_cook_every_frame_without_cycling`). The ping-pong is not special code: the pool and the uniqueness rule produce two alternating generations. When FR-P4 nested networks land, Solver Block becomes a container whose ports are this pair; the data contract does not change. Offline, it is "Stateful" in `docs/render.md`: state starts with the render.
 - **For-Each.** M2 For-Each runs a body of per-element PNT ops once over all elements, with the piece or iteration index as an attribute (RESEARCH §2.3: "For-Each over points/instances compiled to one dispatch"). A fixed iteration count unrolls into N dispatches per op. The uniqueness rule keeps that allocation-free. Each iteration needs its own parameters, through a dynamic uniform offset, because `FullscreenPass`-style "one uniform buffer per pass" would make every iteration use the last values. Running an MSH body per piece is left out of M2.
-- **30-op deformer stack.** At 2M points each per-point op reads and writes `P`: 2M × 32 B = 64 MB a pass. Thirty passes move 1.92 GB a frame, about 3.8 ms at the RTX 4070's 504 GB/s peak. The hand-over removes the allocation and the copies but not that traffic. Fusion removes it: deformers ship their WGSL as a function with a fixed signature over their declared attributes, and the engine joins a straight run of fusable ops into one pipeline (64 MB, about 0.13 ms), built on a worker thread when the graph changes. Fusion needs no Kernel DSL, so it does not depend on A12. **Recommendation:** build the hand-over in M2 and decide fusion from spike S3. At 100k points the unfused stack is about 0.2 ms and fusion does not matter.
+- **30-op deformer stack.** At 2M points each per-point op reads and writes `P`: 2M × 32 B = 64 MB a pass. Thirty passes move 1.92 GB a frame, about 3.8 ms at the RTX 4070's 504 GB/s peak. The hand-over removes the allocation and the copies but not that traffic. Fusion removes it: deformers ship their WGSL as a function with a fixed signature over their declared attributes, and the engine joins a straight run of fusable ops into one pipeline (64 MB, about 0.13 ms), built on a worker thread when the graph changes. Fusion needs no Kernel DSL, so it does not depend on A12. **Recommendation:** build the hand-over in M2 and decide fusion from spike S3. At 100k points the unfused stack is about 0.2 ms and fusion does not matter. **Built 2026-10-30** (S3 was over its threshold; Mark ratified fusion for M2): see §9, "Deformer fusion".
 
 ## 4. Particle core for PT-2
 
@@ -303,3 +303,53 @@ What was built follows the design; this section lists only deviations, their rea
 | Noise library | analytic gradient vs central differences: max error 3.8e-4; divergence of the curl: ≤ 4e-3 (finite differences) | |
 
 S3's deformer is curl noise (three gradient noises, 24 hashes per point), so the 4.5 ms is part arithmetic and part bandwidth (30 × 64 MB ≈ 1.9 GB, about 2.4 ms at the 5070 Ti's bandwidth); fusion would remove the bandwidth part. Whether to build fusion in M2 is a question for Mark (`docs/milestones/m2/geometry-core.md`).
+
+### Deformer fusion (built 2026-10-30)
+
+Choices where §3.2 left room, each the simplest consistent with it:
+
+- **Which operators.** The per-point field operators (Bend, Twist, Taper, Wave; Attract,
+  Vortex, Drag, Gravity; Collide, Integrate) and Transform: each reads and writes only its own
+  point's `P`, `v` (created at zero by the forces) and `N`. Wind and Turbulence are left
+  unfused: they call the curl-noise library, and two Winds in one Metal kernel rounded `v`
+  differently from two kernels (up to 4 ulps) because the compiler treats two inlined copies
+  of that large function differently. `pnt.noise` (a `Deformer` from `atd-gpu`) and every
+  operator that moves, adds or removes points end a run.
+- **The planner's rule** (`atd_gpu::engine`): a run is consecutive cooks in the frame's step
+  list where each node's only wired input is the previous node's GEO output and that output
+  could be handed over (its only wire, cooking this frame and next, not viewed): exactly when
+  the intermediate results can never be read. Runs are at most 64 stages, and stay within one
+  loop pass. The run's first node takes the input as it would; the inner nodes' results are
+  released; the last node holds the result. `Engine::set_fusion(false)` turns it off;
+  `Engine::fused_last_frame` counts fused nodes.
+- **The fixed signature.** An operator offers `GeoOp::point_stage(params, dt)`: a kind (which
+  stage function), its unfused uniforms (up to 128 bytes) and whether it writes `v`. Each kind's
+  WGSL is its unfused `fn point` body, rewritten as `fn stage_<kind>(atd_p, atd_v, atd_n,
+  params)` over the point's local `P`, `v`, `N`. **The unfused kernels call the same function**
+  between a load and a store; the fused kernel loads once, calls the stages in order with
+  uniforms from an array (one block per stage) and stores once. No Kernel DSL is needed (§3.2).
+- **Identical output: byte-identical, measured.** Every stage's inputs pass through an
+  exclusive-or with a uniform that is always 0 (`atd_opaque`), in the unfused kernels and
+  between fused stages. Without it Metal's fast math folded one stage's arithmetic into the
+  next (Twist then Taper: `(a + r) - a`), and fused `P` differed from the chain by an ulp in
+  7% of words. With it the tests compare whole buffers byte for byte (Q4 answered for fusion:
+  no tolerance needed). Transform became one kernel over `P`, `v`, `N` for this (it had three).
+- **Pipelines** are built on a worker thread when a run's stage kinds change (`atd-fuse`
+  thread); live, the run cooks unfused until the pipeline arrives (`Engine::pending` is true
+  meanwhile), and a run that could not be fused cooks entirely unfused that frame; offline the
+  cook waits for it, so every frame of a render is fused alike.
+- **Implementation of the stages** lives with the operators (`atd-ops-pnt`: `fuse.rs`, the
+  `PointFuser` registered with `OpLibrary::set_point_fuser`); the engine knows only stages,
+  runs and fusers, so another family can register its own.
+
+Evidence (Apple M5 Pro, Metal, 2026-10-30; other agents were building and running GPU work on
+the same machine, so timings are indicative): `tests/batch/fusion.rs` — the 14-operator chain
+(every fusable deformer and force, plus Wind and Turbulence, over 5,000 points with `N` and
+`v`, animated) fused into two runs gives the same bytes of `P`, `v` and `N` as the unfused
+chain over six offline frames; 30 Transforms and three of each deformer (42 stages) the same;
+live fusion waits for its pipeline; runs stop at viewed nodes and non-stages.
+`tests/alloc_batch.rs` runs with a fused Bend + Wave run: no buffer, bind-group or texture
+creation after warm-up. `atidarla bench` case `pnt.fusion_30_transforms_2m` (30 animated
+Transforms over 2M points, frame time including GPU completion; this adapter reports zero for
+GPU timestamps): fused p50 1.26-1.61 ms, unfused 8.48-9.18 ms over three runs (5.7-6.7×), `P`
+byte-identical.

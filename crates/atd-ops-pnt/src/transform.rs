@@ -3,11 +3,12 @@
 //! `N` with the inverse-transpose (renormalised), when they exist.
 //!
 //! The matrix is composed on the CPU (scale, then rotation X, Y, Z, then
-//! translation), so a chain of transforms costs one 3 × 4 matrix each.
+//! translation), so a chain of transforms costs one 3 × 4 matrix each. One
+//! kernel moves `P`, `v` and `N`; its `point` is also the fused stage.
 
 use atd_core::geo::{AttrType, names};
 use atd_core::registry::{OperatorSchema, ParamSchema};
-use atd_gpu::engine::{GeoCtx, GeoOp, Params};
+use atd_gpu::engine::{GeoCtx, GeoOp, Params, PointStage, STAGE_BYTES};
 use atd_gpu::geo::kernels::{Bind, Packer};
 
 use crate::kit::{self, Missing, PointKernel, vec3};
@@ -92,42 +93,128 @@ pub(crate) fn matrices(p: &Params<'_>) -> ([[f32; 4]; 3], M3, M3) {
     (rows, m, n)
 }
 
-const SOURCE: &str = "struct Params {
-    r0: vec4f,
-    r1: vec4f,
-    r2: vec4f,
-    // x: 1 to add the translation, y: 1 to renormalise
-    flags: vec4f,
+/// The uniforms: the point matrix's rows (translation in `w`), the normal
+/// matrix's rows, and which of `v` (bit 0) and `N` (bit 1) to turn.
+pub(crate) const DECL: &str = "struct Params {
+    p0: vec4f,
+    p1: vec4f,
+    p2: vec4f,
+    n0: vec4f,
+    n1: vec4f,
+    n2: vec4f,
+    // x: bit 0 turns `v`, bit 1 `N`; y: always 0 (`crate::fuse::OPAQUE`)
+    has: vec4u,
 };
-@group(0) @binding(2) var<storage, read_write> a: array<vec4f>;
-fn point(i: u32) {
-    let x = vec4f(a[i].xyz, params.flags.x);
-    var y = vec3f(dot(params.r0, x), dot(params.r1, x), dot(params.r2, x));
-    if (params.flags.y > 0.5) {
+";
+
+/// Byte offset of `has` in the uniforms (the fuser sets it per stage).
+pub(crate) const HAS_OFFSET: usize = 96;
+
+/// The stage over `P`, `v` and `N` (as `crate::fuse::stage_function` turns
+/// it into a function of local values, shared with the fused kernel).
+pub(crate) const BODY: &str = "fn point(i: u32) {
+    let x = vec4f(P[i].xyz, 1.0);
+    P[i] = vec4f(dot(params.p0, x), dot(params.p1, x), dot(params.p2, x), P[i].w);
+    if ((params.has.x & 1u) != 0u) {
+        let w = vec4f(v[i].xyz, 0.0);
+        let y = vec3f(
+            dot(vec4f(params.p0.xyz, 0.0), w),
+            dot(vec4f(params.p1.xyz, 0.0), w),
+            dot(vec4f(params.p2.xyz, 0.0), w),
+        );
+        v[i] = vec4f(y, v[i].w);
+    }
+    if ((params.has.x & 2u) != 0u) {
+        let w = vec4f(N[i].xyz, 0.0);
+        var y = vec3f(dot(params.n0, w), dot(params.n1, w), dot(params.n2, w));
         let l = length(y);
         if (l > 1e-20) { y = y / l; }
+        N[i] = vec4f(y, N[i].w);
     }
-    a[i] = vec4f(y, a[i].w);
 }
 ";
 
+const BINDINGS: &str = "@group(0) @binding(2) var<storage, read_write> P: array<vec4f>;
+@group(0) @binding(3) var<storage, read_write> v: array<vec4f>;
+@group(0) @binding(4) var<storage, read_write> N: array<vec4f>;
+";
+
+/// The unfused kernel after the prelude: loads the point, runs the stage,
+/// stores what it turned.
+fn kernel_source() -> String {
+    format!(
+        "{DECL}{BINDINGS}{}{}
+fn point(i: u32) {{
+    let z = params.has.y;
+    var p = atd_opaque(P[i], z);
+    var w = vec4f(0.0);
+    var n = vec4f(0.0);
+    if ((params.has.x & 1u) != 0u) {{ w = atd_opaque(v[i], z); }}
+    if ((params.has.x & 2u) != 0u) {{ n = atd_opaque(N[i], z); }}
+    {}(&p, &w, &n, params);
+    P[i] = p;
+    if ((params.has.x & 1u) != 0u) {{ v[i] = w; }}
+    if ((params.has.x & 2u) != 0u) {{ N[i] = n; }}
+}}
+",
+        crate::fuse::OPAQUE,
+        crate::fuse::stage_function("transform", BODY, "Params"),
+        crate::fuse::function("transform"),
+    )
+}
+
+/// The uniforms of `params`, with `has` left at 0.
+pub(crate) fn uniforms(params: &Params<'_>) -> Packer<112> {
+    let (rows, _, n) = matrices(params);
+    let mut u = Packer::<112>::new();
+    for row in rows {
+        u.vec4(row);
+    }
+    for row in n {
+        u.vec4([row[0], row[1], row[2], 0.0]);
+    }
+    u
+}
+
 pub struct Transform {
-    /// One kernel per attribute (each has its own uniforms).
-    kernels: [PointKernel; 3],
+    kernel: PointKernel,
+    /// Bound for a missing `v` or `N` (never written).
+    unused: [wgpu::Buffer; 2],
 }
 
 pub fn create(device: &wgpu::Device) -> Box<dyn GeoOp> {
-    let k = |label: &str| PointKernel::new(device, label, SOURCE, &[Bind::ReadWrite], 64);
+    use Bind::*;
+    let unused = || {
+        device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("pnt.transform.unused"),
+            size: 256,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        })
+    };
     Box::new(Transform {
-        kernels: [
-            k("pnt.transform.P"),
-            k("pnt.transform.v"),
-            k("pnt.transform.N"),
-        ],
+        kernel: PointKernel::new(
+            device,
+            "pnt.transform",
+            &kernel_source(),
+            &[ReadWrite, ReadWrite, ReadWrite],
+            112,
+        ),
+        unused: [unused(), unused()],
     })
 }
 
 impl GeoOp for Transform {
+    fn point_stage(&self, params: &Params<'_>, _dt: f64) -> Option<PointStage> {
+        let mut out = [0u8; STAGE_BYTES];
+        out[..112].copy_from_slice(uniforms(params).bytes());
+        Some(PointStage {
+            kind: "transform",
+            uniforms: out,
+            velocity: false,
+        })
+    }
+
     fn cook(&mut self, ctx: &mut GeoCtx<'_>) -> Result<(), String> {
         let Some(mut g) = ctx.take_input(0) else {
             ctx.output.clear();
@@ -138,33 +225,49 @@ impl GeoOp for Transform {
             return Ok(());
         }
         let hdr = kit::header_of(&g)?;
-        let (rows, m, n) = matrices(&ctx.params);
-        let pack = |r: [[f32; 3]; 3], t: Option<[f32; 3]>, normalise: bool| {
-            let mut u = Packer::<64>::new();
-            for (k, row) in r.iter().enumerate() {
-                u.vec4([row[0], row[1], row[2], t.map_or(0.0, |t| t[k])]);
-            }
-            u.vec4([
-                f32::from(u8::from(t.is_some())),
-                f32::from(u8::from(normalise)),
-                0.0,
-                0.0,
-            ]);
-            u
-        };
-        let m3 = [0, 1, 2].map(|k| [rows[k][0], rows[k][1], rows[k][2]]);
-        let t = [rows[0][3], rows[1][3], rows[2][3]];
         let pos = kit::writable(ctx, &mut g, names::P, AttrType::VEC3, Missing::Error)?;
-        self.kernels[0].run(ctx, &hdr, &[&pos], pack(m3, Some(t), false).bytes());
-        if g.point_typed(names::V, AttrType::VEC3).is_some() {
-            let v = kit::writable(ctx, &mut g, names::V, AttrType::VEC3, Missing::Error)?;
-            self.kernels[1].run(ctx, &hdr, &[&v], pack(m, None, false).bytes());
-        }
-        if g.point_typed(names::N, AttrType::VEC3).is_some() {
-            let nn = kit::writable(ctx, &mut g, names::N, AttrType::VEC3, Missing::Error)?;
-            self.kernels[2].run(ctx, &hdr, &[&nn], pack(n, None, true).bytes());
-        }
+        let mut has = 0u32;
+        let vel = if g.point_typed(names::V, AttrType::VEC3).is_some() {
+            has |= 1;
+            kit::writable(ctx, &mut g, names::V, AttrType::VEC3, Missing::Error)?
+        } else {
+            self.unused[0].clone()
+        };
+        let nrm = if g.point_typed(names::N, AttrType::VEC3).is_some() {
+            has |= 2;
+            kit::writable(ctx, &mut g, names::N, AttrType::VEC3, Missing::Error)?
+        } else {
+            self.unused[1].clone()
+        };
+        let mut u = uniforms(&ctx.params);
+        u.u32(has);
+        self.kernel.run(ctx, &hdr, &[&pos, &vel, &nrm], u.bytes());
         *ctx.output = g;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_kernel_is_valid_wgsl() {
+        let src = format!(
+            "{}{}
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> hdr: GeoHeader;
+@compute @workgroup_size(256) fn main(@builtin(global_invocation_id) gid: vec3u) {{ if (gid.x < hdr.count) {{ point(gid.x); }} }}",
+            kit::prelude(),
+            kernel_source()
+        );
+        let module = naga::front::wgsl::parse_str(&src)
+            .unwrap_or_else(|e| panic!("{}", e.emit_to_string(&src)));
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::default(),
+        )
+        .validate(&module)
+        .unwrap();
     }
 }
