@@ -439,6 +439,21 @@ impl<'a> Params<'a> {
         self.sig.get(&bind.node)?.value(&bind.channel)
     }
 
+    /// Whether the parameter follows a channel binding or an expression
+    /// and no live value overrides it. Such a value is only current once
+    /// its sources have cooked this frame, so before the plan (in
+    /// [`GpuOp::needed_inputs`]) it may still be last frame's. Live values
+    /// are set before the plan and are always current.
+    pub fn is_driven(&self, name: &str) -> bool {
+        if self.live(name).is_some() {
+            return false;
+        }
+        self.net
+            .node(self.node)
+            .and_then(|n| n.params.get(name))
+            .is_some_and(|p| p.bind.is_some() || p.expr.is_some())
+    }
+
     /// The value the parameter's expression gave this frame, if it has
     /// one that evaluated.
     pub fn expr(&self, name: &str) -> Option<f64> {

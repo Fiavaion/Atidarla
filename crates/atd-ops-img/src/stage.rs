@@ -324,8 +324,13 @@ impl GpuOp for Layer {
     /// Only the clips it shows: the playing one, the outgoing one during a
     /// transition and the target (so a launch shows its first frame in the
     /// same cook, and a quantised launch prerolls), plus the clock. The
-    /// other clips do not cook.
+    /// other clips do not cook. A `target` bound to a channel or driven by
+    /// an expression is not known until its sources cook, so then every
+    /// input is read (the value here would be last frame's).
     fn needed_inputs(&self, params: &Params<'_>) -> Option<u64> {
+        if params.is_driven("target") {
+            return None;
+        }
         let bit = |s: Option<u8>| s.map_or(0, |i| 1u64 << i);
         let target = params.i64("target");
         let target = (0..SLOTS as i64).contains(&target).then_some(target as u8);
