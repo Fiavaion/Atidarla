@@ -1,6 +1,6 @@
 # Spike (a): Spout and Syphon texture sharing via `wgpu-hal`
 
-**Status:** core mechanism built and tested in CI. Spout protocol layer built, loopback-tested (RTX 5070 Ti and WARP) and **verified against the official Spout SDK (SpoutDX 2.007.018) in both directions** on the RTX 5070 Ti; the remaining gaps are listed under "Still unverified". Syphon wire-up and timings still need a Mac. · **Feeds:** `atd-interop`, IMG Share In/Out (M1), RESEARCH §4.8, §5.2, §10 Q3.
+**Status:** core mechanism built and tested in CI. Spout protocol layer built, loopback-tested (RTX 5070 Ti and WARP) and **verified against the official Spout SDK (SpoutDX 2.007.018) in both directions** on the RTX 5070 Ti; the remaining gaps are listed under "Still unverified". **Syphon built on the official framework (2026-10-30)** and checked across processes against plain Syphon.framework peers in both directions on an Apple M5 Pro; real Syphon apps not tried yet. · **Feeds:** `atd-interop`, IMG Share In/Out (M1), RESEARCH §4.8, §5.2, §10 Q3.
 
 ## Built so far (2026-10-15)
 
@@ -11,7 +11,7 @@
 - **Tests:** both write a pattern on device A, read it on an independent device B (its own `wgpu::Instance`), then write on B and read on A, with no CPU copy between them, for RGBA8 and BGRA8 (`tests/dx12_share.rs`, `tests/metal_share.rs`). CI runs them on `windows-latest` (WARP) and `macos-latest` (Apple Paravirtual device).
 - **Readback fallback:** `readback::read_rgba8`, tested everywhere including Linux/lavapipe.
 
-Still to do on hardware: the Syphon server announcement and its timings.
+Still to do on hardware: the Syphon server announcement and its timings (done 2026-10-30, see the Syphon section).
 
 ## Spout 2.007 sender and receiver (2026-10-17)
 
@@ -99,6 +99,31 @@ Legacy handles with bit 31 set (`0x8…`, `0xC…`) and without (`0x4…`) were 
 - Non-ASCII and 255-byte names, and a full 64-sender list.
 - WARP or CI against the SDK (WARP lacks the implicit cross-device sync, see above).
 
+## Syphon servers and clients (2026-10-30)
+
+`atd_interop::syphon` (macOS only) drives the **official Syphon framework**, not a reimplementation: Syphon-Framework (BSD-3-Clause, `third-party/Syphon/License.txt`) at commit f476167 is fetched by `crates/atd-interop/build.rs` (shallow `git fetch` into `OUT_DIR`, or the checkout in `ATD_SYPHON_SRC` for offline builds), built unmodified with `xcodebuild` (about 5 s; needs Xcode and its Metal compiler for the framework's `default.metallib`) and loaded at run time with `dlopen` from `ATD_SYPHON_FRAMEWORK`, an app bundle's `Contents/Frameworks`, beside the executable, or the build output. Nothing links against it, so binaries start where it is missing and the nodes report why. Nothing is vendored or committed.
+
+- **API:** `SyphonServer::new(device, queue, name)`, `publish(&texture)` (RGBA8 or BGRA8; `SyphonMetalServer publishFrameTexture:onCommandBuffer:...` on a command buffer we commit to the wgpu queue's own `MTLCommandQueue`, so it runs after the frame and Syphon announces the frame once the copy has completed); `SyphonReceiver::connect(device, queue, Some(name) | None)` and `receive_into(&texture)` returning `NoSender`, `Resize`, `NewFrame` or `NoNewFrame` like Spout's; a `SyphonMetalClient` with a frame handler counts announced frames and each new one is one blit into the target on the wgpu queue. Syphon frames are always BGRA8. `list_servers()` merges the directory with this process's own servers.
+- **Main run loop:** the directory and the servers' answers to "announce yourselves" travel as distributed notifications, which macOS delivers **only on the main thread's run loop** (checked: a directory created on another thread with its own run loop heard nothing). The app's event loop runs it. A headless process (CLI, tests) does not: it neither sees other processes' servers nor answers late clients, so this process's servers are also kept in a local list, which is what the loopback tests and `atidarla check` use. `syphon::run_main_loop` exists for tools and tests that own their main thread.
+- **Syphon bug worked around:** a client's "remove me" message still queued when its server stops is delivered to the server's freed message receiver (use-after-free in `SyphonServerConnectionManager`, crash in `objc_retain` on the `info.v002.syphon.messaging` queue). Our parallel loopback tests hit it 1 run in 10. Dropping a `SyphonServer` now waits up to 100 ms for `hasClients` to turn false (the last client message handled); 0 crashes in 20 runs after. Worth reporting upstream.
+- **First frame:** a client learns its server's surface before the server's first copy has run, so a local server's first frame is copied only once its command buffer has completed (a completion handler counter); another process's server is taken at its word, as Syphon itself does.
+- **Tests:** `tests/syphon_loopback.rs` (two wgpu devices on separate instances: exact bytes both ways, RGBA8 source arrives as BGRA8, no new frame until the next publish, resize mid-stream, server gone and back, newest server, name matching, bad names) and `tests/syphon_directory.rs` (`harness = false`, runs the main run loop: the directory lists the server and drops it when it stops). Operator tests `atd-ops-img/tests/share.rs` run on macOS too.
+
+### Cross-process check against plain Syphon apps (2026-10-30)
+
+`docs/spikes/syphon-interop/run.sh` builds `peer_send.m` and `peer_receive.m` (minimal Syphon apps using only `Syphon.framework` and Metal: `SyphonMetalServer` publishing a CPU-filled texture; `SyphonServerDirectory` + `SyphonMetalClient` with a frame handler, blit to a shared texture, `getBytes`) and runs them against the `syphon_send` / `syphon_receive` examples with the same stamped pattern as the Spout check, compared byte for byte after the stamp. Apple M5 Pro, macOS 26.6, Xcode 27.1, wgpu 30.0.1 Metal, release builds, 60 fps senders:
+
+| Case | Result |
+|---|---|
+| Ours → peer, BGRA8 1920×1080 resized to 960×540, peer started 1 s after | peer found our server through the directory (announce request), saw both sizes, **409 distinct frames verified, 0 bad**; saw "server gone" when ours exited |
+| Peer → ours, BGRA8 1920×1080 resized to 960×540, ours started 1 s after | our receiver listed `peer_send`'s server, followed both sizes, **373 frames verified, 0 bad**, "waiting for a server" after it exited |
+| Ours → ours, receiver waiting first, 1280×720 | found the server when it started (its announcement), **240 of 240 frames verified, 0 bad** |
+| The app (`atidarla-app examples/texture-sharing.atidarla --smoke 600`) → peer | peer connected to "Atidarla Example" from `atidarla-app`, 640×360 BGRA8, 166 frames in 5 s (noise, so not pattern-checked); the app's own Share In showed the loopback |
+
+Timings from that run (ms, mean / p50 / p95): `publish` 0.11 / 0.08 / 0.22 at 1080p; `receive_into` 0.17 / 0.07 / 0.19; stamp → pixels on the receiver's CPU, including its blocking readback and polling, 4.1 / 2.4 / 14.4. Skipped frame numbers (9 and 17) are the receivers' blocking readbacks falling behind, not Syphon drops.
+
+**Still unverified (Syphon):** real apps (Resolume, VDMX, MadMapper, Syphon Simple Client/Server, OBS with a Syphon plugin); a 4K run and the GPU-only timings the Spout record has; Intel Macs; the CI `macos-latest` runner (the build fetches and builds the framework there; not yet pushed); headless (CLI) servers answering clients that start later, which needs the main run loop.
+
 ## Questions to answer
 1. Can we export a `wgpu::Texture` created on the DX12 backend as a shared handle that Spout 2.007.x receivers accept (format `B8G8R8A8_UNORM` / `R8G8B8A8_UNORM`, keyed mutex or none)?
 2. Can we import a Spout sender's shared handle as a `wgpu::Texture` without a copy (`wgpu-hal` DX12 `texture_from_raw`, then `Device::create_texture_from_hal`)?
@@ -117,10 +142,10 @@ Legacy handles with bit 31 set (`0x8…`, `0xC…`) and without (`0x4…`) were 
 | Spout receive | Windows | 1080p / 4K | no CPU copy; one GPU copy | CPU call 0.032 / 0.033 (p50), 0.066 / 0.076 (p95) | `receive_into_shared` |
 | Spout send → receive, GPU done | Windows | 1080p / 4K | as above | 0.218 / 0.275 (p50), 0.245 / 0.308 (p95) | loopback, both GPU copies finished |
 | Spout ours ↔ SDK, cross-process | Windows | 1080p / 4K | as above | stamp → receiver CPU 4.7 / 9.8–11.7 (p50) | upper bound incl. polling and readback; see the interop section |
-| Syphon send | macOS | 1080p / 4K | | | |
-| Syphon receive | macOS | 1080p / 4K | | | |
+| Syphon send | macOS | 1080p | no CPU copy; one GPU blit by Syphon | CPU call 0.08 (p50), 0.22 (p95) | `SyphonServer::publish`, Apple M5 Pro, cross-process run; 4K not measured |
+| Syphon receive | macOS | 1080p | no CPU copy; one GPU blit | CPU call 0.07 (p50), 0.19 (p95) | `SyphonReceiver::receive_into`; 4K not measured |
 | Readback fallback | Windows | 1080p / 4K | n/a | 1.186 / 4.339 (p50), 1.419 / 4.463 (p95) | `read_rgba8` of the received BGRA8 texture, one side only |
 
 Spout method (2026-10-17): `cargo test -p atd-interop --release --test spout_loopback -- --ignored --nocapture` (`loopback_timing`), RTX 5070 Ti, Windows 11, wgpu 30.0.1 DX12, BGRA8, three runs of 300 frames per size. Figures are the middle run; across the three runs the CPU-call p50s were within 0.02 ms of each other, GPU-done p50s within 0.01 ms and readback p50s within 0.1 ms. One process, two wgpu devices on separate instances; the same 1080p or 4K source is sent every frame, so each frame is a new one for the receiver. *CPU call* is wall-clock time inside `send_wgpu` / `receive_into_shared`, which do not wait for the GPU. *GPU done* is from the start of `send_wgpu` until the receiving device's `poll(Wait)` returns after its queue has passed the fence the receiving D3D11 device signals after its copy; it includes both D3D11 copies and fence round trips, but no cross-process scheduling. *Readback* is `read_rgba8` (GPU copy to a mapped buffer, map, de-pad) of the received texture, 30 runs: the fallback would pay this plus an upload on the other side.
 
-Licences: Spout is BSD-2. Syphon is BSD-style [unverified, RESEARCH §5.2]; confirm its licence before writing bindings.
+Licences: Spout is BSD-2. Syphon-Framework is **BSD-3-Clause** (checked in its `License.txt`, 2026-10-30; copied to `third-party/Syphon/License.txt`; binary distributions must carry it).
