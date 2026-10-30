@@ -56,7 +56,7 @@ impl Lib {
             Lib::U01 => "atd_u01".into(),
             Lib::U01v3 => "atd_u01v3".into(),
             Lib::Hash2 => "atd_hash2".into(),
-            Lib::Hash3 => "atd_hash3".into(),
+            Lib::Hash3 => "atd_ihash3".into(),
             Lib::Grad2 => "atd_grad2".into(),
             Lib::Grad3 => "atd_grad3".into(),
             Lib::Idiv => "atd_idiv".into(),
@@ -100,7 +100,6 @@ impl Lib {
             Lib::Simplex2 => &[Lib::Hash2, Lib::Grad2],
             Lib::Simplex3 => &[Lib::Hash3, Lib::Grad3],
             Lib::Worley2 | Lib::Worley3 => &[Lib::Pcg3d, Lib::U01v3],
-            Lib::Curl => &[Lib::Perlin3d],
             Lib::RandI | Lib::RandF | Lib::Rand2 | Lib::Rand3 => &[Lib::Pcg3d, Lib::U01],
             _ => &[],
         }
@@ -138,6 +137,15 @@ impl Lib {
                     "fn atd_col{n}(m: {t}, i: i32) -> {v} {{\n    var c = m;\n    return c[clamp(i, 0i, {hi}i)];\n}}\n"
                 )
             }
+            Lib::Curl => format!(
+                "{}{}// The engine's curl noise (seed 0), the same code `pnt.noise` runs.
+    fn atd_curlnoise(p: vec3f) -> vec3f {{
+        return atd_curl(p, 0u);
+    }}
+    ",
+                atd_core::wgsl::HASH,
+                atd_core::wgsl::NOISE
+            ),
             other => fixed(other).to_owned(),
         }
     }
@@ -179,7 +187,7 @@ fn atd_pcg3d(v0: vec3u) -> vec3u {
 "
         }
         Lib::Hash3 => {
-            "fn atd_hash3(c: vec3i) -> u32 {
+            "fn atd_ihash3(c: vec3i) -> u32 {
     return atd_pcg3d(bitcast<vec3u>(c)).x;
 }
 "
@@ -368,14 +376,14 @@ fn atd_perlin3d(p: vec3f) -> vec4f {
     let c = vec3i(i);
     let u = f * f * f * (f * (f * 6.0f - 15.0f) + 10.0f);
     let du = 30.0f * f * f * (f * (f - 2.0f) + 1.0f);
-    let ga = atd_grad3(atd_hash3(c));
-    let gb = atd_grad3(atd_hash3(c + vec3i(1i, 0i, 0i)));
-    let gc = atd_grad3(atd_hash3(c + vec3i(0i, 1i, 0i)));
-    let gd = atd_grad3(atd_hash3(c + vec3i(1i, 1i, 0i)));
-    let ge = atd_grad3(atd_hash3(c + vec3i(0i, 0i, 1i)));
-    let gf = atd_grad3(atd_hash3(c + vec3i(1i, 0i, 1i)));
-    let gg = atd_grad3(atd_hash3(c + vec3i(0i, 1i, 1i)));
-    let gh = atd_grad3(atd_hash3(c + vec3i(1i, 1i, 1i)));
+    let ga = atd_grad3(atd_ihash3(c));
+    let gb = atd_grad3(atd_ihash3(c + vec3i(1i, 0i, 0i)));
+    let gc = atd_grad3(atd_ihash3(c + vec3i(0i, 1i, 0i)));
+    let gd = atd_grad3(atd_ihash3(c + vec3i(1i, 1i, 0i)));
+    let ge = atd_grad3(atd_ihash3(c + vec3i(0i, 0i, 1i)));
+    let gf = atd_grad3(atd_ihash3(c + vec3i(1i, 0i, 1i)));
+    let gg = atd_grad3(atd_ihash3(c + vec3i(0i, 1i, 1i)));
+    let gh = atd_grad3(atd_ihash3(c + vec3i(1i, 1i, 1i)));
     let va = dot(ga, f);
     let vb = dot(gb, f - vec3f(1.0f, 0.0f, 0.0f));
     let vc = dot(gc, f - vec3f(0.0f, 1.0f, 0.0f));
@@ -454,22 +462,22 @@ fn atd_simplex3(p: vec3f) -> f32 {
     let t0 = 0.5f - dot(x0, x0);
     if (t0 > 0.0f) {
         let q = t0 * t0;
-        n = n + q * q * dot(atd_grad3(atd_hash3(c)), x0);
+        n = n + q * q * dot(atd_grad3(atd_ihash3(c)), x0);
     }
     let t1 = 0.5f - dot(x1, x1);
     if (t1 > 0.0f) {
         let q = t1 * t1;
-        n = n + q * q * dot(atd_grad3(atd_hash3(c + vec3i(i1))), x1);
+        n = n + q * q * dot(atd_grad3(atd_ihash3(c + vec3i(i1))), x1);
     }
     let t2 = 0.5f - dot(x2, x2);
     if (t2 > 0.0f) {
         let q = t2 * t2;
-        n = n + q * q * dot(atd_grad3(atd_hash3(c + vec3i(i2))), x2);
+        n = n + q * q * dot(atd_grad3(atd_ihash3(c + vec3i(i2))), x2);
     }
     let t3 = 0.5f - dot(x3, x3);
     if (t3 > 0.0f) {
         let q = t3 * t3;
-        n = n + q * q * dot(atd_grad3(atd_hash3(c + vec3i(1i, 1i, 1i))), x3);
+        n = n + q * q * dot(atd_grad3(atd_ihash3(c + vec3i(1i, 1i, 1i))), x3);
     }
     return 76.0f * n;
 }
@@ -511,16 +519,6 @@ fn atd_worley2(p: vec2f) -> f32 {
         }
     }
     return sqrt(d);
-}
-"
-        }
-        Lib::Curl => {
-            "// Curl of the vector potential (perlin(p), perlin(p + o1), perlin(p + o2)).
-fn atd_curlnoise(p: vec3f) -> vec3f {
-    let a = atd_perlin3d(p);
-    let b = atd_perlin3d(p + vec3f(31.416f, -47.853f, 12.679f));
-    let c = atd_perlin3d(p + vec3f(-233.17f, 113.51f, 71.93f));
-    return vec3f(c.z - b.w, a.w - c.y, b.y - a.z);
 }
 "
         }

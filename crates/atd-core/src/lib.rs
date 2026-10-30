@@ -14,6 +14,7 @@ pub mod history;
 pub mod pack;
 pub mod platform;
 pub mod registry;
+pub mod wgsl;
 
 pub use capability::{CapabilityFlag, CapabilityRequirement, Fallback};
 pub use platform::{Arch, GpuVendor, Os, PlatformInfo};

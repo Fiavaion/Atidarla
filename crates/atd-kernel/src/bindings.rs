@@ -16,7 +16,7 @@ use crate::diag::Span;
 use crate::types::{AttrType, Type};
 
 /// Invocations per workgroup of a Points kernel.
-pub const WORKGROUP_SIZE: u32 = 64;
+pub const WORKGROUP_SIZE: u32 = atd_core::geo::WORKGROUP;
 
 /// Bytes of the Points header buffer: `count: u32, capacity: u32`.
 pub const HEADER_SIZE: u64 = 8;

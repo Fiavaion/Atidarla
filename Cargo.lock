@@ -290,6 +290,7 @@ dependencies = [
 name = "atd-core"
 version = "0.0.1"
 dependencies = [
+ "naga",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -357,6 +358,7 @@ dependencies = [
 name = "atd-kernel"
 version = "0.0.1"
 dependencies = [
+ "atd-core",
  "atd-gpu",
  "naga",
  "pollster 0.4.0",
@@ -439,6 +441,7 @@ dependencies = [
  "atd-core",
  "atd-gpu",
  "atd-interop",
+ "atd-kernel",
  "naga",
  "pollster 0.4.0",
  "serde_json",

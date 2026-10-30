@@ -1,7 +1,7 @@
 //! Type checking: resolves names, decides attribute types, inserts every implicit
 //! conversion and produces the typed IR.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::AttrSchema;
 use crate::Target;
@@ -26,6 +26,7 @@ pub(crate) fn check(
         attrs: Vec::new(),
         attr_index: HashMap::new(),
         sigils: HashMap::new(),
+        assigned: HashSet::new(),
         params: Vec::new(),
         images: BTreeSet::new(),
         sigs: Vec::new(),
@@ -34,6 +35,7 @@ pub(crate) fn check(
         cx: FnCx::default(),
     };
     c.collect_sigils(program);
+    c.collect_assigned(program);
     c.collect_functions(program);
 
     let mut functions = Vec::new();
@@ -90,6 +92,8 @@ struct Checker<'a> {
     attr_index: HashMap<String, AttrId>,
     /// The type a sigil gives each attribute, and where.
     sigils: HashMap<String, (Type, Span)>,
+    /// Attributes the kernel body assigns to (`@name = …`, `@name.x += …`, `@name++`).
+    assigned: HashSet<String>,
     params: Vec<ParamDecl>,
     images: BTreeSet<u32>,
     sigs: Vec<FnSig>,
@@ -319,6 +323,49 @@ impl Checker<'_> {
                 None => {
                     self.sigils.insert(name, (ty, span));
                 }
+            }
+        }
+    }
+
+    /// Records the attributes the kernel body writes: an explicit sigil on one of them
+    /// redefines it, so a kernel edited in a running simulation may change its type.
+    fn collect_assigned(&mut self, program: &ast::Program) {
+        fn target(e: &ast::Expr) -> Option<&str> {
+            match &e.kind {
+                AK::Attr { name, .. } => Some(name),
+                AK::Member(base, _, _) | AK::Index(base, _) => target(base),
+                _ => None,
+            }
+        }
+        fn visit(s: &ast::Stmt, out: &mut HashSet<String>) {
+            match &s.kind {
+                SK::Assign { target: t, .. } | SK::IncDec { target: t, .. } => {
+                    if let Some(name) = target(t) {
+                        out.insert(name.to_owned());
+                    }
+                }
+                SK::If { then, els, .. } => {
+                    visit(then, out);
+                    if let Some(e) = els {
+                        visit(e, out);
+                    }
+                }
+                SK::For {
+                    init, step, body, ..
+                } => {
+                    for s in [init, step].into_iter().flatten() {
+                        visit(s, out);
+                    }
+                    visit(body, out);
+                }
+                SK::Foreach { body, .. } => visit(body, out),
+                SK::Block(b) => b.iter().for_each(|s| visit(s, out)),
+                _ => {}
+            }
+        }
+        for item in &program.items {
+            if let ast::Item::Stmt(s) = item {
+                visit(s, &mut self.assigned);
             }
         }
     }
@@ -1098,6 +1145,7 @@ impl Checker<'_> {
             };
             if let Some(t) = sig
                 && t != kt
+                && !self.assigned.contains(name)
             {
                 let at = self.sigils.get(name).map_or(span, |(_, s)| *s);
                 return Err(Error::new(
@@ -1106,7 +1154,10 @@ impl Checker<'_> {
                 )
                 .hint(format!("drop the sigil or use the input's type, `{kt}`")));
             }
-            return Ok((kt, a.ty));
+            if sig.is_none_or(|t| t == kt) {
+                return Ok((kt, a.ty));
+            }
+            // A written attribute with another sigil: redefined, stored as the sigil says.
         }
         let std = standard_attribute(name);
         let ty = sig

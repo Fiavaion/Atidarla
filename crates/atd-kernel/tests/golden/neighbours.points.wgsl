@@ -99,9 +99,9 @@ fn atd_kernel() {
     a_P = (a_P + (a_v * vec3f(atd_u.globals.y)));
 }
 
-@compute @workgroup_size(64)
+@compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) atd_gid: vec3u, @builtin(num_workgroups) atd_nwg: vec3u) {
-    atd_index = atd_gid.x + atd_gid.y * atd_nwg.x * 64u;
+    atd_index = atd_gid.x + atd_gid.y * atd_nwg.x * 256u;
     if (atd_index >= atd_header.count) {
         return;
     }

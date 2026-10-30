@@ -63,7 +63,7 @@ fn bindings_follow_the_layout_rules() {
         Target::Points,
     );
     let b = &c.bindings;
-    assert_eq!(b.workgroup_size, 64);
+    assert_eq!(b.workgroup_size, atd_kernel::bindings::WORKGROUP_SIZE);
     assert_eq!(b.entry_point, "main");
     let h = b.header.as_ref().expect("header");
     assert_eq!((h.group, h.binding), (0, 0));
@@ -160,11 +160,21 @@ fn input_schema_types_untyped_attributes() {
         .find(|a| a.name == "Cd")
         .expect("Cd");
     assert_eq!(cd.ty, AttrType::VEC3);
-    let d = compile("p@Cd = 1;", &opts).expect_err("sigil disagrees with the input");
+    let d = compile("@P.y = p@Cd.x;", &opts).expect_err("sigil disagrees with the input");
     assert!(
         d[0].message.contains("the input's `Cd` is a `vec3`"),
         "{d:?}"
     );
+    // Written with another sigil, the attribute is redefined (FR-K4: an edit in a
+    // running simulation may change a type; the new attribute starts at zero).
+    let c = compile("p@Cd = 1;", &opts).expect("a written attribute is redefined");
+    let cd = c
+        .bindings
+        .attributes
+        .iter()
+        .find(|a| a.name == "Cd")
+        .expect("Cd");
+    assert_eq!(cd.ty, AttrType::VEC4);
     let d = compile("@P.y = @big.x;", &opts).expect_err("unsupported storage");
     assert!(d[0].message.contains("u32x3"), "{d:?}");
     // No schema: the sigil wins over the standard table.

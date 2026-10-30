@@ -304,12 +304,95 @@ pub fn worley3(p: V3) -> f32 {
     d.sqrt()
 }
 
-/// Curl of the potential `(perlin(p), perlin(p + o1), perlin(p + o2))`: divergence-free.
+/// `atd_hash3` of the engine library (`atd_core::wgsl::HASH`).
+fn ehash3(v0: [u32; 3]) -> [u32; 3] {
+    let mut v = v0.map(|x| x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223));
+    v[0] = v[0].wrapping_add(v[1].wrapping_mul(v[2]));
+    v[1] = v[1].wrapping_add(v[2].wrapping_mul(v[0]));
+    v[2] = v[2].wrapping_add(v[0].wrapping_mul(v[1]));
+    v = v.map(|x| x ^ (x >> 16));
+    v[0] = v[0].wrapping_add(v[1].wrapping_mul(v[2]));
+    v[1] = v[1].wrapping_add(v[2].wrapping_mul(v[0]));
+    v[2] = v[2].wrapping_add(v[0].wrapping_mul(v[1]));
+    v
+}
+
+/// `atd_grad` of the engine library.
+fn egrad(c: [i32; 3], seed: u32) -> V3 {
+    let k = [
+        seed,
+        seed.wrapping_mul(3).wrapping_add(1),
+        seed.wrapping_mul(7).wrapping_add(2),
+    ];
+    let h = ehash3([c[0] as u32 ^ k[0], c[1] as u32 ^ k[1], c[2] as u32 ^ k[2]]);
+    h.map(|x| (x & 0xffff) as f32 * (2.0 / 65535.0) - 1.0)
+}
+
+/// The analytic gradient of `atd_gnoise` (the engine's gradient noise).
+fn egnoise_grad(p: V3, seed: u32) -> V3 {
+    let cell = p.map(f32::floor);
+    let c = cell.map(|x| x as i32);
+    let f = [p[0] - cell[0], p[1] - cell[1], p[2] - cell[2]];
+    let u = f.map(|f| f * f * f * (f * (f * 6.0 - 15.0) + 10.0));
+    let du = f.map(|f| 30.0 * f * f * (f * (f - 2.0) + 1.0));
+    let g: Vec<V3> = (0..8)
+        .map(|i| {
+            egrad(
+                [c[0] + (i & 1), c[1] + ((i >> 1) & 1), c[2] + ((i >> 2) & 1)],
+                seed,
+            )
+        })
+        .collect();
+    let n: Vec<f32> = (0..8)
+        .map(|i| {
+            let o = [(i & 1) as f32, ((i >> 1) & 1) as f32, ((i >> 2) & 1) as f32];
+            dot3(g[i as usize], [f[0] - o[0], f[1] - o[1], f[2] - o[2]])
+        })
+        .collect();
+    let k1 = n[1] - n[0];
+    let k2 = n[2] - n[0];
+    let k3 = n[4] - n[0];
+    let k4 = n[0] - n[1] - n[2] + n[3];
+    let k5 = n[0] - n[2] - n[4] + n[6];
+    let k6 = n[0] - n[1] - n[4] + n[5];
+    let k7 = -n[0] + n[1] + n[2] - n[3] + n[4] - n[5] - n[6] + n[7];
+    let mut grad = [0.0f32; 3];
+    for a in 0..3 {
+        let gk1 = g[1][a] - g[0][a];
+        let gk2 = g[2][a] - g[0][a];
+        let gk3 = g[4][a] - g[0][a];
+        let gk4 = g[0][a] - g[1][a] - g[2][a] + g[3][a];
+        let gk5 = g[0][a] - g[2][a] - g[4][a] + g[6][a];
+        let gk6 = g[0][a] - g[1][a] - g[4][a] + g[5][a];
+        let gk7 = -g[0][a] + g[1][a] + g[2][a] - g[3][a] + g[4][a] - g[5][a] - g[6][a] + g[7][a];
+        grad[a] = g[0][a]
+            + gk1 * u[0]
+            + gk2 * u[1]
+            + gk3 * u[2]
+            + gk4 * u[0] * u[1]
+            + gk5 * u[1] * u[2]
+            + gk6 * u[0] * u[2]
+            + gk7 * u[0] * u[1] * u[2];
+    }
+    let chain = [
+        k1 + k4 * u[1] + k6 * u[2] + k7 * u[1] * u[2],
+        k2 + k4 * u[0] + k5 * u[2] + k7 * u[0] * u[2],
+        k3 + k5 * u[1] + k6 * u[0] + k7 * u[0] * u[1],
+    ];
+    [
+        grad[0] + du[0] * chain[0],
+        grad[1] + du[1] * chain[1],
+        grad[2] + du[2] * chain[2],
+    ]
+}
+
+/// The engine's curl noise with seed 0 (`atd_curl` in `atd_core::wgsl::NOISE`, which
+/// `pnt.noise` runs): the curl of a potential of three decorrelated gradient noises.
 pub fn curlnoise(p: V3) -> V3 {
-    let a = perlin3d(p);
-    let b = perlin3d(add3(p, [31.416, -47.853, 12.679]));
-    let c = perlin3d(add3(p, [-233.17, 113.51, 71.93]));
-    [c[2] - b[3], a[3] - c[1], b[1] - a[2]]
+    let a = egnoise_grad(p, 0);
+    let b = egnoise_grad(add3(p, [31.416, 47.853, 12.679]), 1);
+    let c = egnoise_grad(add3(p, [-59.207, 23.114, -71.931]), 2);
+    [c[1] - b[2], a[2] - c[0], b[0] - a[1]]
 }
 
 pub fn rand_i(x: i32) -> f32 {
