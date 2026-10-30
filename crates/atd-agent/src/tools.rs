@@ -13,7 +13,9 @@
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
+use atd_core::Registry;
 use atd_core::graph::{Edit, Endpoint, Network, Node, NodeId, Param, Wire};
+use atd_core::pack::{self, PackDef, ParamTarget, Version};
 use atd_core::registry::{OpFamily, OperatorSchema};
 use serde_json::{Map, Value, json};
 
@@ -123,6 +125,37 @@ pub fn specs() -> Vec<ToolSpec> {
             scope: None,
         },
         ToolSpec {
+            name: "create_pack",
+            description: "Stages turning existing nodes (or nodes you just created) into a new Pack: a reusable unit with a semantic version, help, promoted parameters and sockets. The nodes are replaced by one instance (`cmp.pack_<name>`). Wires from outside the selection become the Pack's inputs, wires to outside its outputs (with none, the last node nothing inside reads becomes `out`). Accepted with the other staged changes as one undo step.",
+            schema: obj(
+                json!({
+                    "name": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$", "maxLength": 48, "description": "The Pack's name; its operator type is `cmp.pack_<name>`."},
+                    "nodes": {"type": "array", "items": node.clone(), "minItems": 1, "description": "The nodes that go inside the Pack."},
+                    "promote": {"type": "array", "description": "Inner parameters the instance shows as its own; their current values become the defaults.", "items": {
+                        "type": "object",
+                        "properties": {
+                            "node": node.clone(),
+                            "param": {"type": "string"},
+                            "name": {"type": "string", "pattern": "^[a-z_][a-z0-9_]*$", "description": "The promoted parameter's name (default: the inner one's)."},
+                            "label": {"type": "string"},
+                            "help": {"type": "string"},
+                            "min": {"type": "number", "description": "May only narrow the inner parameter's range."},
+                            "max": {"type": "number"}
+                        },
+                        "required": ["node", "param"],
+                        "additionalProperties": false
+                    }},
+                    "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$", "default": "0.1.0"},
+                    "label": {"type": "string"},
+                    "summary": {"type": "string", "description": "One sentence for the Palette."},
+                    "help": {"type": "string", "description": "The help page (Markdown)."},
+                    "instance": {"type": "string", "description": "The instance's name (default: the Pack's name and a number)."}
+                }),
+                &["name", "nodes"],
+            ),
+            scope: Some(Scope::Edit),
+        },
+        ToolSpec {
             name: "review_changes",
             description: "The staged changes as a list (nodes added/removed, wires, parameter changes old → new). Nothing is applied until accepted.",
             schema: obj(json!({}), &[]),
@@ -220,6 +253,10 @@ pub struct Agent {
     pub lock: ShowLock,
     /// The network with the staged changes applied, while any are staged.
     preview: Option<Network>,
+    /// The registry with the staged Packs' operator types, while any are staged.
+    preview_registry: Option<Registry>,
+    /// New Packs the staged edits use (added when they are accepted).
+    staged_packs: Vec<PackDef>,
     staged: Vec<Edit>,
     /// What each staged edit is, for review.
     notes: Vec<String>,
@@ -231,6 +268,8 @@ impl Agent {
             scopes,
             lock,
             preview: None,
+            preview_registry: None,
+            staged_packs: Vec::new(),
             staged: Vec::new(),
             notes: Vec::new(),
         }
@@ -248,10 +287,26 @@ impl Agent {
         &self.staged
     }
 
+    /// New Packs the staged changes use (`create_pack`).
+    pub fn staged_packs(&self) -> &[PackDef] {
+        &self.staged_packs
+    }
+
     /// The staged changes, taken (for a person accepting them in the app).
+    /// Staged Packs are dropped; use [`Self::take_staged_with_packs`] when
+    /// any may be staged.
     pub fn take_staged(&mut self) -> (Vec<Edit>, Vec<String>) {
+        let (_, edits, notes) = self.take_staged_with_packs();
+        (edits, notes)
+    }
+
+    /// The staged changes and the new Packs they use, taken: apply them with
+    /// [`Workspace::apply_with_packs`] as one undo step.
+    pub fn take_staged_with_packs(&mut self) -> (Vec<PackDef>, Vec<Edit>, Vec<String>) {
         self.preview = None;
+        self.preview_registry = None;
         (
+            std::mem::take(&mut self.staged_packs),
             std::mem::take(&mut self.staged),
             std::mem::take(&mut self.notes),
         )
@@ -259,6 +314,13 @@ impl Agent {
 
     fn view<'a>(&'a self, ws: &'a dyn Workspace) -> &'a Network {
         self.preview.as_ref().unwrap_or_else(|| ws.network())
+    }
+
+    /// The registry as the agent sees it (staged Packs included).
+    fn reg<'a>(&'a self, ws: &'a dyn Workspace) -> &'a Registry {
+        self.preview_registry
+            .as_ref()
+            .unwrap_or_else(|| ws.registry())
     }
 
     /// Runs a tool. Errors are answers for the model, not failures.
@@ -290,8 +352,8 @@ impl Agent {
         match name {
             "list_ops" => {
                 let family = s("family");
-                let ops: Vec<Value> = ws
-                    .registry()
+                let ops: Vec<Value> = self
+                    .reg(ws)
                     .iter()
                     .filter(|o| family.is_none_or(|f| family_name(o.family) == f))
                     .map(|o| json!({"type": o.type_id, "label": o.label, "summary": o.summary}))
@@ -300,8 +362,8 @@ impl Agent {
             }
             "get_schema" => {
                 let t = need("type")?;
-                let op = ws
-                    .registry()
+                let op = self
+                    .reg(ws)
                     .get(t)
                     .ok_or_else(|| format!("no operator type `{t}`; see list_ops"))?;
                 Ok(Output::Json(schema_json(op)))
@@ -313,8 +375,8 @@ impl Agent {
             "create_node" => {
                 self.lock.check_graph_edit().map_err(|e| e.to_string())?;
                 let t = need("type")?;
-                let op = ws
-                    .registry()
+                let op = self
+                    .reg(ws)
                     .get(t)
                     .ok_or_else(|| format!("no operator type `{t}`; see list_ops"))?
                     .clone();
@@ -415,6 +477,7 @@ impl Agent {
                 Ok(Output::Json(json!({"disconnected": true, "staged": true})))
             }
             "set_param" => self.set_param(ws, a),
+            "create_pack" => self.create_pack(ws, a),
             "review_changes" => Ok(Output::Json(json!({
                 "staged": self.notes,
                 "count": self.staged.len(),
@@ -555,8 +618,8 @@ impl Agent {
             .get("param")
             .and_then(Value::as_str)
             .ok_or("missing argument `param`")?;
-        let op = ws
-            .registry()
+        let op = self
+            .reg(ws)
             .get(&node.type_id)
             .ok_or("unknown operator type")?;
         let schema = op.params.iter().find(|p| p.name == param).ok_or_else(|| {
@@ -616,6 +679,151 @@ impl Agent {
         Ok(Output::Json(json!({"staged": true})))
     }
 
+    /// `create_pack`: Make Pack (`atd_core::pack::make_pack`) on the preview,
+    /// with the interface the agent asked for, staged like any other edit.
+    fn create_pack(
+        &mut self,
+        ws: &mut dyn Workspace,
+        a: &Map<String, Value>,
+    ) -> Result<Output, String> {
+        self.lock.check_graph_edit().map_err(|e| e.to_string())?;
+        let str_arg = |k: &str| a.get(k).and_then(Value::as_str);
+        let name = str_arg("name").ok_or("missing argument `name`")?;
+        if !pack::valid_pack_name(name) {
+            return Err(format!(
+                "`{name}` is not a Pack name: lower-case letters, digits and `_`, starting with a letter, at most {} long",
+                pack::MAX_NAME_LEN
+            ));
+        }
+        let type_id = pack::type_id(name);
+        if self.reg(ws).get(&type_id).is_some() {
+            return Err(format!(
+                "an operator `{type_id}` exists; pick another Pack name"
+            ));
+        }
+        let mut net = self.view(ws).clone();
+        let mut selection = BTreeSet::new();
+        for r in a
+            .get("nodes")
+            .and_then(Value::as_array)
+            .ok_or("missing argument `nodes`")?
+        {
+            let r = r.as_str().ok_or("`nodes` lists node names")?;
+            selection.insert(find(&net, r)?);
+        }
+        let promote_args: Vec<&Map<String, Value>> = a
+            .get("promote")
+            .and_then(Value::as_array)
+            .map(|v| v.iter().filter_map(Value::as_object).collect())
+            .unwrap_or_default();
+        let mut promote: Vec<ParamTarget> = Vec::new();
+        for p in &promote_args {
+            let node = p
+                .get("node")
+                .and_then(Value::as_str)
+                .ok_or("each `promote` entry needs `node`")?;
+            let param = p
+                .get("param")
+                .and_then(Value::as_str)
+                .ok_or("each `promote` entry needs `param`")?;
+            let id = find(&net, node)?;
+            if !selection.contains(&id) {
+                return Err(format!("`{node}` is not one of `nodes`"));
+            }
+            let t = ParamTarget::new(id, param);
+            if promote.contains(&t) {
+                return Err(format!("{node}.{param} is promoted twice"));
+            }
+            promote.push(t);
+        }
+        let instance = net.alloc_id();
+        let made = pack::make_pack(&net, self.reg(ws), &selection, name, &promote, instance)
+            .map_err(|e| e.to_string())?;
+        let mut def = made.def;
+        let mut edits = made.edits;
+        if let Some(v) = str_arg("version") {
+            def.version = v
+                .parse::<Version>()
+                .map_err(|e| format!("`version`: {e}"))?;
+        }
+        for (field, key) in [
+            (&mut def.label, "label"),
+            (&mut def.summary, "summary"),
+            (&mut def.help, "help"),
+        ] {
+            if let Some(v) = str_arg(key) {
+                v.clone_into(field);
+            }
+        }
+        // `make_pack` numbers inner nodes in selection order and puts the
+        // chosen promotions first, in the order asked for.
+        let inner =
+            |id: NodeId| NodeId(selection.iter().position(|s| *s == id).unwrap_or(0) as u64);
+        for (p, t) in promote_args.iter().zip(&promote) {
+            let target = ParamTarget::new(inner(t.node), t.param.clone());
+            let promoted = def
+                .params
+                .iter_mut()
+                .find(|q| q.targets.contains(&target))
+                .ok_or("a promoted parameter went missing")?;
+            let text = |k: &str| p.get(k).and_then(Value::as_str);
+            if let Some(n) = text("name") {
+                n.clone_into(&mut promoted.name);
+            }
+            if let Some(l) = text("label") {
+                l.clone_into(&mut promoted.label);
+            }
+            if let Some(h) = text("help") {
+                h.clone_into(&mut promoted.help);
+            }
+            promoted.min = p.get("min").and_then(Value::as_f64).or(promoted.min);
+            promoted.max = p.get("max").and_then(Value::as_f64).or(promoted.max);
+        }
+        let mut instance_name = String::new();
+        for e in &mut edits {
+            if let Edit::AddNode { node } = e
+                && node.id == instance
+            {
+                if let Some(n) = str_arg("instance") {
+                    if net
+                        .node_by_name(n)
+                        .is_some_and(|o| !selection.contains(&o.id))
+                    {
+                        return Err(format!("a node named `{n}` exists; pick another name"));
+                    }
+                    n.clone_into(&mut node.name);
+                }
+                instance_name.clone_from(&node.name);
+            }
+        }
+        let schema = def.schema(self.reg(ws)).map_err(|e| e.to_string())?;
+        let mut reg = self.reg(ws).clone();
+        reg.register(schema).map_err(|e| e.to_string())?;
+        let previous = self.preview_registry.replace(reg);
+        let note = format!(
+            "make Pack {name} {} from {} node(s) → {instance_name}",
+            def.version,
+            selection.len()
+        );
+        if let Err(e) = self.stage(ws, net, edits, note) {
+            self.preview_registry = previous;
+            return Err(e);
+        }
+        let out = json!({
+            "pack": name,
+            "type": type_id,
+            "version": def.version.to_string(),
+            "instance": instance_name,
+            "params": def.params.iter().map(|p| &p.name).collect::<Vec<_>>(),
+            "inputs": def.inputs.iter().map(|i| &i.name).collect::<Vec<_>>(),
+            "outputs": def.outputs.iter().map(|o| &o.name).collect::<Vec<_>>(),
+            "warnings": made.warnings,
+            "staged": true,
+        });
+        self.staged_packs.push(def);
+        Ok(Output::Json(out))
+    }
+
     /// Applies `edits` to the preview (checking them against the registry)
     /// and records them.
     fn stage(
@@ -625,9 +833,9 @@ impl Agent {
         edits: Vec<Edit>,
         note: String,
     ) -> Result<(), String> {
+        let reg = self.reg(ws);
         for e in &edits {
-            net.apply(ws.registry(), e.clone())
-                .map_err(|e| e.to_string())?;
+            net.apply(reg, e.clone()).map_err(|e| e.to_string())?;
         }
         self.preview = Some(net);
         self.staged.extend(edits);
@@ -645,8 +853,12 @@ impl Agent {
         if self.staged.is_empty() {
             return Ok(ws.cook_errors());
         }
-        let (edits, _) = self.take_staged();
-        ws.apply(label, edits)?;
+        let (packs, edits, _) = self.take_staged_with_packs();
+        if packs.is_empty() {
+            ws.apply(label, edits)?;
+        } else {
+            ws.apply_with_packs(label, packs, edits)?;
+        }
         Ok(ws.cook_errors())
     }
 }

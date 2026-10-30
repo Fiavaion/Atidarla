@@ -21,7 +21,7 @@ use atd_agent::mcp::{self, Request};
 use atd_agent::{Agent, ShowLock, Workspace};
 use atd_core::Registry;
 use atd_core::graph::{Edit, Network, NodeId};
-use atd_core::pack::Flat;
+use atd_core::pack::{Flat, PackDef};
 use atd_gpu::engine::{Engine, EngineConfig};
 use serde_json::json;
 
@@ -162,6 +162,49 @@ impl Workspace for ServeWorkspace {
                 .map_err(|e| e.to_string())?;
         }
         self.reload(net)?;
+        self.history.push(label.to_owned());
+        Ok(())
+    }
+
+    fn apply_with_packs(
+        &mut self,
+        label: &str,
+        packs: Vec<PackDef>,
+        edits: Vec<Edit>,
+    ) -> Result<(), String> {
+        // Check everything on copies first, so a failure changes nothing.
+        let mut registry = self.engine.registry().clone();
+        let mut schemas = Vec::new();
+        for def in &packs {
+            if self.loaded.project.packs.get(&def.name).is_some() {
+                return Err(format!("a Pack named `{}` exists", def.name));
+            }
+            let schema = def.schema(&registry).map_err(|e| e.to_string())?;
+            registry
+                .register(schema.clone())
+                .map_err(|e| e.to_string())?;
+            schemas.push(schema);
+        }
+        let mut net = self.network().clone();
+        for e in edits {
+            net.apply(&registry, e).map_err(|e| e.to_string())?;
+        }
+        self.engine.extend(|r, _| {
+            for s in schemas {
+                r.register(s).expect("checked on a copy");
+            }
+        });
+        let names: Vec<String> = packs.iter().map(|d| d.name.clone()).collect();
+        for def in packs {
+            self.loaded.project.packs.insert(def);
+        }
+        if let Err(e) = self.reload(net) {
+            // The extra operator types stay registered, unused.
+            for n in &names {
+                self.loaded.project.packs.remove(n);
+            }
+            return Err(e);
+        }
         self.history.push(label.to_owned());
         Ok(())
     }

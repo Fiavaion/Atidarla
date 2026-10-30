@@ -220,6 +220,7 @@ version = "0.0.1"
 dependencies = [
  "atd-ai",
  "atd-core",
+ "atd-format",
  "atd-kernel",
  "atd-ops-img",
  "atd-ops-sig",

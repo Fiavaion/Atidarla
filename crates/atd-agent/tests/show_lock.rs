@@ -85,6 +85,10 @@ fn show_lock_refuses_every_graph_edit() {
         ),
         ("disconnect", json!({"to": "level1", "input": "in"})),
         (
+            "create_pack",
+            json!({"name": "heist", "nodes": ["noise1", "level1"]}),
+        ),
+        (
             "set_param",
             json!({"node": "level1", "param": "contrast", "value": 2.0}),
         ),

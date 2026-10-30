@@ -22,6 +22,7 @@ log.workspace = true
 toml_edit = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
+atd-format.workspace = true
 atd-ops-img.workspace = true
 atd-ops-sig.workspace = true
 
