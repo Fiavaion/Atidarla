@@ -338,6 +338,18 @@ impl Renderer {
         self.fps = opts.fps;
         self.engine.set_mode(CookMode::Offline { fps: opts.fps });
         self.engine.set_project_dir(Some(dir.to_owned()));
+        // Sovereign mode, spend cap and hosts before any AI node routes.
+        let tokens_path = atd_ai::models::Store::default().hosts_path();
+        let tokens = atd_ai::hosts::HostTokens::load(&tokens_path).unwrap_or_else(|e| {
+            self.warnings.push(format!("AI host tokens: {e}"));
+            Default::default()
+        });
+        atd_ai::hosts::apply(
+            &project.ai,
+            &tokens,
+            atd_ai::supervisor::Supervisor::global(),
+        );
+        atd_ai::router::spend().reset();
         self.engine
             .load(flat.network)
             .map_err(|e| match e {

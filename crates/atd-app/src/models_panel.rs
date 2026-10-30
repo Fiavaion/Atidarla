@@ -584,6 +584,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut ai = AiSettings {
             commercial_safe_only: true,
+            ..AiSettings::default()
         };
         let manifest = BTreeMap::from([(
             "sd-turbo".to_owned(),

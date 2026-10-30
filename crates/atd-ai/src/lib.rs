@@ -13,6 +13,7 @@
 pub mod client;
 pub mod comfy;
 pub mod egress;
+pub mod hosts;
 pub mod link;
 pub mod models;
 pub mod protocol;
