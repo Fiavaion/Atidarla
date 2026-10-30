@@ -1,0 +1,168 @@
+# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 18
+
+[[node]]
+id = 0
+name = "lfo_slow"
+type = "sig.lfo"
+pos = [0.0, 400.0]
+params.frequency = 0.05
+
+[[node]]
+id = 1
+name = "lfo_tri"
+type = "sig.lfo"
+pos = [0.0, 500.0]
+params.frequency = 0.13
+params.waveform = "triangle"
+
+[[node]]
+id = 2
+name = "wander"
+type = "sig.noise"
+pos = [0.0, 600.0]
+params.channels = 2
+params.frequency = 0.3
+params.seed = 7
+
+[[node]]
+id = 3
+name = "zoom_math"
+type = "sig.math"
+pos = [200.0, 450.0]
+inputs.a = { node = 0, output = "out" }
+inputs.b = { node = 1, output = "out" }
+params.from_max = 1
+params.from_min = -1
+params.operation = "multiply"
+params.to_max = 0.995
+params.to_min = 0.965
+
+[[node]]
+id = 4
+name = "field_noise"
+type = "img.noise"
+pos = [0.0, 0.0]
+params.amplitude = 0.95
+params.monochrome = false
+params.octaves = 4
+params.scale = 3
+params.z = { value = 0.0, expr = "time * 0.15" }
+
+[[node]]
+id = 5
+name = "palette"
+type = "img.ramp"
+pos = [0.0, 120.0]
+params.colour_a = [0.05, 0, 0.25, 1]
+params.colour_b = [1, 0.45, 0.1, 1]
+
+[[node]]
+id = 6
+name = "colour_field"
+type = "img.lookup"
+pos = [200.0, 60.0]
+inputs.in = { node = 4, output = "out" }
+inputs.lut = { node = 5, output = "out" }
+params.offset = { value = 0.0, bind = { node = 0, channel = "lfo" } }
+
+[[node]]
+id = 7
+name = "seed_shape"
+type = "img.shape"
+pos = [0.0, 250.0]
+params.fill = [0.4, 0.9, 1, 1]
+params.rotate = { value = 0.0, expr = "op('lfo_tri')['lfo'] * 180" }
+params.shape = "polygon"
+params.sides = 5
+params.size = [0.18, 0.18]
+params.softness = 0.01
+
+[[node]]
+id = 8
+name = "fb"
+type = "img.feedback"
+pos = [200.0, 250.0]
+inputs.in = { node = 7, output = "out" }
+inputs.loop = { node = 14, output = "out" }
+
+[[node]]
+id = 9
+name = "fb_warp"
+type = "img.displace"
+pos = [350.0, 250.0]
+inputs.by = { node = 4, output = "out" }
+inputs.in = { node = 8, output = "out" }
+params.amount = { value = 0.006, expr = "0.006 + 0.004 * op('wander')['chan2']" }
+
+[[node]]
+id = 10
+name = "fb_xform"
+type = "img.transform"
+pos = [500.0, 250.0]
+inputs.in = { node = 9, output = "out" }
+params.rotate = { value = 0.0, expr = "1.5 * op('lfo_slow')['lfo']" }
+params.scale = [1.015, 1.015]
+
+[[node]]
+id = 11
+name = "fb_hue"
+type = "img.hsv_adjust"
+pos = [650.0, 250.0]
+inputs.in = { node = 10, output = "out" }
+params.hue = { value = 2.5, expr = "2 + 3 * op('wander')['chan1']" }
+params.saturation = 1.04
+
+[[node]]
+id = 12
+name = "fb_fade"
+type = "img.level"
+pos = [800.0, 250.0]
+inputs.in = { node = 11, output = "out" }
+params.brightness = { value = 0.96, bind = { node = 3, channel = "lfo" } }
+
+[[node]]
+id = 13
+name = "fb_soften"
+type = "img.blur"
+pos = [950.0, 250.0]
+inputs.in = { node = 12, output = "out" }
+params.size = 1
+
+[[node]]
+id = 14
+name = "fb_comp"
+type = "img.composite"
+pos = [1100.0, 250.0]
+inputs.a = { node = 7, output = "out" }
+inputs.b = { node = 13, output = "out" }
+
+[[node]]
+id = 15
+name = "final_comp"
+type = "img.composite"
+pos = [1250.0, 150.0]
+inputs.a = { node = 6, output = "out" }
+inputs.b = { node = 14, output = "out" }
+params.opacity = { value = 0.4, expr = "0.3 + 0.15 * op('lfo_tri')['lfo']" }
+params.operation = "screen"
+
+[[node]]
+id = 16
+name = "kaleido"
+type = "img.kaleidoscope"
+pos = [1400.0, 150.0]
+inputs.in = { node = 15, output = "out" }
+params.rotation = { value = 0.0, expr = "time * 6" }
+params.segments = 8
+
+[[node]]
+id = 17
+name = "out_bloom"
+type = "img.bloom"
+pos = [1550.0, 150.0]
+inputs.in = { node = 16, output = "out" }
+params.intensity = 0.8
+params.size = 10
+params.threshold = 0.8
