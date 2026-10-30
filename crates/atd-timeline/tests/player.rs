@@ -187,3 +187,40 @@ fn stop_leaves_values_another_writer_set() {
         "the mapping's value stays"
     );
 }
+
+/// The document's `[clock]` and `stage` mode set up the player, also
+/// after a rebind; offline renders always drive the Stage.
+#[test]
+fn the_document_sets_the_clock_and_stage_mode() {
+    use atd_format::timeline::TimecodeClock;
+    use atd_timeline::ClockSource;
+    let Some(mut e) = engine() else {
+        return;
+    };
+    let tc = add(&mut e, "sig.timecode_in");
+    let doc = TimelineDoc {
+        follow_stage: true,
+        clock: Some(TimecodeClock {
+            node: tc,
+            offset: 2.5,
+        }),
+        ..TimelineDoc::default()
+    };
+    let mut p = Player::new(doc.clone(), &e);
+    assert_eq!(p.transport.clock, ClockSource::Timecode);
+    assert_eq!(p.timecode_node(), Some(tc));
+    assert_eq!(p.transport.chase.config.offset, 2.5);
+    assert!(p.timeline().follow_stage());
+    assert!(p.watched().contains(&tc), "the chased node cooks");
+
+    p.rebind(TimelineDoc::default(), &mut e);
+    assert_eq!(p.transport.clock, ClockSource::Internal);
+    assert_eq!(p.timecode_node(), None);
+    assert!(!p.timeline().follow_stage());
+
+    let offline = Player::offline(doc, &e);
+    assert!(
+        !offline.timeline().follow_stage(),
+        "offline drives the Stage"
+    );
+}

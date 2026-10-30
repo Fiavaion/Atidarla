@@ -1,4 +1,4 @@
-use super::timeline::{Cue, CueAction, Interp, Key, Marker, Track};
+use super::timeline::{Cue, CueAction, Interp, Key, Marker, TimecodeClock, Track};
 use super::*;
 use atd_core::graph::NodeId;
 use serde_json::json;
@@ -90,6 +90,11 @@ fn random_timeline(rng: &mut Rng) -> TimelineDoc {
         length: 1.0 + rng.time(),
         fps: [24.0, 25.0, 29.97, 30.0, 60.0][rng.next(5) as usize],
         loop_region: (rng.next(2) == 0).then_some([1.0, 2.5]),
+        follow_stage: rng.next(2) == 0,
+        clock: (rng.next(2) == 0).then(|| TimecodeClock {
+            node: NodeId(rng.next(20)),
+            offset: [0.0, -3600.0, 12.5][rng.next(3) as usize],
+        }),
         ..Default::default()
     };
     for _ in 0..rng.next(6) {
@@ -261,6 +266,13 @@ fn bad_files_are_rejected_with_a_location() {
             "format = 1\n[[cue]]\nid = 1\nactions = [{ launch = 1, layers = [\"a\"] }]\n",
             "`layers`",
         ),
+        ("format = 1\nstage = \"lead\"\n", "`stage` must be"),
+        ("format = 1\n[clock]\noffset = 1.0\n", "[clock]: `node`"),
+        (
+            "format = 1\n[clock]\nnode = 1\nsource = \"mtc\"\n",
+            "unknown key `source`",
+        ),
+        ("format = 1\nclock = 3\n", "`clock` must be a table"),
     ];
     for (text, want) in cases {
         let e = timeline_from_str(text).unwrap_err().to_string();
@@ -329,4 +341,57 @@ fn track_and_key_helpers_keep_order() {
     assert_eq!(t.set_key(2.0002, 5.0), 1, "close enough to move the value");
     assert_eq!(t.keys, [Key::new(1.0, 0.0), Key::new(2.0, 5.0)]);
     let _ = Track::set_key;
+}
+
+/// The chased Timecode In node, its offset and the Stage mode are saved;
+/// changing one is a one-line diff, and a file without them reads as the
+/// internal clock driving the Stage.
+#[test]
+fn clock_and_stage_mode_round_trip_as_one_line_diffs() {
+    let mut base = timeline_from_str(SAMPLE).unwrap();
+    assert!(!base.follow_stage);
+    assert_eq!(base.clock, None);
+    base.clock = Some(TimecodeClock {
+        node: NodeId(12),
+        offset: -3600.0,
+    });
+    base.follow_stage = true;
+    let before = timeline_to_string(&base).unwrap();
+    assert!(
+        before.contains(
+            "loop = [8.0, 16.0]\nstage = \"follow\"\n\n[clock]\nnode = 12\noffset = -3600.0\n\n[[track]]"
+        ),
+        "{before}"
+    );
+    assert_eq!(timeline_from_str(&before).unwrap(), base);
+
+    let diff = |doc: &TimelineDoc| {
+        let after = timeline_to_string(doc).unwrap();
+        let (a, b): (Vec<&str>, Vec<&str>) = (before.lines().collect(), after.lines().collect());
+        assert_eq!(a.len(), b.len(), "{after}");
+        a.iter()
+            .zip(&b)
+            .filter(|(x, y)| x != y)
+            .map(|(_, y)| y.to_string())
+            .collect::<Vec<_>>()
+    };
+    let mut doc = base.clone();
+    doc.clock.as_mut().unwrap().offset = 2.5;
+    assert_eq!(diff(&doc), ["offset = 2.5"]);
+    let mut doc = base.clone();
+    doc.clock.as_mut().unwrap().node = NodeId(13);
+    assert_eq!(diff(&doc), ["node = 13"]);
+
+    // Drive (the default) and a zero offset are not written.
+    let mut doc = base.clone();
+    doc.follow_stage = false;
+    doc.clock.as_mut().unwrap().offset = 0.0;
+    let text = timeline_to_string(&doc).unwrap();
+    assert_eq!(text.lines().count(), before.lines().count() - 2);
+    assert!(text.contains("[clock]\nnode = 12\n\n"));
+    assert_eq!(timeline_from_str(&text).unwrap(), doc);
+    assert_eq!(
+        timeline_from_str("format = 1\nstage = \"drive\"\n").unwrap(),
+        TimelineDoc::default()
+    );
 }
