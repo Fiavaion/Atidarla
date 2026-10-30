@@ -1,0 +1,70 @@
+# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 8
+
+[[node]]
+id = 0
+name = "ball"
+type = "msh.sphere"
+pos = [0.0, 0.0]
+params.level = 3
+params.radius = 0.6
+params.type = "ico"
+
+[[node]]
+id = 1
+name = "cutter"
+type = "msh.box"
+pos = [0.0, 120.0]
+params.centre = [0.35, 0.35, 0.0]
+params.size = [0.7, 0.7, 1.6]
+
+[[node]]
+id = 2
+name = "cut"
+type = "msh.boolean"
+pos = [220.0, 60.0]
+inputs.a = { node = 0, output = "out" }
+inputs.b = { node = 1, output = "out" }
+params.operation = "subtract"
+
+[[node]]
+id = 3
+name = "weld"
+type = "msh.fuse"
+pos = [440.0, 60.0]
+inputs.in = { node = 2, output = "out" }
+
+[[node]]
+id = 4
+name = "wrap"
+type = "msh.uv_project"
+pos = [660.0, 60.0]
+inputs.in = { node = 3, output = "out" }
+params.axis = "y"
+params.projection = "spherical"
+
+[[node]]
+id = 5
+name = "save"
+type = "msh.file_out"
+pos = [880.0, 60.0]
+inputs.in = { node = 4, output = "out" }
+params.file = ".cache/boolean.glb"
+
+[[node]]
+id = 6
+name = "tilt"
+type = "msh.transform"
+pos = [1100.0, 60.0]
+inputs.in = { node = 5, output = "out" }
+params.rotate = [20.0, 0.0, 0.0]
+
+[[node]]
+id = 7
+name = "draw"
+type = "img.render_points"
+pos = [1320.0, 60.0]
+inputs.geo = { node = 6, output = "out" }
+params.blend = "over"
+params.size = 2.0

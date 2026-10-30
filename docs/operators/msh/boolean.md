@@ -29,4 +29,5 @@ All platforms.
 
 ## Examples
 
+- [Mesh Boolean to glTF](../../../examples/mesh-boolean-gltf.atidarla/) — `cut`
 - [Mesh Modelling](../../../examples/mesh-modelling.atidarla/) — `cut`

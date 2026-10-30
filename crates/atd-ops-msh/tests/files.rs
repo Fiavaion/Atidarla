@@ -265,3 +265,57 @@ fn file_out_writes_and_file_in_reads_back() {
     );
     assert!(err.unwrap_err().contains(".obj"));
 }
+
+/// The chain of `examples/mesh-boolean-gltf.atidarla`: Boolean (sphere minus box), Fuse,
+/// UV Project, Mesh File Out as GLB. The file is the one checked in Blender
+/// (`bench/check-gltf-blender.sh`); here it must be valid, deterministic and read back equal.
+#[test]
+fn boolean_uv_project_file_out_glb() {
+    let ball = make(
+        "msh.sphere",
+        &[
+            ("type", json!("ico")),
+            ("level", json!(3)),
+            ("radius", json!(0.6)),
+        ],
+    );
+    let cutter = make(
+        "msh.box",
+        &[
+            ("centre", json!([0.35, 0.35, 0.0])),
+            ("size", json!([0.7, 0.7, 1.6])),
+        ],
+    );
+    let cut = run(
+        "msh.boolean",
+        &[("operation", json!("subtract"))],
+        &[Some(ball), Some(cutter)],
+    );
+    let welded = on("msh.fuse", &[], &cut);
+    let wrapped = on(
+        "msh.uv_project",
+        &[("projection", json!("spherical")), ("axis", json!("y"))],
+        &welded,
+    );
+    let path = dir("boolean-glb").join("boolean.glb");
+    let _ = std::fs::remove_file(&path);
+    let file = [("file", json!(path.to_string_lossy()))];
+    run("msh.file_out", &file, &[Some(wrapped.clone())]);
+    let first = std::fs::read(&path).unwrap();
+    assert_eq!(&first[..4], b"glTF", "binary glTF header");
+    run("msh.file_out", &file, &[Some(wrapped.clone())]);
+    assert_eq!(std::fs::read(&path).unwrap(), first, "byte-identical");
+
+    let triangles = |m: &Mesh| {
+        (0..m.prims())
+            .map(|i| m.prim(i).len().saturating_sub(2))
+            .sum::<usize>()
+    };
+    let back = run("msh.file_in", &file, &[]);
+    assert!(back.prims() > 0, "has faces");
+    assert_eq!(back.prims(), triangles(&back), "read back as triangles");
+    assert_eq!(back.prims(), triangles(&wrapped), "no faces lost");
+    let uv = attr(&back, "uv");
+    assert_eq!(uv.len(), back.points() * 2, "one uv per point");
+    assert!(uv.iter().all(|&x| (-1e-6..=1.0 + 1e-6).contains(&x)));
+}

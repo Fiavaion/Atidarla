@@ -28,4 +28,5 @@ All platforms.
 
 ## Examples
 
+- [Mesh Boolean to glTF](../../../examples/mesh-boolean-gltf.atidarla/) — `weld`
 - [Mesh Modelling](../../../examples/mesh-modelling.atidarla/) — `weld`

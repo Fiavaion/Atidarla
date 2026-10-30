@@ -28,5 +28,6 @@ All platforms.
 
 ## Examples
 
+- [Mesh Boolean to glTF](../../../examples/mesh-boolean-gltf.atidarla/) — `cutter`
 - [Mesh Modelling](../../../examples/mesh-modelling.atidarla/) — `block`, `cutter`
 - [Mesh Primitives](../../../examples/mesh-primitives.atidarla/) — `box`

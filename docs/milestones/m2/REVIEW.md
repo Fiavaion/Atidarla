@@ -54,7 +54,8 @@ All of these are listed with their context in the notes files. Proposed decision
 
 ## Known gaps and honest caveats
 
-- **Nothing here has run on a Mac.** The renderer (vertex-stage storage reads, `sample_mask` output), compute, NCA and geometry code were only checked on NVIDIA DX12/Vulkan, the Windows software adapter and CI's Metal runner for the tests that CI runs. Rule 6 parity is open.
+- **Mac status (2026-10-30, Apple M5 Pro, Metal).** Now run on a Mac: the full workspace tests (513 passed), `check --gpu` on every example, `render` twice on all 43 examples (byte-identical frames, M2 AC4), the Boolean → UV Project → Mesh File Out GLB in Blender 5.2.1 (1 mesh, 1042 triangles, 1 UV layer) and in the Khronos validator (0 errors, 0 warnings), and the bench once (PT-1 4K chain p95 35.5 ms, PT-2 p95 15.3 ms: indicative, the machine was busy; GPU timestamps read 0.00 ms on Metal). Still not checked on a Mac: the interactive app and Viewer, the Windows-only paths, and PT-1/PT-2 on the target lab hardware. One new finding: the AC1 test's two-engine pixel comparison is not exact on Metal (see the 2026-10-30 row in `../M2.md`).
+- **Before 2026-10-30 nothing here had run on a Mac.** The renderer (vertex-stage storage reads, `sample_mask` output), compute, NCA and geometry code were only checked on NVIDIA DX12/Vulkan, the Windows software adapter and CI's Metal runner for the tests that CI runs.
 - **Tests I loosened because CI's adapters differ from this PC**, so you know what is weaker than it looks:
   - allocation-per-frame bounds for compute, NCA, geometry and the PNT batch were recalibrated (CI's Metal and WARP allocate 2 to 3 times more inside wgpu per pass);
   - the MAT line-material exact-pixel checks are skipped on software adapters (WARP rasterises one-pixel lines on pixel boundaries differently);

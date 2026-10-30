@@ -31,6 +31,7 @@ All platforms.
 
 ## Examples
 
+- [Mesh Boolean to glTF](../../../examples/mesh-boolean-gltf.atidarla/) — `ball`
 - [Mesh Modelling](../../../examples/mesh-modelling.atidarla/) — `ball`
 - [Mesh Primitives](../../../examples/mesh-primitives.atidarla/) — `ball`
 - [Scatter to Iso Surface](../../../examples/mesh-scatter-iso.atidarla/) — `base`
