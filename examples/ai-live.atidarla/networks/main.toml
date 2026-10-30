@@ -20,13 +20,13 @@ id = 2
 name = "diffusion1"
 type = "ai.diffusion"
 pos = [440.0, 0.0]
-inputs.image = { node = 0, output = "out" }
 inputs.control = { node = 1, output = "out" }
-params.route = "local → lan:studio"
+inputs.image = { node = 0, output = "out" }
 params.prompt1 = "a watercolour painting of a stormy sea"
 params.prompt2 = "a neon city at night, rain"
-params.weight2 = 0.0
+params.route = "local → lan:studio"
 params.strength = 0.6
+params.weight2 = 0.0
 
 [[node]]
 id = 3
