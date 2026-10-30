@@ -246,9 +246,11 @@ impl Mappings {
         self.mappings.len() != before
     }
 
-    /// Whether there is nothing to write (no mappings, default OSC).
+    /// Whether there is nothing to write: no mappings, default OSC, and no
+    /// ID handed out yet (after deleting every mapping the file stays, so
+    /// `next_id` is kept and IDs are never reused).
     pub fn is_empty(&self) -> bool {
-        self.mappings.is_empty() && self.osc == OscSettings::default()
+        self.mappings.is_empty() && self.next_id == 0 && self.osc == OscSettings::default()
     }
 }
 

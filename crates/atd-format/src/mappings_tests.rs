@@ -313,3 +313,30 @@ fn projects_keep_their_mappings_and_old_projects_load_unchanged() {
     assert!(e.starts_with("mappings.toml: "), "{e}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Deleting every mapping keeps the file (with `next_id`), so a mapping
+/// added after reopening does not take a deleted one's ID.
+#[test]
+fn ids_are_not_reused_after_deleting_every_mapping() {
+    let dir = temp_dir("ids");
+    let mut p = Project::new("Mapped");
+    let target = Target {
+        node: NodeId(0),
+        param: "gamma".into(),
+        component: None,
+    };
+    let osc = Source::Osc {
+        address: "/level".into(),
+        arg: 0,
+    };
+    let first = p.mappings.add(osc.clone(), target.clone(), [0.0, 1.0]);
+    p.mappings.remove(first);
+    assert!(!p.mappings.is_empty(), "an ID was handed out");
+    save(&dir, &p).unwrap();
+    assert!(dir.join(mappings::FILE).exists());
+    let mut back = load(&dir).unwrap();
+    assert_eq!(back.mappings, p.mappings);
+    let second = back.mappings.add(osc, target, [0.0, 1.0]);
+    assert_ne!(second, first, "IDs are never reused");
+    let _ = std::fs::remove_dir_all(&dir);
+}
