@@ -23,6 +23,8 @@ mdns-sd.workspace = true
 gilrs.workspace = true
 thiserror.workspace = true
 log.workspace = true
+# DMX fixture and patch files (TOML).
+toml_edit.workspace = true
 
 [build-dependencies]
 cc = "1"

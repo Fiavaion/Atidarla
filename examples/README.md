@@ -27,6 +27,7 @@ every IMG and SIG operator (CLAUDE.md rule 7); each operator's page in
 | [compute-shaders](compute-shaders.atidarla/) | WGSL compute shaders: a blur, an iterated diffusion, and trails with a state image and a buffer from a file |
 | [neural-growth](neural-growth.atidarla/) | Neural cellular automata growing, regrowing where erased, and running a weights file |
 | [live-control](live-control.atidarla/) | Mouse, OSC, MIDI, DMX, timecode and audio output |
+| [pixel-map](pixel-map.atidarla/) | LED pixel mapping: a patch of strips, a pixel grid and PARs sampling an image into DMX universes ([`docs/dmx.md`](../docs/dmx.md)) |
 | [texture-sharing](texture-sharing.atidarla/) | Share Out and Share In: publishing to other applications and a loopback (Spout on Windows) |
 | [python-ops](python-ops.atidarla/) | Operators written in Python in the project's `ops/` folder: a counter, an LFO and an image generator ([`docs/python-ops.md`](../docs/python-ops.md)) |
 | [points](points.atidarla/) | GPU geometry: point clouds deformed by curl noise and drawn as sprites (M2) |

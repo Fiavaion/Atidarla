@@ -1,10 +1,12 @@
-//! Video through FFmpeg (PRD A23), with the `ffmpeg` feature.
+//! Video through FFmpeg (PRD A23, A51), with the `ffmpeg` feature.
 //!
-//! The C shim (`ffmpeg_shim.c`) is compiled against the installed FFmpeg
-//! headers and linked to its shared libraries, so no FFmpeg struct is
-//! described by hand here. A [`Decoder`] addresses frames by index in
-//! display order and decodes them to RGBA8; hardware decoding is used when
-//! the platform supports the codec, with software as the fallback.
+//! The C shims (`ffmpeg_shim.c`, `ffmpeg_encode.c`) are compiled against
+//! the installed FFmpeg headers and linked to its shared libraries, so no
+//! FFmpeg struct is described by hand here. A [`Decoder`] addresses frames
+//! by index in display order and decodes them to RGBA8; hardware decoding
+//! is used when the platform supports the codec, with software as the
+//! fallback. An [`Encoder`] writes RGBA8 frames to a `.mov` or `.mp4` with
+//! an encoder named by the caller (only LGPL ones: [`super::record`]).
 
 use std::ffi::{CStr, c_char, c_int, c_uint};
 use std::path::Path;
@@ -155,6 +157,144 @@ impl Decoder {
                 err.len() as c_int,
             )
         };
+        if r == 0 { Ok(()) } else { Err(message(&err)) }
+    }
+}
+
+#[repr(C)]
+struct RawEncoder {
+    _private: [u8; 0],
+}
+
+unsafe extern "C" {
+    fn atd_encoder_available(name: *const c_char) -> c_int;
+    fn atd_encoder_open(
+        path: *const c_char,
+        name: *const c_char,
+        width: c_int,
+        height: c_int,
+        fps_num: c_int,
+        fps_den: c_int,
+        profile: c_int,
+        bitrate: i64,
+        err: *mut c_char,
+        errlen: c_int,
+    ) -> *mut RawEncoder;
+    fn atd_encoder_push(
+        e: *mut RawEncoder,
+        rgba: *const u8,
+        err: *mut c_char,
+        errlen: c_int,
+    ) -> c_int;
+    fn atd_encoder_finish(e: *mut RawEncoder, err: *mut c_char, errlen: c_int) -> c_int;
+    fn atd_encoder_free(e: *mut RawEncoder);
+}
+
+/// Whether the linked FFmpeg has an encoder called `name`.
+pub fn encoder_available(name: &str) -> bool {
+    let Ok(c) = std::ffi::CString::new(name) else {
+        return false;
+    };
+    // SAFETY: a NUL-terminated name; the shim only looks it up.
+    unsafe { atd_encoder_available(c.as_ptr()) != 0 }
+}
+
+/// One video stream written to a file, on the calling thread. Dropping it
+/// without [`Encoder::finish`] leaves the file without its trailer.
+#[derive(Debug)]
+pub struct Encoder {
+    raw: Option<NonNull<RawEncoder>>,
+    pub width: u32,
+    pub height: u32,
+    /// The FFmpeg encoder's name.
+    pub encoder: String,
+}
+
+// SAFETY: the handle is used from one thread at a time (`&mut self`),
+// which is all FFmpeg requires of a format and codec context.
+unsafe impl Send for Encoder {}
+
+impl Drop for Encoder {
+    fn drop(&mut self) {
+        if let Some(raw) = self.raw.take() {
+            // SAFETY: `raw` came from `atd_encoder_open` and is freed once.
+            unsafe { atd_encoder_free(raw.as_ptr()) };
+        }
+    }
+}
+
+impl Encoder {
+    /// Opens `path` (`.mov` or `.mp4`) for `width` × `height` RGBA frames
+    /// at `fps.0 / fps.1` frames per second with the FFmpeg encoder
+    /// `encoder`. `profile` is the ProRes profile for `prores_ks` (2
+    /// standard, 3 HQ, 4 4444); `bitrate` (bit/s) is for H.264 and H.265.
+    pub fn open(
+        path: &Path,
+        encoder: &str,
+        (width, height): (u32, u32),
+        fps: (u32, u32),
+        profile: i32,
+        bitrate: u64,
+    ) -> Result<Self, String> {
+        let text = path
+            .to_str()
+            .ok_or_else(|| format!("{}: the path is not valid UTF-8", path.display()))?;
+        let c_path = std::ffi::CString::new(text).map_err(|_| "a NUL in the path".to_owned())?;
+        let c_name =
+            std::ffi::CString::new(encoder).map_err(|_| "a NUL in the encoder name".to_owned())?;
+        let int = |v: u32| c_int::try_from(v).map_err(|_| format!("{v} is too large"));
+        let mut err = [0 as c_char; 512];
+        // SAFETY: valid NUL-terminated strings; `err` is writable for its length.
+        let raw = unsafe {
+            atd_encoder_open(
+                c_path.as_ptr(),
+                c_name.as_ptr(),
+                int(width)?,
+                int(height)?,
+                int(fps.0)?,
+                int(fps.1)?,
+                profile,
+                i64::try_from(bitrate).unwrap_or(i64::MAX),
+                err.as_mut_ptr(),
+                err.len() as c_int,
+            )
+        };
+        let raw = NonNull::new(raw).ok_or_else(|| format!("{encoder}: {}", message(&err)))?;
+        Ok(Self {
+            raw: Some(raw),
+            width,
+            height,
+            encoder: encoder.to_owned(),
+        })
+    }
+
+    /// Encodes one tightly packed RGBA8 frame of the opened size.
+    pub fn push(&mut self, rgba: &[u8]) -> Result<(), String> {
+        let len = self.width as usize * self.height as usize * 4;
+        if rgba.len() != len {
+            return Err(format!("a frame of {} bytes, expected {len}", rgba.len()));
+        }
+        let raw = self.raw.ok_or("the encoder is finished")?;
+        let mut err = [0 as c_char; 512];
+        // SAFETY: `rgba` holds width × height × 4 bytes, the size the shim
+        // reads; `err` is writable.
+        let r = unsafe {
+            atd_encoder_push(
+                raw.as_ptr(),
+                rgba.as_ptr(),
+                err.as_mut_ptr(),
+                err.len() as c_int,
+            )
+        };
+        if r == 0 { Ok(()) } else { Err(message(&err)) }
+    }
+
+    /// Flushes the encoder and writes the file's trailer.
+    pub fn finish(mut self) -> Result<(), String> {
+        let raw = self.raw.take().ok_or("the encoder is finished")?;
+        let mut err = [0 as c_char; 512];
+        // SAFETY: `raw` is open; the shim frees it whatever the result.
+        let r = unsafe { atd_encoder_finish(raw.as_ptr(), err.as_mut_ptr(), err.len() as c_int) };
         if r == 0 { Ok(()) } else { Err(message(&err)) }
     }
 }

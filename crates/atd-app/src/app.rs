@@ -83,6 +83,8 @@ struct Panels {
     timeline: crate::timeline::TimelinePanel,
     /// Nodes cooked every frame besides the viewed one (reused).
     extra: Vec<NodeId>,
+    /// Recording the viewed image to a movie (FR-S10).
+    record: crate::record::RecordPanel,
 }
 
 impl AtidarlaApp {
@@ -193,6 +195,7 @@ impl AtidarlaApp {
                 control: crate::mappings::Control::new(oscquery),
                 timeline: Default::default(),
                 extra: Vec::new(),
+                record: Default::default(),
             },
             smoke: smoke.map(Smoke::new),
             start: Instant::now(),
@@ -776,6 +779,11 @@ impl AtidarlaApp {
             let mut renderer = rs.renderer.write();
             p.viewer.present(&rs.device, &rs.queue, &mut renderer, tex);
         }
+        if p.record.is_recording() {
+            // Every app frame is a frame of the movie.
+            p.record.frame(&rs.device, &rs.queue, tex);
+            ctx.request_repaint();
+        }
     }
 }
 
@@ -889,7 +897,11 @@ impl Panels {
                 ui.colored_label(egui::Color32::from_rgb(230, 80, 80), e);
             }
         });
-        ui.horizontal(|ui| self.viewer.toolbar(ui));
+        ui.horizontal(|ui| {
+            self.viewer.toolbar(ui);
+            ui.separator();
+            self.record.toolbar(ui);
+        });
         let avail = ui.available_size();
         let aspect = w as f32 / h.max(1) as f32;
         let size = if avail.x / avail.y.max(1.0) > aspect {

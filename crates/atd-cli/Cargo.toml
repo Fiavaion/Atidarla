@@ -40,6 +40,10 @@ wgpu.workspace = true
 pollster.workspace = true
 atd-interop.workspace = true
 png.workspace = true
+# Show export (FR-S9): file hashes in the manifest, the optional zip.
+sha2.workspace = true
+zip.workspace = true
+toml_edit.workspace = true
 
 [features]
 # Non-HAP video through FFmpeg (PRD A23); needs FFmpeg development files.

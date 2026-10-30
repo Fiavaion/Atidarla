@@ -149,10 +149,11 @@ fn every_img_operator_survives_random_patches() {
                     continue;
                 }
                 let from = placed[rng.next(placed.len() as u64) as usize];
-                // Analyze outputs channels, not images: skip it as a source.
+                // Analyze and Pixel Map output channels, not images: skip
+                // them as sources.
                 if e.network()
                     .node(from)
-                    .is_some_and(|n| n.type_id == "img.analyze")
+                    .is_some_and(|n| n.type_id == "img.analyze" || n.type_id == "img.pixel_map")
                 {
                     continue;
                 }

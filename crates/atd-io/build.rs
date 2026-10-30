@@ -1,5 +1,6 @@
-//! With the `ffmpeg` feature, compiles the C shim over FFmpeg
-//! (`src/video/ffmpeg_shim.c`) and links FFmpeg's shared libraries.
+//! With the `ffmpeg` feature, compiles the C shims over FFmpeg
+//! (`src/video/ffmpeg_shim.c` decodes, `src/video/ffmpeg_encode.c` encodes)
+//! and links FFmpeg's shared libraries.
 
 use std::path::PathBuf;
 
@@ -11,6 +12,7 @@ fn main() {
         return;
     }
     println!("cargo:rerun-if-changed=src/video/ffmpeg_shim.c");
+    println!("cargo:rerun-if-changed=src/video/ffmpeg_encode.c");
     println!("cargo:rerun-if-env-changed=FFMPEG_DIR");
 
     let mut includes = Vec::new();
@@ -36,7 +38,10 @@ fn main() {
         }
     }
     let mut build = cc::Build::new();
-    build.file("src/video/ffmpeg_shim.c").warnings(true);
+    build
+        .file("src/video/ffmpeg_shim.c")
+        .file("src/video/ffmpeg_encode.c")
+        .warnings(true);
     for dir in &includes {
         build.include(dir);
     }

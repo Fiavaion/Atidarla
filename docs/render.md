@@ -1,7 +1,7 @@
 # Offline render (`atidarla render`, FR-H1)
 
 `atidarla render` cooks a project offline at a fixed time step and writes the frames as a
-numbered PNG sequence. It is the first slice of FR-H1 (PRD §7.10) and of M2 AC4: two renders of
+numbered PNG sequence, or, in a build with FFmpeg, as a movie file (FR-S10, below). It is the first slice of FR-H1 (PRD §7.10) and of M2 AC4: two renders of
 the same project on the same machine give byte-identical frames.
 
 ## Usage
@@ -14,6 +14,9 @@ atidarla render examples/audio-reactive-feedback.atidarla --out renders/arf --ra
 |---|---|
 | `<project>` | Project folder (`*.atidarla`). |
 | `--out <dir>` | Folder for the frames, created if missing: `frame_000000.png`, `frame_000001.png`, ... numbered by frame (a render of `10-20` writes `frame_000010.png` to `frame_000019.png`). Existing frames are overwritten. |
+| `--out <file.mov\|file.mp4>` | A movie file instead (FFmpeg builds only; see [Movie files](#movie-files-fr-s10)). |
+| `--codec <name>` | Movie codec: `prores` (ProRes 422, default for `.mov`), `prores-hq`, `prores4444` (with alpha), `h264` (default for `.mp4`), `h265`. |
+| `--bitrate <bit/s>` | H.264/H.265 bit rate; default about 0.15 bit per pixel per frame (25 Mbit/s at 1080p60). |
 | `--range A-B` | Frames `A` (inclusive) to `B` (exclusive). Default `0-60`. |
 | `--fps N` | Frame `i` is at `i / N` seconds. Default 60 (project files have no frame rate yet). |
 | `--fixed-step` | Accepted for the PRD's command line; the step is always fixed. |
@@ -21,10 +24,68 @@ atidarla render examples/audio-reactive-feedback.atidarla --out renders/arf --ra
 
 The resolution is the project's. Frames are 8-bit RGBA, as the engine renders them.
 
-**Not in this slice:** writing a movie file. `--out clip.mov` (or `.mp4`, `.png` and other file
-extensions) is refused with a message saying so; encode the PNG sequence with another tool for
-now. Movie output needs two decisions of its own: HAP encoding (A15 "HAP-first") and FFmpeg
-encoding (A23 covers decoding only).
+Other file extensions (`.png`, `.gif`, `.webm`, ...) are refused with a message: pass a folder
+for frames.
+
+## Movie files (FR-S10)
+
+With FFmpeg (`cargo build -p atd-cli --features atd-io/ffmpeg`; PRD A23, A51), `--out` may name
+a `.mov` or `.mp4` file:
+
+```sh
+atidarla render examples/stage-deck.atidarla --out renders/deck.mov --range 0-600
+atidarla render examples/stage-deck.atidarla --out renders/deck.mp4 --codec h265 --bitrate 40000000
+```
+
+| Codec | FFmpeg encoder | Container | Notes |
+|---|---|---|---|
+| `prores` | `prores_ks`, profile Standard | `.mov` | 10-bit 4:2:2. Every FFmpeg build has it. |
+| `prores-hq` | `prores_ks`, profile HQ | `.mov` | |
+| `prores4444` | `prores_ks`, profile 4444, 16-bit alpha | `.mov` | Keeps the image's alpha. |
+| `h264` | `h264_videotoolbox` (macOS); `h264_nvenc`, then `h264_mf` (Windows) | `.mp4`, `.mov` | Hardware. One keyframe a second, no B-frames. |
+| `h265` | `hevc_videotoolbox` (macOS); `hevc_nvenc`, then `hevc_mf` (Windows) | `.mp4`, `.mov` | Hardware. Tagged `hvc1` for Apple players. |
+
+**Only LGPL encoders.** A23/A51 and CLAUDE.md rule 3: Atidarla never asks FFmpeg for
+`libx264` or `libx265` (GPL), so an LGPL FFmpeg build (no `--enable-gpl`) is enough, and a GPL
+build's extra encoders are never used. H.264 and H.265 therefore need the platform's hardware
+encoder: VideoToolbox on every Mac; NVENC on NVIDIA, Media Foundation on other Windows GPUs.
+The Windows encoder names are compiled in and tried in order; a machine without them gets a
+message naming them. Linux tries NVENC only (best effort, A19).
+
+**No HAP encoder.** HAP (A15) would need FFmpeg's `hap` encoder, which needs Snappy
+(`--enable-libsnappy`, BSD) at FFmpeg build time; Homebrew's FFmpeg and the usual LGPL builds
+are configured without it (checked 2026-10-30: `ffmpeg -encoders` lists no `hap`). A native
+HAP encoder (DXT1/DXT5 + Snappy, both already used for decoding in `atd-io`) is the way to add
+it without depending on how FFmpeg was built; PRD A51 leaves it for later.
+
+**Colour.** Frames are 8-bit RGBA, full range, treated as BT.709 (sRGB primaries). They are
+converted to YUV with the BT.709 matrix at limited range, and the stream is tagged BT.709, so
+players and Atidarla's Movie In convert back with the same matrix. Alpha is kept only by
+`prores4444`; the other codecs drop it (the colour is written as is, not over black).
+
+**Determinism.** The PNG path is unchanged and byte-identical across runs (below). Movies are
+encoded from the same frames in order (the renderer waits for the encoder, so no frame is
+dropped), but encoders, hardware ones especially, do not promise identical bytes; compare
+movies by decoding them.
+
+**Timing.** The frame rate is `--fps` (as a fraction: 29.97 is 29970/1000). Frame *i* has
+presentation time *i / fps*, starting at 0 whatever `--range` starts at.
+
+**Without FFmpeg** (the default build), `--out clip.mov` is refused with a message saying how
+to rebuild, or to pass a folder.
+
+### Recording live (the app)
+
+The Viewer's toolbar has **Record**: choose a `.mov` (ProRes 422) or `.mp4` (H.264) file, and
+every app frame of the viewed image (view the Mixer to record the composition) is written at 60
+frames a second until **Stop**. The image is copied to the CPU through a ring of three readback
+buffers mapped asynchronously and encoded on a worker thread, so recording never makes the
+render thread wait (rule 1); when the GPU copies or the encoder fall behind, frames are dropped
+and counted in the status (`REC 12.0 s, 720 frames, 3 dropped`). The recording assumes the app
+runs at 60 fps: at a lower rate the movie plays faster than real time. Changing the viewed
+image's size stops the recording. Code: `crates/atd-app/src/record.rs` (`RecordPanel`: `start`,
+`frame`, `stop`, usable by other panels such as the Stage); the encoder is
+`atd_io::video::record::Recorder`.
 
 Warnings (stderr) name every live input and every sink in the project (see below), and any node
 this platform does not run (capability flags, A19), which renders as empty. Any other node error
@@ -122,7 +183,7 @@ through and do not emit offline.
 | Waits | Work on a worker thread; offline the cook waits for it. | Kernel (`pnt.kernel` and `img.kernel`: compile; a file once; a Points kernel's state on the wire), project kernel operators (`kernel.*`, [`docs/kernel-dsl.md`](kernel-dsl.md): the same, every `kernels/` file read once when the render starts), Movie In (opening and every frame; playhead `cue + time * speed`), Audio File In (decode; playhead from time), Text (rasteriser), WGSL (compile; a file once), Compute (compile; a file once; persistent `state` images and buffers also make it stateful), ISF shaders (compile; persistent buffers also make one stateful), Python operators (`py.*`, [`docs/python-ops.md`](python-ops.md): each frame waits for its own result, at most the operator's timeout plus 3 s; those with `state` are also stateful; they run only with `--allow-python-ops`). MSH: every operator (`msh.*`, [`design/msh-operators.md`](design/msh-operators.md)): cooked on a worker thread; offline the cook reads GPU inputs back and waits for the result, so frame *i* uses the inputs of frame *i*. |
 | One frame late | Values are those of the previous frame, always exactly one. | Analyze (GPU readback). Also every Python expression. |
 | Live input | Opens nothing; idle value; `render` warns. | Share In (black), Audio In (no channels), Input Devices (keys up, no gamepad, pointer at rest), MIDI In (no channels), OSC In (no channels), Timecode In (all zero, unlocked). |
-| Sink | Passes its input through; emits nothing; `render` warns. | Share Out, Audio Out, DMX Out, MIDI Out, OSC Out. |
+| Sink | Passes its input through; emits nothing; `render` warns. | Share Out, Audio Out, DMX Out, MIDI Out, OSC Out. Pixel Map sends nothing; its channels (cooked only when something rendered reads them) are its readback, exactly one frame late. |
 
 Beat stays Stateful with every source: offline its `midi` source reads no port (the clock sits
 at beat 0, and `render` does not warn: Beat is not a live input in the table), its MIDI clock out

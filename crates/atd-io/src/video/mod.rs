@@ -1,4 +1,4 @@
-//! Video input. HAP (PRD A15, "HAP-first") is decoded natively: [`mov`]
+//! Video input, and recording ([`record`]). HAP (PRD A15, "HAP-first") is decoded natively: [`mov`]
 //! demuxes, [`hap`] unpacks frames to block-compressed texture data for the
 //! GPU, and [`bc`] is the CPU fallback. Other codecs go through FFmpeg
 //! (`ffmpeg` feature, PRD A23), with hardware decoding where available,
@@ -14,6 +14,7 @@ pub mod bc;
 pub mod ffmpeg;
 pub mod hap;
 pub mod mov;
+pub mod record;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};

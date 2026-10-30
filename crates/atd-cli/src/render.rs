@@ -11,7 +11,7 @@
 
 use std::collections::BTreeSet;
 use std::ops::Range;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
@@ -20,10 +20,14 @@ use atd_core::pack::Flat;
 use atd_core::platform::PlatformInfo;
 use atd_core::registry::{Availability, Registry, WireType};
 use atd_gpu::engine::{CookMode, Engine, EngineConfig};
+use atd_io::video::record::{Codec, Recorder, Settings};
 
 /// Frames per second when `--fps` is not given (project files have no
 /// frame rate yet).
 pub const DEFAULT_FPS: f64 = 60.0;
+
+/// Movie files `render` writes (through FFmpeg, A51).
+const MOVIE_EXTENSIONS: &[&str] = &["mov", "mp4", "m4v"];
 
 /// File extensions that name a movie or image file rather than a folder.
 const FILE_EXTENSIONS: &[&str] = &[
@@ -75,9 +79,28 @@ pub fn frame_name(i: u64) -> String {
     format!("frame_{i:06}.png")
 }
 
-/// Renders `project` into the folder `out`.
-pub fn run(project: &Path, out: &Path, opts: &RenderOptions) -> Result<()> {
-    check_out(out)?;
+/// Movie output settings (`--codec`, `--bitrate`).
+#[derive(Debug, Clone, Default)]
+pub struct MovieOptions {
+    /// Codec name (`prores`, `prores-hq`, `prores4444`, `h264`, `h265`);
+    /// `None`: ProRes 422 for `.mov`, H.264 for `.mp4`.
+    pub codec: Option<String>,
+    /// H.264/H.265 bit rate in bit/s.
+    pub bitrate: Option<u64>,
+}
+
+/// Where the frames go.
+#[derive(Debug, Clone, PartialEq)]
+enum Output {
+    /// A numbered PNG sequence in this folder.
+    Frames(PathBuf),
+    /// One movie file, encoded through FFmpeg (A51).
+    Movie(PathBuf, Codec),
+}
+
+/// Renders `project` into the folder `out`, or into the movie file `out`.
+pub fn run(project: &Path, out: &Path, opts: &RenderOptions, movie: &MovieOptions) -> Result<()> {
+    let output = output(out, movie)?;
     let gpu = atd_gpu::GpuContext::headless().context("no GPU adapter for rendering")?;
     let info = gpu.adapter.get_info();
     let mut r = Renderer::new(gpu.device.clone(), gpu.queue.clone(), gpu.platform_info())?;
@@ -85,19 +108,62 @@ pub fn run(project: &Path, out: &Path, opts: &RenderOptions) -> Result<()> {
     for w in r.take_warnings() {
         eprintln!("warning: {w}");
     }
-    std::fs::create_dir_all(out).with_context(|| format!("creating {}", out.display()))?;
+    match &output {
+        Output::Frames(dir) => {
+            std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+        }
+        Output::Movie(path, _) => {
+            if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+                std::fs::create_dir_all(dir)
+                    .with_context(|| format!("creating {}", dir.display()))?;
+            }
+        }
+    }
     let start = Instant::now();
     let mut size = (0, 0);
+    let mut recorder: Option<Recorder> = None;
     for i in opts.range.clone() {
         let frame = r.frame(i)?;
         for w in r.take_warnings() {
             eprintln!("warning: {w}");
         }
         size = (frame.width, frame.height);
-        frame.write_png(&out.join(frame_name(i)))?;
+        match &output {
+            Output::Frames(dir) => frame.write_png(&dir.join(frame_name(i)))?,
+            Output::Movie(path, codec) => {
+                let rec = match &mut recorder {
+                    Some(rec) => rec,
+                    None => {
+                        let mut rec = Recorder::start(Settings {
+                            path: path.clone(),
+                            width: frame.width,
+                            height: frame.height,
+                            fps: Settings::fps_fraction(opts.fps),
+                            codec: *codec,
+                            bitrate: movie.bitrate,
+                        })
+                        .map_err(|e| anyhow::anyhow!("--out {}: {e}", path.display()))?;
+                        rec.wait_open()
+                            .map_err(|e| anyhow::anyhow!("--out {}: {e}", path.display()))?;
+                        recorder.insert(rec)
+                    }
+                };
+                // Offline every frame is encoded: wait for the encoder.
+                rec.push_wait(&frame.rgba)
+                    .map_err(|e| anyhow::anyhow!("frame {i}: {e}"))?;
+            }
+        }
     }
+    let encoded = match recorder {
+        Some(rec) => {
+            let encoder = rec.encoder;
+            let stats = rec.finish().map_err(|e| anyhow::anyhow!("{e}"))?;
+            format!(" ({} frames, {encoder})", stats.frames)
+        }
+        None => String::new(),
+    };
     println!(
-        "rendered frames {}-{} (end exclusive) of {} at {}x{}, {} fps, to {} in {:.1} s on {} ({:?})",
+        "rendered frames {}-{} (end exclusive) of {} at {}x{}, {} fps, to {}{encoded} in {:.1} s on {} ({:?})",
         opts.range.start,
         opts.range.end,
         r.output_name(),
@@ -112,26 +178,55 @@ pub fn run(project: &Path, out: &Path, opts: &RenderOptions) -> Result<()> {
     Ok(())
 }
 
-/// `--out` must name a folder: movie output is not implemented yet.
-fn check_out(out: &Path) -> Result<()> {
-    if let Some(ext) = out.extension().and_then(|e| e.to_str()) {
-        let ext = ext.to_ascii_lowercase();
-        if FILE_EXTENSIONS.contains(&ext.as_str()) {
+/// `--out`: a folder for PNG frames, or a `.mov` / `.mp4` file when this
+/// build has FFmpeg. Other file extensions are refused.
+fn output(out: &Path, movie: &MovieOptions) -> Result<Output> {
+    let ext = out
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+    let Some(ext) = ext.filter(|e| FILE_EXTENSIONS.contains(&e.as_str())) else {
+        if out.is_file() {
+            bail!("--out {}: is a file; pass a folder", out.display());
+        }
+        if movie.codec.is_some() || movie.bitrate.is_some() {
             bail!(
-                "--out {}: `atidarla render` writes a numbered PNG sequence ({}, {}, ...) into a \
-                 folder; writing a .{ext} file is not implemented yet (movie encoding, HAP or \
-                 FFmpeg, is a separate step of FR-H1). Pass a folder, e.g. --out {}",
-                out.display(),
-                frame_name(0),
-                frame_name(1),
-                out.with_extension("").display()
+                "--codec and --bitrate are for movie files (--out clip.mov or clip.mp4); \
+                 {} is a folder of PNG frames",
+                out.display()
             );
         }
+        return Ok(Output::Frames(out.to_owned()));
+    };
+    if !MOVIE_EXTENSIONS.contains(&ext.as_str()) {
+        bail!(
+            "--out {}: `atidarla render` writes a numbered PNG sequence ({}, {}, ...) into a \
+             folder, or a .mov or .mp4 movie; it does not write .{ext} files. Pass a folder, \
+             e.g. --out {}",
+            out.display(),
+            frame_name(0),
+            frame_name(1),
+            out.with_extension("").display()
+        );
     }
-    if out.is_file() {
-        bail!("--out {}: is a file; pass a folder", out.display());
+    if !atd_io::video::record::ENABLED {
+        bail!(
+            "--out {}: this build cannot write .{ext} files: it was built without FFmpeg. \
+             Rebuild with `cargo build -p atd-cli --features atd-io/ffmpeg` (needs FFmpeg's LGPL \
+             shared libraries and development files; docs/render.md), or pass a folder for a PNG \
+             sequence, e.g. --out {}",
+            out.display(),
+            out.with_extension("").display()
+        );
     }
-    Ok(())
+    let codec = match &movie.codec {
+        Some(name) => Codec::parse(name).with_context(|| {
+            let names: Vec<&str> = Codec::NAMES.iter().map(|(n, _)| *n).collect();
+            format!("--codec {name}: one of {}", names.join(", "))
+        })?,
+        None => Codec::for_path(out).context("a movie extension has a default codec")?,
+    };
+    Ok(Output::Movie(out.to_owned(), codec))
 }
 
 /// One rendered frame, tightly packed RGBA8.
@@ -523,7 +618,8 @@ pub fn classify(type_id: &str) -> Option<Class> {
         "img.analyze" => OneFrameLate,
         "img.share_in" | "sig.audio_in" | "sig.input" | "sig.midi_in" | "sig.osc_in"
         | "sig.timecode_in" => LiveInput,
-        "img.share_out" | "sig.audio_out" | "sig.dmx_out" | "sig.midi_out" | "sig.osc_out" => Sink,
+        "img.share_out" | "img.pixel_map" | "sig.audio_out" | "sig.dmx_out" | "sig.midi_out"
+        | "sig.osc_out" => Sink,
         _ => return None,
     })
 }
@@ -752,12 +848,51 @@ mod tests {
         assert!(parse_range("300").is_err());
         assert!(parse_fps("0").is_err());
         assert_eq!(parse_fps("29.97"), Ok(29.97));
-        let err = check_out(Path::new("renders/clip.mov"))
+        let none = MovieOptions::default();
+        assert_eq!(
+            output(Path::new("renders/clip"), &none).unwrap(),
+            Output::Frames("renders/clip".into())
+        );
+        let err = output(Path::new("renders/clip.gif"), &none)
             .unwrap_err()
             .to_string();
-        assert!(err.contains("not implemented yet"), "{err}");
-        assert!(err.contains("renders/clip"), "{err}");
-        assert!(check_out(Path::new("renders/clip")).is_ok());
+        assert!(err.contains("does not write .gif"), "{err}");
+        let mov = output(Path::new("renders/clip.mov"), &none);
+        if atd_io::video::record::ENABLED {
+            assert_eq!(
+                mov.unwrap(),
+                Output::Movie("renders/clip.mov".into(), Codec::ProRes422)
+            );
+            let h265 = MovieOptions {
+                codec: Some("h265".into()),
+                bitrate: None,
+            };
+            assert_eq!(
+                output(Path::new("a.mp4"), &h265).unwrap(),
+                Output::Movie("a.mp4".into(), Codec::H265)
+            );
+            let bad = MovieOptions {
+                codec: Some("x264".into()),
+                bitrate: None,
+            };
+            assert!(output(Path::new("a.mp4"), &bad).is_err());
+        } else {
+            // The default build refuses movie files with a clear message.
+            let err = mov.unwrap_err().to_string();
+            assert!(err.contains("built without FFmpeg"), "{err}");
+            assert!(err.contains("--features atd-io/ffmpeg"), "{err}");
+            assert!(err.contains("renders/clip"), "{err}");
+        }
+        let err = output(
+            Path::new("renders/clip"),
+            &MovieOptions {
+                codec: Some("prores".into()),
+                bitrate: None,
+            },
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("for movie files"), "{err}");
         assert_eq!(frame_name(12), "frame_000012.png");
     }
 

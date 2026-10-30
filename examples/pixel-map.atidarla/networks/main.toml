@@ -1,0 +1,27 @@
+# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 3
+
+[[node]]
+id = 0
+name = "noise1"
+type = "img.noise"
+pos = [0.0, 0.0]
+params.z = { value = 0.0, expr = "time * 0.3" }
+
+[[node]]
+id = 1
+name = "pixel_map1"
+type = "img.pixel_map"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+params.patch = "patch.toml"
+params.universe = 1
+
+[[node]]
+id = 2
+name = "dmx_out1"
+type = "sig.dmx_out"
+pos = [440.0, 0.0]
+inputs.in = { node = 1, output = "out" }
+params.host = "127.0.0.1"

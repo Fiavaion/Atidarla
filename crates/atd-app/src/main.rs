@@ -8,6 +8,7 @@ mod mappings;
 mod params;
 mod patch;
 mod project;
+mod record;
 mod smoke;
 mod stage;
 mod suggest;
