@@ -46,3 +46,4 @@ All platforms.
 - [Signal scope](../../../examples/signal-scope.atidarla/) — `scopes`, `all`
 - [Simulations](../../../examples/simulations.atidarla/) — `screen`, `all`
 - [Time effects](../../../examples/time-effects.atidarla/) — `compare`
+- [Timeline show](../../../examples/timeline-show.atidarla/) — `mix`

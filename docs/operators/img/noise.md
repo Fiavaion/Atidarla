@@ -44,3 +44,4 @@ All platforms.
 - [Pack: Vignette](../../../examples/pack-vignette.atidarla/) — `clouds`
 - [Render Textures](../../../examples/render-textures.atidarla/) — `noise`
 - [Texture sharing](../../../examples/texture-sharing.atidarla/) — `pattern`
+- [Timeline show](../../../examples/timeline-show.atidarla/) — `clouds`

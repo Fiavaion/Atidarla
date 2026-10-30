@@ -30,3 +30,4 @@ All platforms.
 ## Examples
 
 - [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `kaleidoscope1`
+- [Timeline show](../../../examples/timeline-show.atidarla/) — `kaleido`

@@ -42,3 +42,4 @@ All platforms.
 - [Pack: Spark Fountain](../../../examples/pack-spark-fountain.atidarla/) — `breath`
 - [Simulations](../../../examples/simulations.atidarla/) — `orbit`
 - [Texture sharing](../../../examples/texture-sharing.atidarla/) — `drift`
+- [Timeline show](../../../examples/timeline-show.atidarla/) — `pulse`

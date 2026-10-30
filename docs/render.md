@@ -49,6 +49,12 @@ driver and build** give byte-identical frames. That is the promise; nothing more
 - **Python expressions** are one frame late, always exactly one (frame 0 shows the stored value).
   Python code that reads the clock, `random` without a seed, files or the network is not
   deterministic; the native expression subset is.
+- **The timeline** (`timeline.toml`, [`timeline.md`](timeline.md)) is evaluated at each frame's
+  time: tracks become live values, and every cue action (`set`, `live`, `launch`) is held as a
+  live value rather than edited into the network. A frame rendered alone first fires the timed
+  cues before it, so it matches the same frame of a whole render (tested). Cues with a condition
+  read the previous frame's channels (the nodes they name cook with the output) and fire as
+  crossed; a range started part-way arms them rather than firing them.
 - **Files** are read as they are when the render reaches them. A WGSL file is compiled once at the
   start; edits during a render are not picked up.
 

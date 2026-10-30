@@ -27,3 +27,4 @@ All platforms.
 ## Examples
 
 - [Beat switcher](../../../examples/beat-switcher.atidarla/) — `solid`
+- [Timeline show](../../../examples/timeline-show.atidarla/) — `tint`
