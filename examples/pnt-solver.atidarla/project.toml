@@ -5,14 +5,15 @@ description = '''
 A home-made simulation with Solver (M2 PNT batch). 40,000 points on a disk (Scatter) get a
 starting velocity from noise (Attribute, source noise, into v); Piece numbers them by grid
 cell (For-Each Begin) and Randomize, keyed by that piece, gives every cell its own colour.
-Solver starts from that and then feeds the previous frame back through its body: Attract (a
-spring to the centre), Turbulence, Drag, Integrate (moves P by v) and Age (ages them, and
-removes points that leave a ball of radius 3). Attribute Math warms the colours for Render
-Points.
+Solver starts from that and then feeds the previous frame back through its body, in two
+sub-steps a frame: Attract (a spring to the centre), Turbulence, Drag, Integrate (moves P by
+v) and Age (ages them, and removes points that leave a ball of radius 3). Attribute Math warms
+the colours for Render Points.
 
 The cells stay together as they swirl because each piece keeps its colour; the state lives on
 the wire from Age back into the Solver's prev.
 
-Try: Solver reset (on, then off); Attract strength 6; Piece cell 0.1; Turbulence octaves 6.
+Try: Solver reset (on, then off); Solver sub-steps 8; Attract strength 6; Piece cell 0.1;
+Turbulence octaves 6.
 '''
 resolution = [1280, 720]

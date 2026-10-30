@@ -25,7 +25,7 @@
 //! DAT results arrive with their family. Operators are created per node
 //! from an [`OpLibrary`] of factories registered by the `atd-ops-*` crates.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -640,9 +640,15 @@ pub struct GeoCtx<'a> {
     pub params: Params<'a>,
     /// Seconds since the engine's time origin.
     pub time: f64,
-    /// Seconds since the previous frame (offline: exactly one step).
+    /// Seconds since the previous frame (offline: exactly one step); in a
+    /// loop of [`Repeat::SubSteps`], that divided by the sub-step count.
     pub dt: f64,
     pub frame: u64,
+    /// Which pass of its loop this cook is (0 outside loops; see
+    /// [`GeoOp::repeat`]).
+    pub iteration: u32,
+    /// How many passes its loop makes this frame (1 outside loops).
+    pub iterations: u32,
     /// Set when the result is provisional: the node cooks again next frame.
     pub cook_again: bool,
     node: NodeId,
@@ -708,9 +714,35 @@ impl GeoCtx<'_> {
     }
 }
 
+/// How many passes a loop makes in one frame (design:
+/// `docs/design/solver-foreach.md`). A loop is headed by a GEO node with a
+/// feedback GEO input; the source of that input is the loop's end, and the
+/// loop's body is every node on a path from the head to the end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Repeat {
+    /// One pass (the default: a feedback loop steps once per frame).
+    Once,
+    /// `n` passes, each a sub-step of the frame: the body's `dt` is the
+    /// frame's divided by `n`.
+    SubSteps(u32),
+    /// `n` passes with the frame's `dt` (For-Each iterations).
+    Iterations(u32),
+}
+
+/// Most passes a loop makes per frame ([`Repeat`] counts are clamped to it).
+pub const MAX_REPEAT: u32 = 256;
+
 /// A live GEO operator instance (one per node).
 pub trait GeoOp: Send {
     fn cook(&mut self, ctx: &mut GeoCtx<'_>) -> Result<(), String>;
+
+    /// When this node heads a loop (it has a feedback GEO input wired from a
+    /// node downstream of it), how many passes the loop makes this frame.
+    /// Passes after the first are submitted separately, so uniforms written
+    /// in one pass are not overwritten by the next before they are used.
+    fn repeat(&self, _params: &Params<'_>) -> Repeat {
+        Repeat::Once
+    }
 
     /// Runs once the frame's commands are submitted (start readbacks here).
     fn after_submit(&mut self) {}
@@ -922,6 +954,10 @@ pub struct Engine {
     last_time: Option<f64>,
     // Per-frame scratch, reused.
     plan: Vec<NodeId>,
+    /// The plan with loops unrolled into their passes ([`Repeat`]).
+    steps: Vec<Step>,
+    loop_after: HashSet<NodeId>,
+    loop_body: HashSet<NodeId>,
     requested: Vec<NodeId>,
     inputs: Vec<Option<wgpu::Texture>>,
     sig_sources: Vec<Option<NodeId>>,
@@ -1002,6 +1038,9 @@ impl Engine {
             frame: 0,
             last_time: None,
             plan: Vec::new(),
+            steps: Vec::new(),
+            loop_after: HashSet::new(),
+            loop_body: HashSet::new(),
             requested: Vec::new(),
             inputs: Vec::new(),
             sig_sources: Vec::new(),
@@ -1224,7 +1263,8 @@ impl Engine {
     }
 
     /// Cooks what `requested` needs at `time` (seconds) and submits it.
-    /// Returns how many nodes cooked (0 when everything was cached).
+    /// Returns how many node-cooks it made (0 when everything was cached; a
+    /// node in a loop that makes several passes counts once per pass).
     pub fn cook(&mut self, requested: &[NodeId], time: f64) -> Result<usize, EngineError> {
         if !self.again.is_empty() {
             let net = &self.net;
@@ -1261,6 +1301,9 @@ impl Engine {
             frame,
             last_time,
             plan,
+            steps,
+            loop_after,
+            loop_body,
             inputs,
             sig_sources,
             geo_sources,
@@ -1299,11 +1342,48 @@ impl Engine {
             format: config.format,
             usage: ENGINE_USAGE,
         };
+        unroll_loops(
+            &Unroll {
+                net,
+                registry,
+                library,
+                sig,
+                exprs,
+                project_dir: project_dir.as_deref(),
+                mode,
+                time,
+                frame: *frame,
+                plan,
+            },
+            device,
+            geo_ops,
+            steps,
+            loop_after,
+            loop_body,
+        );
+        let frame_dt = dt;
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("atd-cook"),
         });
 
-        for &id in plan.iter() {
+        for &step in steps.iter() {
+            let id = step.node;
+            if step.flush {
+                // A new pass of a loop: what the previous pass recorded runs
+                // with the uniforms it wrote.
+                let done = std::mem::replace(
+                    &mut encoder,
+                    device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("atd-cook"),
+                    }),
+                );
+                queue.submit([done.finish()]);
+            }
+            let dt = if step.substeps {
+                frame_dt / f64::from(step.iterations)
+            } else {
+                frame_dt
+            };
             let start = Instant::now();
             let node = net.node(id).expect("planned nodes exist");
             let Some(schema) = registry.get(&node.type_id) else {
@@ -1467,6 +1547,8 @@ impl Engine {
                     time,
                     dt,
                     frame: *frame,
+                    iteration: step.iteration,
+                    iterations: step.iterations,
                     cook_again: false,
                     node: id,
                     sources: geo_sources,
@@ -1757,7 +1839,7 @@ impl Engine {
         pool.end_frame();
         buffers.end_frame();
         *frame += 1;
-        Ok(plan.len())
+        Ok(steps.len())
     }
 
     /// Replaces the network (e.g. a loaded project) after validating it
@@ -1855,6 +1937,222 @@ impl Engine {
     pub fn frame(&self) -> u64 {
         self.frame
     }
+}
+
+/// One cook of the frame: a planned node in one pass of its loop.
+#[derive(Debug, Clone, Copy)]
+struct Step {
+    node: NodeId,
+    iteration: u32,
+    iterations: u32,
+    /// The passes are sub-steps: each gets `dt / iterations`.
+    substeps: bool,
+    /// Submit what is recorded so far first (the start of a pass after the
+    /// first).
+    flush: bool,
+}
+
+impl Step {
+    fn once(node: NodeId) -> Self {
+        Self {
+            node,
+            iteration: 0,
+            iterations: 1,
+            substeps: false,
+            flush: false,
+        }
+    }
+}
+
+/// What [`unroll_loops`] reads.
+struct Unroll<'a> {
+    net: &'a Network,
+    registry: &'a Registry,
+    library: &'a OpLibrary,
+    sig: &'a HashMap<NodeId, Channels>,
+    exprs: &'a ExprTable,
+    project_dir: Option<&'a Path>,
+    mode: CookMode,
+    time: f64,
+    frame: u64,
+    plan: &'a [NodeId],
+}
+
+impl Unroll<'_> {
+    /// When planned node `i` heads a loop that makes more than one pass this
+    /// frame: the plan index of the loop's end and the passes.
+    fn loop_at(
+        &self,
+        i: usize,
+        device: &wgpu::Device,
+        geo_ops: &mut HashMap<NodeId, Box<dyn GeoOp>>,
+    ) -> Option<(usize, Repeat)> {
+        let head = self.plan[i];
+        let node = self.net.node(head)?;
+        let schema = self.registry.get(&node.type_id)?;
+        if schema
+            .outputs
+            .first()
+            .is_none_or(|o| o.wire != WireType::Geo)
+        {
+            return None;
+        }
+        let end = schema
+            .inputs
+            .iter()
+            .filter(|s| s.feedback && s.wire == WireType::Geo)
+            .find_map(|s| {
+                self.net
+                    .inputs_of(head)
+                    .find(|(name, _)| *name == s.name)
+                    .map(|(_, src)| src.node)
+            })?;
+        let end = i + self.plan[i..].iter().position(|&n| n == end)?;
+        if let std::collections::hash_map::Entry::Vacant(slot) = geo_ops.entry(head) {
+            let factory = self.library.geo_factories.get(&node.type_id)?;
+            slot.insert(factory(device));
+        }
+        if !self.exprs.is_empty() {
+            crate::expr::Ctx {
+                net: self.net,
+                registry: self.registry,
+                sig: self.sig,
+                table: self.exprs,
+                time: self.time,
+                frame: self.frame as f64,
+            }
+            .eval_node(head);
+        }
+        let params = Params {
+            net: self.net,
+            registry: self.registry,
+            sig: self.sig,
+            node: head,
+            project_dir: self.project_dir,
+            exprs: Some(self.exprs),
+            mode: self.mode,
+        };
+        let repeat = match geo_ops[&head].repeat(&params) {
+            Repeat::SubSteps(n) if n > 1 => Repeat::SubSteps(n.min(MAX_REPEAT)),
+            Repeat::Iterations(n) if n > 1 => Repeat::Iterations(n.min(MAX_REPEAT)),
+            _ => return None,
+        };
+        Some((end, repeat))
+    }
+}
+
+/// Writes the frame's cooks into `steps`: the plan, with every loop that
+/// makes more than one pass ([`GeoOp::repeat`]) unrolled. Within the plan
+/// stretch from a loop's head to its end, nodes that do not depend on the
+/// head cook first, then the body (the nodes on a path from the head to the
+/// end) once per pass, then the other nodes that depend on the head (they
+/// see the last pass). A loop inside another loop's body makes one pass per
+/// outer pass. Reuses its buffers, so nothing allocates once warm.
+fn unroll_loops(
+    u: &Unroll<'_>,
+    device: &wgpu::Device,
+    geo_ops: &mut HashMap<NodeId, Box<dyn GeoOp>>,
+    steps: &mut Vec<Step>,
+    after: &mut HashSet<NodeId>,
+    body: &mut HashSet<NodeId>,
+) {
+    steps.clear();
+    let plan = u.plan;
+    let mut i = 0;
+    while i < plan.len() {
+        let Some((end, repeat)) = u.loop_at(i, device, geo_ops) else {
+            steps.push(Step::once(plan[i]));
+            i += 1;
+            continue;
+        };
+        let stretch = &plan[i..=end];
+        let reads = |n: NodeId, set: &HashSet<NodeId>| {
+            let net = u.net;
+            let schema = net.node(n).and_then(|node| u.registry.get(&node.type_id));
+            let feedback = |input: &str| {
+                schema
+                    .and_then(|s| s.inputs.iter().find(|i| i.name == input))
+                    .is_some_and(|i| i.feedback)
+            };
+            net.inputs_of(n)
+                .any(|(input, src)| !feedback(input) && set.contains(&src.node))
+                || net.bindings_of(n).any(|b| set.contains(&b.node))
+        };
+        // Downstream of the head (in plan order, so inputs come first).
+        after.clear();
+        after.insert(plan[i]);
+        for &n in &stretch[1..] {
+            if reads(n, after) {
+                after.insert(n);
+            }
+        }
+        if !after.contains(&plan[end]) {
+            // The feedback comes from a node that does not depend on the
+            // head: no loop to repeat.
+            steps.extend(stretch.iter().map(|&n| Step::once(n)));
+            i = end + 1;
+            continue;
+        }
+        // Of those, the ones the end depends on: walk back from the end.
+        body.clear();
+        body.insert(plan[end]);
+        for &n in stretch.iter().rev().skip(1) {
+            if after.contains(&n)
+                && stretch
+                    .iter()
+                    .any(|&m| body.contains(&m) && m != n && reads_from(u, m, n))
+            {
+                body.insert(n);
+            }
+        }
+        body.insert(plan[i]);
+        for &n in stretch {
+            if !after.contains(&n) {
+                steps.push(Step::once(n));
+            }
+        }
+        let (passes, substeps) = match repeat {
+            Repeat::SubSteps(n) => (n, true),
+            Repeat::Iterations(n) => (n, false),
+            Repeat::Once => (1, false),
+        };
+        for k in 0..passes {
+            for &n in stretch {
+                if body.contains(&n) {
+                    steps.push(Step {
+                        node: n,
+                        iteration: k,
+                        iterations: passes,
+                        substeps,
+                        flush: k > 0 && n == plan[i],
+                    });
+                }
+            }
+        }
+        for &n in stretch {
+            if after.contains(&n) && !body.contains(&n) {
+                steps.push(Step::once(n));
+            }
+        }
+        i = end + 1;
+    }
+}
+
+/// Whether `consumer` reads `source` through a normal (not feedback) input
+/// or a channel binding.
+fn reads_from(u: &Unroll<'_>, consumer: NodeId, source: NodeId) -> bool {
+    let net = u.net;
+    let schema = net
+        .node(consumer)
+        .and_then(|node| u.registry.get(&node.type_id));
+    let feedback = |input: &str| {
+        schema
+            .and_then(|s| s.inputs.iter().find(|i| i.name == input))
+            .is_some_and(|i| i.feedback)
+    };
+    net.inputs_of(consumer)
+        .any(|(input, src)| !feedback(input) && src.node == source)
+        || net.bindings_of(consumer).any(|b| b.node == source)
 }
 
 /// Counts the wires leaving each node (on edits, not per frame).

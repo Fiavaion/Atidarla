@@ -48,6 +48,7 @@ type = "pnt.solver"
 pos = [880.0, 0.0]
 inputs.init = { node = 3, output = "out" }
 inputs.prev = { node = 9, output = "out" }
+params.substeps = 2
 
 [[node]]
 id = 5

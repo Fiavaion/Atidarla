@@ -30,21 +30,42 @@ the body's end. Nothing new is needed for this: flattening keeps the inner feedb
 test cooks such a Pack (`crates/atd-ops-pnt/tests/batch/solver.rs`). Offline it is Stateful
 (`docs/render.md`).
 
-**Not built: sub-steps.** Running the body N times per frame needs N copies of it in one
-frame, because the engine cooks each node once per frame. The smallest design that fits:
+**Built (2026-10-30): sub-steps.** Mark ratified sub-steps for M2 on 2026-10-30. The flatten-time
+unrolling sketched in the first draft (N copies of a Pack's network, a `substeps` field in
+`pack.toml`, a `dt` scale in detail values) was replaced by a smaller design that needs no
+format change and works with or without a Pack:
 
-1. A Pack definition gains an optional `substeps` (1 by default), saved in `pack.toml`
-   (rule 8: a round-trip test).
-2. Flattening walks a solver Pack's network N times, with paths `[instance, k]` (stable IDs,
-   as today), and chains the copies: copy 0's solver keeps the feedback from copy N−1's end;
-   copy k > 0's solver takes copy k−1's end on `init` and passes it through (a solver option
-   the flattener sets).
-3. Every copy steps by `dt / N`: the solver writes the scale into the geometry's detail
-   values, and the per-step operators multiply `dt` by it (one helper in `atd-ops-pnt`).
+1. `pnt.solver` has a **Sub-steps** parameter (1 by default, at most 64), saved like any other
+   parameter (no `pack.toml` field; a Solver Block Pack promotes it like any parameter).
+2. **Loops in the engine** (`atd_gpu::engine`, `GeoOp::repeat`). A loop is headed by a GEO node
+   with a feedback GEO input; the input's source is the loop's end; the body is every planned
+   node on a path from the head to the end. When the head's `repeat` asks for N passes, the
+   engine unrolls the frame's plan: nodes of that stretch that do not depend on the head cook
+   first, then the body N times in plan order, then the other nodes that depend on the head
+   (they see the last pass). Each node still cooks with its own operator instance, so its
+   state (an Emitter's count, say) carries from pass to pass. The plan and the scheduler are
+   unchanged; the unrolled list is a reused buffer, so nothing allocates once warm.
+3. **The step is divided by the engine**: in a `Repeat::SubSteps(N)` loop every body node gets
+   `GeoCtx::dt = dt / N` (offline, the fixed step divided exactly), so no per-step operator
+   changes. `GeoCtx::iteration` and `iterations` say which pass a cook is. The solver restarts
+   (Reset, Start Frame, first cook) only on a frame's first pass; later passes continue from
+   `prev`, the body's end as the previous pass left it (handed over in place when nothing else
+   reads it).
+4. **Each pass after the first is submitted on its own** (the engine submits what the frame
+   has recorded before the head's next pass). `queue.write_buffer` takes effect at the next
+   submit, so without this every pass's dispatches would see the last pass's uniforms; with it
+   operators need no per-pass uniform slots. Cost: one submit per extra pass.
+5. **Buffer pool order.** Loops drop pooled buffers in an order that changes from frame to
+   frame, which made bind groups keyed by buffer identity miss their caches. The pool now
+   returns a frame's buffers in a fixed (buffer-identity) order, so a steady state takes the
+   same buffers for the same requests (`tests/alloc_batch.rs` runs a three-sub-step Solver).
 
-Cost: N times the body's dispatches, no allocation after warm-up (the copies hand their
-buffers over in place). This changes `atd-core` (flattening, `PackDef`) and `atd-format`
-(`pack.toml`), so it waits for a yes (question 1).
+Evidence: `solver_substeps_equal_a_four_times_finer_frame_rate` (four sub-steps at 50 fps are
+bit-identical to one step at 200 fps over five frames), `one_frame_of_substeps_from_init`
+(analytic), `an_emitter_in_substeps_numbers_every_particle_once` (fails without the per-pass
+submit: 60 particles instead of 50), `tests/alloc_batch.rs` (no buffer, bind-group or texture
+creation after warm-up with three sub-steps). Loops do not nest in M2: a loop inside another
+loop's body makes one pass per outer pass.
 
 ## For-Each
 
@@ -66,7 +87,7 @@ stages), and running an MSH body per piece (left out of M2 by the design).
 
 ## Questions for Mark
 
-1. Solver sub-steps by flatten-time unrolling and a `dt` scale (above): build it in M2, or is
-   one step per frame (raise the frame rate offline) enough for now?
+1. ~~Solver sub-steps~~: ratified 2026-10-30 and built (above), by engine loops instead of
+   flatten-time unrolling.
 2. For-Each as "a piece attribute plus operators keyed by it" until the Kernel DSL: accept it
    as M2's For-Each, or wait for A12?

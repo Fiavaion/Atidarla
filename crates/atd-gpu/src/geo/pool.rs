@@ -175,6 +175,11 @@ impl BufferPool {
         let now = state.frame;
         {
             let mut returned = lock(&self.shared.returned);
+            // In a fixed order (not the order they were dropped in), so a
+            // steady state takes the same buffers for the same requests and
+            // bind groups keyed by buffers stay cached (loops that make
+            // several passes per frame drop theirs in a varying order).
+            returned.sort_unstable();
             for buffer in returned.drain(..) {
                 let key = (buffer.size(), buffer.usage());
                 state.free_bytes += key.0;

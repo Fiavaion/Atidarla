@@ -99,6 +99,15 @@ impl<'a> Build<'a> {
         n
     }
 
+    /// Sets a parameter of a node added earlier.
+    pub fn set(&mut self, node: NodeId, param: &str, value: Value) {
+        self.edits.push(Edit::SetParam {
+            node,
+            param: param.into(),
+            value: Some(Param::constant(value)),
+        });
+    }
+
     pub fn wire(&mut self, from: NodeId, to: NodeId, socket: &str) {
         self.edits.push(Edit::Connect {
             wire: Wire::new(Endpoint::new(from, "out"), Endpoint::new(to, socket)),

@@ -183,7 +183,7 @@ fn batch_chains_steady_state_allocations() {
     let rand = n.chain(&mut e, math, "pnt.randomize", &[]);
     let r2 = n.node(&mut e, "img.render_points", &[]);
     n.wire(rand, r2, "geo");
-    // 3. Neighbours and a solver.
+    // 3. Neighbours and a solver (three sub-steps a frame).
     let sphere = n.node(
         &mut e,
         "pnt.scatter",
@@ -195,7 +195,7 @@ fn batch_chains_steady_state_allocations() {
     let links = n.chain(&mut e, nrm, "pnt.connect", &[("radius", json!(0.1))]);
     let r3 = n.node(&mut e, "img.render_points", &[("draw", json!("both"))]);
     n.wire(links, r3, "geo");
-    let solver = n.node(&mut e, "pnt.solver", &[]);
+    let solver = n.node(&mut e, "pnt.solver", &[("substeps", json!(3))]);
     n.wire(sphere, solver, "init");
     let pull = n.chain(&mut e, solver, "pnt.attract", &[]);
     let step = n.chain(&mut e, pull, "pnt.integrate", &[]);
