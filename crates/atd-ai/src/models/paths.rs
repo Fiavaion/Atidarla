@@ -84,6 +84,12 @@ impl Store {
         &self.accepted
     }
 
+    /// `hosts.toml`: LAN and cloud host tokens, beside `accepted.toml`
+    /// (`crate::hosts`).
+    pub fn hosts_path(&self) -> PathBuf {
+        self.accepted.with_file_name("hosts.toml")
+    }
+
     /// Where `rel` (a catalogue path, `/`-separated) of model `id` lives.
     pub fn file(&self, id: &str, rel: &str) -> PathBuf {
         let mut p = self.model_dir(id);
