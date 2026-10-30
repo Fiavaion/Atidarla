@@ -9,6 +9,7 @@ mod docs;
 mod export;
 mod isf_import;
 mod kernel;
+mod merge;
 mod models;
 mod project;
 mod pt8;
@@ -203,6 +204,47 @@ enum Command {
         #[arg(long)]
         allow_python_ops: bool,
     },
+    /// What changed between two states of a project (FR-F2): nodes added,
+    /// removed, renamed, moved and retyped, parameter and wire changes, and
+    /// project sections. Each side is a project folder or `git:<rev>`
+    /// (the project folder at a Git revision). See docs/merge.md.
+    Diff {
+        /// The old state.
+        a: String,
+        /// The new state.
+        b: String,
+        /// The project folder `git:<rev>` sides are read from (default:
+        /// the folder side, else the current folder).
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// Three-way merge of project states by stable ID (FR-F3). Each side is
+    /// a project folder or `git:<rev>`. Prints conflicts; exits 0 when the
+    /// merge is clean, 1 with conflicts, 2 on errors. See docs/merge.md.
+    Merge {
+        base: String,
+        ours: String,
+        theirs: String,
+        /// Write the merged project here. With conflicts it is written with
+        /// `# atidarla-conflict` blocks for the app's Merge panel, unless a
+        /// conflict is outside the networks (then nothing is written).
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// The project folder `git:<rev>` sides are read from.
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// Git merge driver for one network file: `atidarla merge-file %O %A
+    /// %B %P`. Writes the merge over OURS; exits 0 when clean, 1 with
+    /// conflicts (recorded in a `# atidarla-conflict` block). See
+    /// docs/merge.md.
+    MergeFile {
+        base: PathBuf,
+        ours: PathBuf,
+        theirs: PathBuf,
+        /// The file's path in the repository, for messages.
+        path: Option<String>,
+    },
     /// Rewrite project folders in canonical form (after editing by hand).
     Fmt {
         #[arg(required = true)]
@@ -340,6 +382,20 @@ fn main() -> ExitCode {
                 allow_python_ops,
             },
         ),
+        Command::Diff { a, b, project } => return merge::diff(&a, &b, project.as_deref()),
+        Command::Merge {
+            base,
+            ours,
+            theirs,
+            out,
+            project,
+        } => return merge::merge(&base, &ours, &theirs, out.as_deref(), project.as_deref()),
+        Command::MergeFile {
+            base,
+            ours,
+            theirs,
+            path,
+        } => return merge::merge_file(&base, &ours, &theirs, path.as_deref()),
         Command::Fmt { projects } => project::fmt(&projects),
         Command::IsfImport {
             dir,
