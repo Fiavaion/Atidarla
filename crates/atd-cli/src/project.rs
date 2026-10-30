@@ -127,6 +127,13 @@ fn is_pack_folder(dir: &Path) -> bool {
 }
 
 pub(crate) fn library() -> (atd_core::Registry, OpLibrary) {
+    library_with(atd_ai::supervisor::Supervisor::global())
+}
+
+/// Like [`library`], with AI operators running on `supervisor`'s hosts.
+pub(crate) fn library_with(
+    supervisor: &'static atd_ai::supervisor::Supervisor,
+) -> (atd_core::Registry, OpLibrary) {
     let registry = crate::builtin_registry();
     let mut library = OpLibrary::default();
     atd_ops_img::library(&mut library);
@@ -135,7 +142,7 @@ pub(crate) fn library() -> (atd_core::Registry, OpLibrary) {
     atd_ops_mat::library(&mut library);
     atd_ops_msh::library(&mut library);
     atd_ops_cmp::library(&mut library);
-    atd_ops_ai::library(&mut library);
+    atd_ops_ai::library_with(&mut library, supervisor);
     (registry, library)
 }
 

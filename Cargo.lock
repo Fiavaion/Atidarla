@@ -222,9 +222,11 @@ version = "0.0.1"
 name = "atd-ai"
 version = "0.0.1"
 dependencies = [
+ "atd-core",
  "atd-format",
  "log",
  "memmap2",
+ "png",
  "rustls",
  "serde",
  "serde_json",

@@ -10,6 +10,7 @@
 //! and reaches the frame loop only through the Output Governor
 //! (CLAUDE.md rule 1).
 
+pub mod batch;
 pub mod client;
 pub mod cloud;
 pub mod comfy;
