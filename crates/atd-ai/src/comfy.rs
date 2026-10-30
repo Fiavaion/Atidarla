@@ -229,7 +229,10 @@ fn parse_class(name: &str, v: &Value) -> Result<ClassInfo, ComfyError> {
     let order = obj.get("input_order").and_then(Value::as_object);
     let mut inputs = Vec::new();
     for (section, required) in [("required", true), ("optional", false)] {
-        let Some(specs) = input.and_then(|i| i.get(section)).and_then(Value::as_object) else {
+        let Some(specs) = input
+            .and_then(|i| i.get(section))
+            .and_then(Value::as_object)
+        else {
             continue;
         };
         let mut names: Vec<&str> = order
@@ -350,9 +353,8 @@ pub fn node_order(a: &str, b: &str) -> CmpOrdering {
 
 /// `["4", 0]`: a link to output 0 of node 4.
 pub fn is_link(v: &Value) -> bool {
-    v.as_array().is_some_and(|a| {
-        a.len() == 2 && a[0].is_string() && (a[1].is_u64() || a[1].is_i64())
-    })
+    v.as_array()
+        .is_some_and(|a| a.len() == 2 && a[0].is_string() && (a[1].is_u64() || a[1].is_i64()))
 }
 
 /// Reads an API-format workflow.
@@ -519,7 +521,11 @@ fn with_value(w: &Widget, v: &Value) -> Widget {
             if let Some(m) = min {
                 d = d.max(m);
             }
-            Widget::Float { default: d, min, max }
+            Widget::Float {
+                default: d,
+                min,
+                max,
+            }
         }
         Widget::String { default, multiline } => Widget::String {
             default: v.as_str().map_or(default, str::to_owned),
@@ -914,7 +920,11 @@ impl Client {
         match e {
             ureq::Error::Status(code, resp) => {
                 let body = resp.into_string().unwrap_or_default();
-                ComfyError::Server(format!("HTTP {code} from {}: {}", self.server, short(&body)))
+                ComfyError::Server(format!(
+                    "HTTP {code} from {}: {}",
+                    self.server,
+                    short(&body)
+                ))
             }
             ureq::Error::Transport(t) => match t.kind() {
                 ureq::ErrorKind::ConnectionFailed | ureq::ErrorKind::Io => {
@@ -958,8 +968,9 @@ impl Client {
         resp.into_reader()
             .read_to_string(&mut text)
             .map_err(|e| ComfyError::Server(format!("{}: {e}", self.server)))?;
-        serde_json::from_str(&text)
-            .map_err(|e| ComfyError::Server(format!("{}: object_info is not JSON: {e}", self.server)))
+        serde_json::from_str(&text).map_err(|e| {
+            ComfyError::Server(format!("{}: object_info is not JSON: {e}", self.server))
+        })
     }
 
     /// `POST /upload/image`; returns the name a `LoadImage` node takes
@@ -996,10 +1007,9 @@ impl Client {
             .send_bytes(&body)
             .map_err(|e| self.http_error(e))?;
         let v = self.json(resp)?;
-        let name = v
-            .get("name")
-            .and_then(Value::as_str)
-            .ok_or_else(|| ComfyError::Server(format!("upload: no name in {}", short(&v.to_string()))))?;
+        let name = v.get("name").and_then(Value::as_str).ok_or_else(|| {
+            ComfyError::Server(format!("upload: no name in {}", short(&v.to_string())))
+        })?;
         Ok(match v.get("subfolder").and_then(Value::as_str) {
             Some(sub) if !sub.is_empty() => format!("{sub}/{name}"),
             _ => name.to_owned(),
@@ -1051,7 +1061,14 @@ impl Client {
             .get(&self.url("/view"))
             .query("filename", s("filename"))
             .query("subfolder", s("subfolder"))
-            .query("type", if s("type").is_empty() { "output" } else { s("type") })
+            .query(
+                "type",
+                if s("type").is_empty() {
+                    "output"
+                } else {
+                    s("type")
+                },
+            )
             .call()
             .map_err(|e| self.http_error(e))?;
         let mut bytes = Vec::new();
@@ -1304,7 +1321,10 @@ impl RunState {
         match msg.get("type")?.as_str()? {
             "execution_start" if ours => Some(Step::Progress),
             "execution_cached" if ours => {
-                self.cached = data.get("nodes").and_then(Value::as_array).map_or(0, Vec::len);
+                self.cached = data
+                    .get("nodes")
+                    .and_then(Value::as_array)
+                    .map_or(0, Vec::len);
                 Some(Step::Progress)
             }
             "executing" => match data.get("node").and_then(|n| n.as_str().map(str::to_owned)) {
@@ -1439,7 +1459,15 @@ mod tests {
         let names: Vec<&str> = k.inputs.iter().map(|i| i.name.as_str()).collect();
         assert_eq!(
             names,
-            ["model", "seed", "steps", "cfg", "sampler_name", "scheduler", "denoise"]
+            [
+                "model",
+                "seed",
+                "steps",
+                "cfg",
+                "sampler_name",
+                "scheduler",
+                "denoise"
+            ]
         );
         assert_eq!(k.inputs[0].ty, InputType::Link("MODEL".into()));
         assert_eq!(
@@ -1468,7 +1496,10 @@ mod tests {
         );
         assert!(matches!(
             info["CLIPTextEncode"].input("text").unwrap().ty,
-            InputType::Widget(Widget::String { multiline: true, .. })
+            InputType::Widget(Widget::String {
+                multiline: true,
+                ..
+            })
         ));
         let save = &info["SaveImage"];
         assert!(save.output_node);
@@ -1525,7 +1556,10 @@ mod tests {
         assert_eq!(d.output.as_deref(), Some("9"));
         assert!(!d.selective && d.unknown_classes.is_empty());
         // The same files give the same operator.
-        assert_eq!(d, derive(&workflow(), &info(), &["server", "run", "auto_run"]));
+        assert_eq!(
+            d,
+            derive(&workflow(), &info(), &["server", "run", "auto_run"])
+        );
         // A reserved name gets the node ID.
         let d2 = derive(&workflow(), &info(), &["ksampler_seed"]);
         assert_eq!(d2.params[0].id, "ksampler_seed_3");
@@ -1558,7 +1592,12 @@ mod tests {
         let seed = d.params.iter().find(|p| p.id == "ksampler_seed").unwrap();
         assert!(matches!(
             seed.widget,
-            Widget::Int { default: 42, min: None, seed: true, .. }
+            Widget::Int {
+                default: 42,
+                min: None,
+                seed: true,
+                ..
+            }
         ));
     }
 
@@ -1585,8 +1624,14 @@ mod tests {
     fn ui_workflows_and_servers_are_explained() {
         let e = parse_workflow(&json!({"nodes": [], "links": []})).unwrap_err();
         assert!(e.to_string().contains("Export (API)"), "{e}");
-        assert_eq!(parse_server("127.0.0.1:8188").unwrap(), ("127.0.0.1".into(), 8188));
-        assert_eq!(parse_server("http://box.local:9000/").unwrap(), ("box.local".into(), 9000));
+        assert_eq!(
+            parse_server("127.0.0.1:8188").unwrap(),
+            ("127.0.0.1".into(), 8188)
+        );
+        assert_eq!(
+            parse_server("http://box.local:9000/").unwrap(),
+            ("box.local".into(), 9000)
+        );
         assert_eq!(parse_server("[::1]:81").unwrap(), ("::1".into(), 81));
         assert_eq!(parse_server("studio").unwrap(), ("studio".into(), 8188));
         assert!(parse_server("https://x:1").is_err());
@@ -1607,11 +1652,29 @@ mod tests {
         };
         let ev = |t: &str, d: Value| json!({"type": t, "data": d}).to_string();
         assert!(matches!(
-            s.handle(&ev("execution_cached", json!({"prompt_id": "p", "nodes": ["6"]})), "p", &prompt),
+            s.handle(
+                &ev(
+                    "execution_cached",
+                    json!({"prompt_id": "p", "nodes": ["6"]})
+                ),
+                "p",
+                &prompt
+            ),
             Some(Step::Progress)
         ));
-        s.handle(&ev("executing", json!({"prompt_id": "p", "node": "3"})), "p", &prompt);
-        s.handle(&ev("progress", json!({"prompt_id": "p", "node": "3", "value": 2, "max": 4})), "p", &prompt);
+        s.handle(
+            &ev("executing", json!({"prompt_id": "p", "node": "3"})),
+            "p",
+            &prompt,
+        );
+        s.handle(
+            &ev(
+                "progress",
+                json!({"prompt_id": "p", "node": "3", "value": 2, "max": 4}),
+            ),
+            "p",
+            &prompt,
+        );
         assert_eq!(
             s.progress(&prompt).to_string(),
             "running KSampler (node 3) 1/4, step 2/4"
@@ -1627,11 +1690,25 @@ mod tests {
             "p",
             &prompt,
         );
-        assert_eq!(s.progress(&prompt).to_string(), "running SaveImage (node 9) 2/4");
+        assert_eq!(
+            s.progress(&prompt).to_string(),
+            "running SaveImage (node 9) 2/4"
+        );
         // Other prompts' events are ignored; the end is ours.
-        assert!(s.handle(&ev("executing", json!({"prompt_id": "q", "node": null})), "p", &prompt).is_none());
+        assert!(
+            s.handle(
+                &ev("executing", json!({"prompt_id": "q", "node": null})),
+                "p",
+                &prompt
+            )
+            .is_none()
+        );
         assert!(matches!(
-            s.handle(&ev("executing", json!({"prompt_id": "p", "node": null})), "p", &prompt),
+            s.handle(
+                &ev("executing", json!({"prompt_id": "p", "node": null})),
+                "p",
+                &prompt
+            ),
             Some(Step::Done)
         ));
         let failed = s.handle(

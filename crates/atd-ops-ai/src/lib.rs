@@ -2,6 +2,8 @@
 //!
 //! **Status:** M0 stub. Implementation lands in M4 (see `PRD.md` §9).
 
+pub mod comfy;
+
 use atd_core::registry::Registry;
 
 /// Registers this family's operators with the registry.

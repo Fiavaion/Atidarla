@@ -11,6 +11,20 @@ publish.workspace = true
 
 [dependencies]
 atd-core.workspace = true
+atd-gpu.workspace = true
+atd-ai.workspace = true
+atd-interop.workspace = true
+# ComfyUI results decode with atd-io's PNG/JPEG reader; inputs encode as PNG.
+atd-io.workspace = true
+png.workspace = true
+wgpu.workspace = true
+serde_json.workspace = true
+log.workspace = true
+
+[dev-dependencies]
+pollster.workspace = true
+tungstenite.workspace = true
+atd-ops-img.workspace = true
 
 [lints]
 workspace = true
