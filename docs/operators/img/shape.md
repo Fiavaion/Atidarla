@@ -33,6 +33,7 @@ All platforms.
 
 ## Examples
 
+- [Beat clock](../../../examples/beat-clock.atidarla/) — `star`
 - [Beat switcher](../../../examples/beat-switcher.atidarla/) — `star`
 - [Compute Shaders](../../../examples/compute-shaders.atidarla/) — `dot`
 - [Live control](../../../examples/live-control.atidarla/) — `shape1`

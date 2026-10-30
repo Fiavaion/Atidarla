@@ -34,5 +34,6 @@ All platforms.
 ## Examples
 
 - [Audio-reactive feedback](../../../examples/audio-reactive-feedback.atidarla/) — `loudness`
+- [Beat clock](../../../examples/beat-clock.atidarla/) — `hue`
 - [Beat switcher](../../../examples/beat-switcher.atidarla/) — `index`, `flash`, `spin`
 - [Live control](../../../examples/live-control.atidarla/) — `degrees`

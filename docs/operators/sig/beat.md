@@ -43,4 +43,5 @@ All platforms.
 
 ## Examples
 
+- [Beat clock](../../../examples/beat-clock.atidarla/) — `clock`
 - [Beat switcher](../../../examples/beat-switcher.atidarla/) — `clock`

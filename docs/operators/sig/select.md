@@ -28,6 +28,7 @@ All platforms.
 
 ## Examples
 
+- [Beat clock](../../../examples/beat-clock.atidarla/) — `cycle_fraction`
 - [Beat switcher](../../../examples/beat-switcher.atidarla/) — `bar_phase`, `beat_phase`
 - [Live control](../../../examples/live-control.atidarla/) — `x`, `y`
 - [Signal scope](../../../examples/signal-scope.atidarla/) — `luma`

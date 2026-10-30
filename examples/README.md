@@ -15,6 +15,7 @@ every IMG and SIG operator (CLAUDE.md rule 7); each operator's page in
 |---|---|
 | [audio-reactive-feedback](audio-reactive-feedback.atidarla/) | The M1 AC1 patch: a feedback loop following a drum loop's spectrum |
 | [beat-switcher](beat-switcher.atidarla/) | A BPM clock switching generators per beat, with triggers and counters |
+| [beat-clock](beat-clock.atidarla/) | Tap tempo, nudge, resync and MIDI clock in/out on Beat, with beat-synced LFOs and a Timer (M3) |
 | [kaleidoscope-tunnel](kaleidoscope-tunnel.atidarla/) | Noise through kaleidoscope, mirror, tile, hue and bloom |
 | [keying](keying.atidarla/) | Chroma and luma keys on a still |
 | [image-processing](image-processing.atidarla/) | The filters: blur, edges, relief, normals, lookup, displace, remap |

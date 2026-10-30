@@ -1,0 +1,18 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "Beat clock"
+description = '''
+A beat clock drives three modulators that stay in step with it: a sine LFO that turns the
+star once per bar, a ramp LFO that flashes it on every beat, and a Timer that walks the
+hue round once every two bars.
+
+Beat (clock) is the one place the tempo lives. Its LFOs and Timer have Sync set to beats
+and take the clock as their input, so their Frequency and Length are in beats and they
+follow every tempo change, tap and resync.
+
+Try: turn Beat's tap on and off in time with music (4 taps or more), or set its bpm; pulse
+resync on a downbeat; set nudge to 1 while it drifts; set source to midi to follow a
+MIDI clock (and pick the Device), or to audio and wire an Onset into its input. Turn on
+send_clock to drive other gear from this clock.
+'''
+resolution = [1280, 720]

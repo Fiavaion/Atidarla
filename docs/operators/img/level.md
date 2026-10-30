@@ -33,6 +33,7 @@ All platforms.
 ## Examples
 
 - [Audio-reactive feedback](../../../examples/audio-reactive-feedback.atidarla/) — `level1`
+- [Beat clock](../../../examples/beat-clock.atidarla/) — `beat_flash`
 - [Beat switcher](../../../examples/beat-switcher.atidarla/) — `level1`
 - [Live control](../../../examples/live-control.atidarla/) — `level1`
 - [Neural Growth](../../../examples/neural-growth.atidarla/) — `dim`
