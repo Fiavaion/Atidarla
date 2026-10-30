@@ -374,6 +374,24 @@ impl AiOp {
         }
     }
 
+    /// Draws the input with the waiting effect (no result will come).
+    fn govern_blocked(&mut self, ctx: &mut CookCtx<'_>) -> Result<(), String> {
+        let input = ctx.input_or_black(0).clone();
+        let black = ctx.black;
+        self.govern.draw(
+            ctx.device,
+            ctx.queue,
+            ctx.encoder,
+            &[&input, black, black, black],
+            &[
+                [0.0, 1.0, 0.0, 0.0],
+                [ctx.params.f32("effect"), 0.0, 0.0, 0.0],
+            ],
+            ctx.output,
+        );
+        Ok(())
+    }
+
     fn refresh_status(&mut self, now: Instant) {
         if self
             .status_at
@@ -495,6 +513,12 @@ impl GpuOp for AiOp {
             match (offline, self.offline_sent) {
                 (true, Some(seq)) => {
                     if !link.wait_result(seq, OFFLINE_WAIT, &mut up) {
+                        // Refused by policy (Sovereign mode, spend cap):
+                        // the render goes on with the passthrough picture.
+                        if link.with_status(|s| s.blocked) {
+                            self.offline_sent = None;
+                            return self.govern_blocked(ctx);
+                        }
                         let why = link.with_status(|s| match &s.state {
                             LinkState::Waiting(w) => w.clone(),
                             _ => "no result".into(),

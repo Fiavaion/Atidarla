@@ -137,6 +137,10 @@ impl Supervisor {
                 name: "local".into(),
                 kind: HostKind::Local(default_local_command()),
             });
+            // Decart runs in a host of its own (its backend streams to the
+            // provider); a cloud target, so Sovereign mode and the spend cap
+            // apply. Lucy 2.6: USD 0.02 a second.
+            crate::cloud::register_decart(&s, 72.0);
             s
         })
     }

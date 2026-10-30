@@ -288,6 +288,16 @@ impl std::fmt::Debug for AtidarlaApp {
 }
 
 impl eframe::App for AtidarlaApp {
+    /// Never leave a cloud pod running (and billing) after the app quits,
+    /// and stop the AI Hosts.
+    fn on_exit(&mut self) {
+        let sup = atd_ai::supervisor::Supervisor::global();
+        for (pod, e) in atd_ai::cloud::runpod::stop_all(sup) {
+            log::error!("could not stop the Runpod pod {pod}: {e}");
+        }
+        sup.shutdown();
+    }
+
     fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
         self.shortcuts(ui);
         self.project_frame(ui.ctx());

@@ -25,6 +25,9 @@ use crate::ring::RingLayout;
 use crate::router::{self, Need, Route, Skip, Target};
 use crate::supervisor::Supervisor;
 
+/// Offline, how long a node may wait with no host able to run it.
+const OFFLINE_GIVE_UP: Duration = Duration::from_secs(30);
+
 /// One parameter value sent with a frame.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PVal {
@@ -168,6 +171,9 @@ pub struct LinkStatus {
     pub vram_mb: Option<u64>,
     /// USD spent on cloud hosts by this node.
     pub cost_usd: f64,
+    /// Every target on the route is refused by policy (Sovereign mode or
+    /// the spend cap): waiting will not help.
+    pub blocked: bool,
     pub error: Option<String>,
 }
 
@@ -185,6 +191,7 @@ impl Default for LinkStatus {
             reconnects: 0,
             vram_mb: None,
             cost_usd: 0.0,
+            blocked: false,
             error: None,
         }
     }
@@ -328,6 +335,9 @@ impl Link {
     /// when the newest result answers an older frame and nothing newer comes.
     pub fn wait_result(&self, seq: u64, timeout: Duration, f: impl FnOnce(&OutSlot)) -> bool {
         let deadline = Instant::now() + timeout;
+        // Waiting with no host able to run the node (none ready, the model
+        // will not load) for this long ends the wait early.
+        let mut waiting_since: Option<Instant> = None;
         loop {
             {
                 let out = self.shared.output.lock().expect("output");
@@ -336,7 +346,21 @@ impl Link {
                     return true;
                 }
             }
-            if Instant::now() > deadline || self.shared.stop.load(Ordering::Acquire) {
+            let (blocked, waiting) = {
+                let st = self.shared.status.lock().expect("status");
+                (st.blocked, matches!(st.state, LinkState::Waiting(_)))
+            };
+            let now = Instant::now();
+            waiting_since = if waiting {
+                waiting_since.or(Some(now))
+            } else {
+                None
+            };
+            if now > deadline
+                || self.shared.stop.load(Ordering::Acquire)
+                || blocked
+                || waiting_since.is_some_and(|t| now.duration_since(t) > OFFLINE_GIVE_UP)
+            {
                 return false;
             }
             std::thread::sleep(Duration::from_millis(1));
@@ -485,14 +509,19 @@ impl Worker {
             Ok(c) => c,
             Err(skipped) => {
                 let why = describe(&skipped);
+                let blocked = skipped
+                    .iter()
+                    .all(|(_, s)| matches!(s, Skip::Sovereign | Skip::SpendCap));
                 self.status(|s| {
                     s.state = LinkState::Waiting(why.clone());
                     s.target = None;
+                    s.blocked = blocked;
                 });
                 return false;
             }
         };
         self.status(|s| {
+            s.blocked = false;
             s.state = LinkState::Loading;
             s.target = Some(choice.target.clone());
             s.realtime = choice.realtime;
