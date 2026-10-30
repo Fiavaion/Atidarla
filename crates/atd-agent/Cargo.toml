@@ -11,6 +11,8 @@ publish.workspace = true
 
 [dependencies]
 atd-core.workspace = true
+atd-ai.workspace = true
+ureq.workspace = true
 atd-kernel.workspace = true
 atd-stage.workspace = true
 serde.workspace = true

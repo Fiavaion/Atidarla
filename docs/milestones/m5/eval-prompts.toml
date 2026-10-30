@@ -1,0 +1,126 @@
+# M5 AC1: the 20-prompt network-generation eval (`atidarla agent eval`).
+#
+# A run is valid when, after the assistant stops, the network has at least
+# `min_nodes` nodes, every node cooks without an error, and for each entry
+# of `require` some node's type starts with it (a full type id such as
+# `img.feedback`, or a family prefix such as `sig.`).
+
+[[prompt]]
+id = "noise-blur"
+text = "Make animated noise and blur it."
+require = ["img.noise", "img.blur"]
+min_nodes = 2
+
+[[prompt]]
+id = "gradient-colour"
+text = "Create a colour gradient and shift its hue slowly over time."
+require = ["img.ramp", "img.hsv_adjust"]
+min_nodes = 2
+
+[[prompt]]
+id = "feedback-trails"
+text = "Build a feedback loop: noise feeding a feedback node, transformed slightly each frame, composited back over the noise so it leaves trails."
+require = ["img.feedback", "img.transform", "img.composite"]
+min_nodes = 4
+
+[[prompt]]
+id = "kaleido"
+text = "Turn moving noise into a kaleidoscope with eight segments."
+require = ["img.kaleidoscope"]
+min_nodes = 2
+
+[[prompt]]
+id = "lfo-brightness"
+text = "Use an LFO to pulse the brightness of a constant colour."
+require = ["sig.lfo", "img.level"]
+min_nodes = 3
+
+[[prompt]]
+id = "edges"
+text = "Show the edges of an animated noise pattern in white on black."
+require = ["img.edge"]
+min_nodes = 2
+
+[[prompt]]
+id = "mirror-tile"
+text = "Mirror a gradient and tile it four times across the frame."
+require = ["img.mirror", "img.tile"]
+min_nodes = 3
+
+[[prompt]]
+id = "two-sources-blend"
+text = "Crossfade between a noise pattern and a gradient, with the mix driven by a slow sine wave."
+require = ["img.blend"]
+min_nodes = 3
+
+[[prompt]]
+id = "threshold"
+text = "Threshold some noise into stark black and white shapes, then blur them a little."
+require = ["img.threshold", "img.blur"]
+min_nodes = 3
+
+[[prompt]]
+id = "shape-spin"
+text = "Draw a shape and spin it around the centre continuously."
+require = ["img.shape", "img.transform"]
+min_nodes = 2
+
+[[prompt]]
+id = "bloom-glow"
+text = "Make a glowing look: bright animated shapes with bloom on top."
+require = ["img.bloom"]
+min_nodes = 2
+
+[[prompt]]
+id = "displace"
+text = "Warp a gradient by displacing it with noise."
+require = ["img.displace", "img.noise"]
+min_nodes = 3
+
+[[prompt]]
+id = "particles"
+text = "Make a simple particle system of points and render it to an image."
+require = ["pnt.", "img.render"]
+min_nodes = 2
+
+[[prompt]]
+id = "mesh-sphere"
+text = "Create a sphere mesh and render it."
+require = ["msh.", "img.render"]
+min_nodes = 2
+
+[[prompt]]
+id = "math-channels"
+text = "Generate an LFO, scale it with a math node to the range 0.5 to 2, and use it to drive the scale of a transformed noise image."
+require = ["sig.lfo", "sig.math", "img.transform"]
+min_nodes = 4
+
+[[prompt]]
+id = "colour-grade"
+text = "Colour grade a noise texture: raise contrast, warm it up and lower saturation."
+require = ["img."]
+min_nodes = 3
+
+[[prompt]]
+id = "lookup-recolour"
+text = "Recolour noise through a gradient lookup."
+require = ["img.lookup"]
+min_nodes = 3
+
+[[prompt]]
+id = "composite-layers"
+text = "Layer three different generators on top of each other with different blend modes."
+require = ["img.composite"]
+min_nodes = 5
+
+[[prompt]]
+id = "reaction-diffusion"
+text = "Run a reaction-diffusion simulation and colourise the result."
+require = ["img."]
+min_nodes = 2
+
+[[prompt]]
+id = "text-overlay"
+text = "Put the text 'ATIDARLA' over animated noise."
+require = ["img.text"]
+min_nodes = 3

@@ -1,5 +1,6 @@
 //! `atidarla` — headless entry points (PRD §7.10).
 
+mod agent;
 mod bake;
 mod bench;
 mod cloud;
@@ -179,6 +180,9 @@ enum Command {
     },
     /// Expose MCP + OSC/REST without UI (FR-H3, M5).
     Serve(serve::ServeArgs),
+    /// The assistant: build a request into a project, or run the eval (FR-G4, M5).
+    #[command(subcommand)]
+    Agent(agent::AgentCommand),
     /// Check project folders: they load, validate against the operator
     /// registry and are in canonical form; with --gpu, every node cooks
     /// without errors.
@@ -450,6 +454,7 @@ fn main() -> ExitCode {
             },
         ),
         Command::Serve(args) => serve::run(args),
+        Command::Agent(cmd) => agent::run(cmd),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

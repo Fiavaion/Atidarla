@@ -45,7 +45,7 @@ png.workspace = true
 # Show export (FR-S9): file hashes in the manifest, the optional zip.
 sha2.workspace = true
 zip.workspace = true
-toml_edit.workspace = true
+toml_edit = { workspace = true, features = ["serde"] }
 # `run` supervisor: stop the child on Ctrl-C / SIGTERM.
 ctrlc.workspace = true
 

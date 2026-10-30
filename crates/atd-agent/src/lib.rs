@@ -4,6 +4,7 @@
 //! no arbitrary code execution outside the opt-in `python.exec` scope
 //! (CLAUDE.md rule 9).
 
+pub mod assistant;
 pub mod lock;
 pub mod mcp;
 pub mod tools;

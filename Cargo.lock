@@ -218,6 +218,7 @@ dependencies = [
 name = "atd-agent"
 version = "0.0.1"
 dependencies = [
+ "atd-ai",
  "atd-core",
  "atd-kernel",
  "atd-ops-img",
@@ -228,6 +229,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "toml_edit",
+ "ureq 3.5.0",
 ]
 
 [[package]]
