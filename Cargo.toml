@@ -67,6 +67,7 @@ epaint_default_fonts = "0.37"
 toml_edit = "0.25"
 rfd = "0.17"
 sha2 = "0.10"
+ctrlc = { version = "3", features = ["termination"] }
 zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 # Model downloads (FR-A12): rustls with the ring provider and the OS trust
 # store (platform verifier), so no bundled root list and no native-tls.
