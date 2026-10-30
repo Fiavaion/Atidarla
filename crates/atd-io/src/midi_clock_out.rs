@@ -215,10 +215,14 @@ mod tests {
         let out = MidiOut::detached();
         let clock = ClockOut::new(out.handle());
         clock.set_tempo(120.0);
+        let started = Instant::now();
         clock.begin(0.0);
         // The cook says nothing more for a second; the pulses go on.
         std::thread::sleep(Duration::from_millis(1000));
         clock.stop();
+        // A busy machine (a CI runner) oversleeps: count against the time
+        // that actually passed, 48 pulses a second at 120 BPM.
+        let expected = started.elapsed().as_secs_f64() * 48.0;
         std::thread::sleep(Duration::from_millis(50));
         drop(clock);
         let sent = out.sent_raw();
@@ -227,9 +231,10 @@ mod tests {
         assert_eq!(sent.iter().filter(|(m, _)| m == &[0xFC]).count(), 1);
         let t = pulses(&sent);
         assert!(
-            (47..=50).contains(&t.len()),
-            "{} pulses in a second",
-            t.len()
+            (t.len() as f64 - expected).abs() <= 2.5,
+            "{} pulses in {:.3} s (expected {expected:.1})",
+            t.len(),
+            expected / 48.0
         );
         let span = (t[t.len() - 1] - t[0]).as_secs_f64() / (t.len() - 1) as f64;
         let nominal = 60.0 / (120.0 * 24.0);
