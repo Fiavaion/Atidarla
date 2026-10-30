@@ -44,13 +44,14 @@ enum Command {
     /// backend) give byte-identical frames; other machines may differ.
     ///
     /// Writes <OUT>/frame_000000.png, frame_000001.png, ... (numbered by
-    /// frame). Writing a movie file (.mov, HAP or FFmpeg) is not
-    /// implemented yet; encode the sequence with another tool. See
-    /// docs/render.md.
+    /// frame), or, when built with FFmpeg (`--features atd-io/ffmpeg`), a
+    /// movie: --out clip.mov (ProRes) or clip.mp4 (H.264), see --codec.
+    /// Only LGPL encoders are used. See docs/render.md.
     Render {
         /// Project folder (`*.atidarla`).
         project: PathBuf,
-        /// Folder to write the PNG frames into (created if missing).
+        /// Folder to write the PNG frames into (created if missing), or a
+        /// .mov / .mp4 file.
         #[arg(long)]
         out: PathBuf,
         /// Frames START-END: START inclusive, END exclusive (0-300 is
@@ -73,6 +74,15 @@ enum Command {
         /// needs one fails. See docs/python-ops.md.
         #[arg(long)]
         allow_python_ops: bool,
+        /// Movie codec for --out *.mov / *.mp4: prores (422, default for
+        /// .mov), prores-hq, prores4444 (with alpha), h264 (default for
+        /// .mp4), h265. H.264/H.265 use the platform's hardware encoder.
+        #[arg(long)]
+        codec: Option<String>,
+        /// H.264/H.265 bit rate in bit/s (default about 0.15 bit per pixel
+        /// per frame).
+        #[arg(long)]
+        bitrate: Option<u64>,
     },
     /// Export a project as one portable show bundle (FR-S9): the project
     /// folder with every file its nodes use from outside it copied into
@@ -247,6 +257,8 @@ fn main() -> ExitCode {
             fixed_step: _,
             node,
             allow_python_ops,
+            codec,
+            bitrate,
         } => render::run(
             &project,
             &out,
@@ -257,6 +269,7 @@ fn main() -> ExitCode {
                 size: None,
                 allow_python_ops,
             },
+            &render::MovieOptions { codec, bitrate },
         ),
         Command::Kernel {
             file,

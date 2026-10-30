@@ -27,6 +27,7 @@ atd-ops-dat.workspace = true
 atd-ops-cmp.workspace = true
 atd-ops-ai.workspace = true
 atd-kernel.workspace = true
+atd-io.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 serde.workspace = true
