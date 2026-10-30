@@ -12,16 +12,20 @@ user granted `python.exec` (CLAUDE.md rule 9).
 | `list_ops`, `get_schema` | the operator catalogue and one operator's parameters, inputs, outputs, capability flags | – |
 | `get_network`, `get_errors` | the network as the agent sees it (staged changes included), node errors after a cook | – |
 | `create_node`, `delete_node`, `connect`, `disconnect`, `set_param` | stage graph changes (expressions and channel bindings included) | `edit` |
+| `create_pack` | stage turning nodes into a new Pack (A40: promoted parameters, sockets from the boundary wires, semver, help) and swapping in one instance; accepted with the rest as one undo step | `edit` |
 | `review_changes`, `discard_changes` | the staged changes as a list; drop them | – |
 | `accept_changes` | apply the staged changes as **one undo step**, cook, return errors | `accept` |
 | `screenshot_viewer`, `run_bench` | a PNG of an image node; per-node cook times against their budgets | – |
 | `write_kernel` | write `kernels/<name>.atk` (becomes `kernel.<name>`); compile errors come back | `files` |
 | `stage_list`, `stage_launch`, `stage_crossfader` | the Stage decks; launch a clip; move the crossfader | `stage` |
+| `cue` | an in-show cue: words to whitelisted parameter moves, quantised to the clock (see Cues) | `stage` |
 | `python_exec` | run Python in the project's interpreter | `python.exec` |
 
 **Staging (FR-G2).** Graph changes are made on a preview of the network. `review_changes` lists
 them; nothing reaches the show until they are accepted, by a person in the app, or by the agent
 itself only when the session has `accept` (`atidarla serve --auto-accept`, `atidarla agent`).
+A staged `create_pack` also carries the new Pack: a host accepting by hand takes both with
+`Agent::take_staged_with_packs` and applies them with `Workspace::apply_with_packs`, one undo step.
 
 ## Show Lock (FR-G3)
 
@@ -45,6 +49,40 @@ pack = "colour-grade"  # any promoted parameter of its instances
 While engaged, every graph edit is refused, expressions and bindings cannot be set, and only
 whitelisted parameters move, within their ranges, at once (each move one undo step). The red-team
 test is `crates/atd-agent/tests/show_lock.rs`.
+
+## Cues (FR-G5)
+
+`cue` turns a performer's words into parameter moves: `darker, slower on the next drop`, `a bit
+bigger now`, `set brightness to 0.4`, `level1.opacity at 50%`. Code: `crates/atd-agent/src/cues.rs`.
+
+- **Only the whitelist moves.** A cue moves numeric parameters on the Show Lock allow-list
+  (`[[show_lock.allow]]`), whether the lock is engaged or not, clamped to the narrower of the
+  parameter's declared range and the entry's `min`/`max`. Parameters driven by an expression or
+  a binding are left alone. A move is a node, a parameter and a number, so a cue can never be a
+  graph edit. With no allow-list, cues do nothing and say so.
+- **Lexicon first.** darker/brighter (brightness, exposure, gain, intensity, level, opacity),
+  slower/faster (speed, rate, tempo, frequency), calmer/wilder (amount, strength, intensity,
+  speed …), warmer/cooler (warmth, temperature), bigger/smaller (scale, size, radius, zoom),
+  `more`/`less <param>`, `set <param> to <n>` and `<node>.<param> at <n>%`. A relative step is a
+  quarter of the range (`a bit`: a tenth, `much`: a half). Naming a node limits the words to it.
+  Anything else (`delete everything`, unknown parameters) plans nothing and returns a note.
+- **A model, optionally.** When the lexicon finds nothing, `CueContext::plan_with` asks an `Llm`
+  for moves through one typed tool, `propose_moves`. Every proposal goes through the same check;
+  the rest are dropped with a note. The `cue` tool itself uses the lexicon only, so it never waits
+  on a model. A host that wants a model captures a `CueContext` (owned data), plans on a worker
+  thread and pushes the moves onto `Agent::cues`.
+- **On the clock.** In `atd_stage::beat_position` beats, a cue fires on the next boundary strictly
+  after now: `now` the next beat, by default the next bar (4), `next drop` 16, `next phrase` 32
+  (beat 5.3 → 8.0 for a bar). `quantum` overrides the words. A host calls
+  `Agent::fire_cues(ws, beat)` as the clock advances; each due move is checked again against the
+  show and the lock as they are then, and applied as one undo step (`Cue: level1.brightness =
+  0.6`). A newer cue for the same parameter replaces a pending one. `atidarla serve` fires cues
+  every frame from the first deck's clock (seconds at 120 BPM without one).
+
+**Why the `stage` scope.** Cues are performance moves, like launching a clip. Their own scope
+would add a permission with nothing new to protect, because the allow-list already bounds them.
+They are not refused by `stage = false` in `agent.toml`, which is about launches and the
+crossfader. The red-team test is `crates/atd-agent/tests/cues.rs`.
 
 ## `atidarla serve` (FR-H3)
 
