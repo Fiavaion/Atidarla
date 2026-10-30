@@ -69,7 +69,11 @@ pub struct Compared {
 }
 
 impl Compared {
-    fn compute(label: String, old: atd_format::Project, new: atd_format::Project) -> Self {
+    pub(crate) fn compute(
+        label: String,
+        old: atd_format::Project,
+        new: atd_format::Project,
+    ) -> Self {
         let diff = atd_format::diff::diff(&old, &new);
         let main = |p: &atd_format::Project| p.main().cloned().unwrap_or_default();
         Self {
@@ -218,25 +222,29 @@ impl DiffView {
         let Some(c) = &mut self.compared else {
             return;
         };
-        ui.weak(&c.label);
-        ui.horizontal_wrapped(|ui| {
-            for (mark, colour, text) in [
-                (Mark::Added, ADDED, "added"),
-                (Mark::Removed, REMOVED, "removed"),
-                (Mark::Changed, CHANGED, "changed"),
-                (Mark::Moved, CHANGED, "moved"),
-            ] {
-                ui.label(RichText::new(format!("{}{text}", mark.sign())).color(colour));
-            }
-        });
-        let fitted = &mut self.fitted;
-        let view = &mut self.view;
-        canvas_ui(ui, c, view, fitted);
-        ui.columns(2, |cols| {
-            change_list(&mut cols[0], c);
-            node_table(&mut cols[1], c);
-        });
+        compared_ui(ui, c, &mut self.view, &mut self.fitted);
     }
+}
+
+/// A comparison: its label, the legend, the marked canvas, the change list
+/// and the selected node's changes. Shared with the Assistant's review.
+pub(crate) fn compared_ui(ui: &mut Ui, c: &mut Compared, view: &mut View, fitted: &mut bool) {
+    ui.weak(&c.label);
+    ui.horizontal_wrapped(|ui| {
+        for (mark, colour, text) in [
+            (Mark::Added, ADDED, "added"),
+            (Mark::Removed, REMOVED, "removed"),
+            (Mark::Changed, CHANGED, "changed"),
+            (Mark::Moved, CHANGED, "moved"),
+        ] {
+            ui.label(RichText::new(format!("{}{text}", mark.sign())).color(colour));
+        }
+    });
+    canvas_ui(ui, c, view, fitted);
+    ui.columns(2, |cols| {
+        change_list(&mut cols[0], c);
+        node_table(&mut cols[1], c);
+    });
 }
 
 fn side_label(s: &Side) -> String {
