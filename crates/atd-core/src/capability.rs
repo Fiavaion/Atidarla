@@ -4,7 +4,8 @@
 //! writes them: `win+nvidia`, `mac`, `win+sdk:kinect`. Every token must hold
 //! on the running machine for the flag to be satisfied:
 //!
-//! - an OS token: `win`, `mac`, `linux` (at most one);
+//! - an OS token: `win`, `mac`, `linux`, or alternatives joined by `|`
+//!   (`win|mac`: either OS will do; at most one such token);
 //! - a GPU vendor token: `nvidia`, `amd`, `intel`, `apple` (at most one);
 //! - any number of `sdk:<name>` tokens for optional runtimes.
 //!
@@ -24,7 +25,8 @@ use crate::platform::{GpuVendor, Os, PlatformInfo};
 /// A conjunction of platform requirements, e.g. `win+nvidia`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct CapabilityFlag {
-    pub os: Option<Os>,
+    /// The OSes any one of which satisfies the flag; empty: any OS.
+    pub os: BTreeSet<Os>,
     pub vendor: Option<GpuVendor>,
     pub sdks: BTreeSet<String>,
 }
@@ -45,7 +47,7 @@ pub enum CapabilityParseError {
 impl CapabilityFlag {
     /// True when every token of the flag holds on `platform`.
     pub fn is_satisfied_by(&self, platform: &PlatformInfo) -> bool {
-        self.os.is_none_or(|os| os == platform.os)
+        (self.os.is_empty() || self.os.contains(&platform.os))
             && self
                 .vendor
                 .is_none_or(|vendor| vendor == platform.gpu_vendor)
@@ -70,19 +72,26 @@ impl FromStr for CapabilityFlag {
                 flag.sdks.insert(sdk.to_owned());
                 continue;
             }
-            let os = match token {
-                "win" => Some(Os::Windows),
-                "mac" => Some(Os::MacOs),
-                "linux" => Some(Os::Linux),
-                _ => None,
-            };
-            if let Some(os) = os {
-                if flag.os.replace(os).is_some() {
+            let mut oses = BTreeSet::new();
+            for alt in token.split('|').map(str::trim) {
+                match alt {
+                    "win" => oses.insert(Os::Windows),
+                    "mac" => oses.insert(Os::MacOs),
+                    "linux" => oses.insert(Os::Linux),
+                    _ if token.contains('|') => {
+                        return Err(CapabilityParseError::UnknownToken(alt.to_owned()));
+                    }
+                    _ => break,
+                };
+            }
+            if !oses.is_empty() {
+                if !flag.os.is_empty() {
                     return Err(CapabilityParseError::Conflict {
                         kind: "OS",
                         flag: s.to_owned(),
                     });
                 }
+                flag.os = oses;
                 continue;
             }
             let vendor = match token {
@@ -106,8 +115,9 @@ impl FromStr for CapabilityFlag {
 impl fmt::Display for CapabilityFlag {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut tokens: Vec<String> = Vec::new();
-        if let Some(os) = self.os {
-            tokens.push(os.token().to_owned());
+        if !self.os.is_empty() {
+            let alts: Vec<&str> = self.os.iter().map(|os| os.token()).collect();
+            tokens.push(alts.join("|"));
         }
         if let Some(vendor) = self.vendor {
             tokens.push(vendor.token().to_owned());
@@ -184,6 +194,8 @@ mod tests {
             "win+sdk:kinect",
             "nvidia",
             "linux+amd+sdk:a+sdk:b",
+            "win|mac",
+            "win|mac+apple",
         ] {
             let flag: CapabilityFlag = s.parse().unwrap();
             assert_eq!(flag.to_string(), s);
@@ -210,6 +222,13 @@ mod tests {
             Err(CapabilityParseError::Conflict { .. })
         ));
         assert!(matches!(
+            "win|mac+linux".parse::<CapabilityFlag>(),
+            Err(CapabilityParseError::Conflict { .. })
+        ));
+        assert!(
+            matches!("win|cuda".parse::<CapabilityFlag>(), Err(CapabilityParseError::UnknownToken(t)) if t == "cuda")
+        );
+        assert!(matches!(
             "nvidia+amd".parse::<CapabilityFlag>(),
             Err(CapabilityParseError::Conflict { .. })
         ));
@@ -225,6 +244,15 @@ mod tests {
         assert!(flag.is_satisfied_by(&platform(Os::Windows, GpuVendor::Nvidia)));
         assert!(!flag.is_satisfied_by(&platform(Os::Windows, GpuVendor::Amd)));
         assert!(!flag.is_satisfied_by(&platform(Os::MacOs, GpuVendor::Apple)));
+        assert!(!flag.is_satisfied_by(&platform(Os::Linux, GpuVendor::Nvidia)));
+    }
+
+    #[test]
+    fn os_alternatives_accept_any_listed_os() {
+        let flag: CapabilityFlag = "mac | win".parse().unwrap();
+        assert_eq!(flag.to_string(), "win|mac");
+        assert!(flag.is_satisfied_by(&platform(Os::Windows, GpuVendor::Amd)));
+        assert!(flag.is_satisfied_by(&platform(Os::MacOs, GpuVendor::Apple)));
         assert!(!flag.is_satisfied_by(&platform(Os::Linux, GpuVendor::Nvidia)));
     }
 

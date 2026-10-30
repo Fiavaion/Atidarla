@@ -75,3 +75,9 @@ Set `ATD_PYTHON` to choose the interpreter the AI Host tests spawn (default: `py
 ## Licence
 
 Dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option. GPL and non-commercial components are kept out of process or in optional plugins (PRD §10). No model weights are ever bundled.
+
+Third-party code built into Atidarla binaries (not vendored; fetched and built from source at build time):
+
+| Component | Used for | Licence |
+|---|---|---|
+| [Syphon-Framework](https://github.com/Syphon/Syphon-Framework) (macOS) | Share In/Out over Syphon (`atd-interop::syphon`) | BSD-3-Clause, [`third-party/Syphon/License.txt`](third-party/Syphon/License.txt); ship this notice with binary builds |
