@@ -596,6 +596,124 @@ fn render_mesh(gpu: &GpuContext) -> anyhow::Result<Case> {
     })
 }
 
+/// PT-7 groundwork (PRD §8, M3 AC3): frames from a clip launch (an edit
+/// of a Layer's `target`) to the new clip in the layer's output, with a cut
+/// and no quantise, at 1920×1080. Eight clips cook every frame (an LFO
+/// animates the noise ones); the measured slots alternate between two
+/// constants so the switch shows in one pixel. The PT-7 targets (≤ 1 frame
+/// for HAP, ≤ 3 for hardware H.264/H.265) need Movie In clips and the RTX
+/// 4070 lab PC; this case measures the layer itself.
+fn pt7_launch_cut(gpu: &GpuContext) -> anyhow::Result<Case> {
+    use atd_core::graph::{Edit, Endpoint, Node, Param, Wire};
+    use atd_gpu::engine::{Engine, EngineConfig, OpLibrary};
+    use serde_json::json;
+
+    let mut library = OpLibrary::default();
+    atd_ops_img::library(&mut library);
+    atd_ops_sig::library(&mut library);
+    let (w, h) = (1920, 1080);
+    let mut engine = Engine::new(
+        gpu.device.clone(),
+        gpu.queue.clone(),
+        crate::builtin_registry(),
+        library,
+        EngineConfig {
+            width: w,
+            height: h,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+        },
+    );
+    let (layer, lfo) = (engine.alloc_id(), engine.alloc_id());
+    let mut edits = vec![
+        Edit::AddNode {
+            node: Node::new(layer, "img.layer", "layer1"),
+        },
+        Edit::AddNode {
+            node: Node::new(lfo, "sig.lfo", "lfo1"),
+        },
+    ];
+    let colours = [[1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0]];
+    for slot in 0..8usize {
+        let id = engine.alloc_id();
+        let (ty, param, value) = match colours.get(slot) {
+            Some(c) => ("img.constant", "colour", Param::constant(json!(c))),
+            None => ("img.noise", "z", Param::bound(json!(0.0), lfo, "lfo")),
+        };
+        edits.push(Edit::AddNode {
+            node: Node::new(id, ty, format!("clip{slot}")),
+        });
+        edits.push(Edit::SetParam {
+            node: id,
+            param: param.into(),
+            value: Some(value),
+        });
+        edits.push(Edit::Connect {
+            wire: Wire::new(
+                Endpoint::new(id, "out"),
+                Endpoint::new(layer, format!("clip{slot}")),
+            ),
+        });
+    }
+    engine.edit("pt7", edits).context("building the layer")?;
+    let target = |slot: usize| Edit::SetParam {
+        node: layer,
+        param: "target".into(),
+        value: Some(Param::constant(json!(slot))),
+    };
+    // The centre pixel's red channel tells the two measured clips apart.
+    let centre_red = |engine: &Engine| -> anyhow::Result<u8> {
+        let tex = engine.result(layer).context("the layer has no result")?;
+        let px = atd_interop::readback::read_rgba8(engine.device(), engine.queue(), tex)?;
+        let i = ((h / 2 * w + w / 2) * 4) as usize;
+        Ok(px[i])
+    };
+    let mut t = 0.0;
+    for _ in 0..30 {
+        engine.cook_frame(Some(layer), t)?;
+        t += 1.0 / 60.0;
+    }
+    let launches = 20;
+    let (mut worst, mut ms) = (0usize, Vec::new());
+    for i in 0..launches {
+        let slot = i % 2;
+        let start = Instant::now();
+        engine.edit("launch", [target(slot)])?;
+        let mut frames = 0;
+        loop {
+            engine.cook_frame(Some(layer), t)?;
+            let _ = engine.device().poll(wgpu::PollType::wait_indefinitely());
+            t += 1.0 / 60.0;
+            frames += 1;
+            if frames == 1 {
+                ms.push(start.elapsed().as_secs_f64() * 1e3);
+            }
+            if (centre_red(&engine)? > 128) == (slot == 0) {
+                break;
+            }
+            anyhow::ensure!(frames < 30, "the new clip never appeared");
+        }
+        worst = worst.max(frames);
+        // A few frames on the clip before the next launch.
+        for _ in 0..3 {
+            engine.cook_frame(Some(layer), t)?;
+            t += 1.0 / 60.0;
+        }
+    }
+    if let Some(e) = engine.error(layer) {
+        anyhow::bail!("the layer failed: {e}");
+    }
+    ms.sort_by(f64::total_cmp);
+    let p50 = ms[ms.len() / 2];
+    Ok(Case {
+        id: "pt7.launch_cut",
+        status: Status::Ok,
+        ms: Some(p50),
+        note: Some(format!(
+            "{launches} launches (cut, quantise off) on a layer with 8 clips at {w}×{h}: the new clip is in the output {worst} frame(s) after the edit at worst (1 = the next cook); launch frame p50 {p50:.2} ms including GPU completion. PT-7 targets (HAP ≤ 1, H.264/H.265 ≤ 3 frames) need Movie In clips on the RTX 4070"
+        )),
+    })
+}
+
 pub fn run(out: Option<&Path>, use_gpu: bool) -> anyhow::Result<()> {
     let mut platform = PlatformInfo::host();
     let mut adapter = None;
@@ -639,6 +757,12 @@ pub fn run(out: Option<&Path>, use_gpu: bool) -> anyhow::Result<()> {
                         note: Some(format!("{err:#}")),
                     },
                 });
+                cases.push(pt7_launch_cut(&gpu).unwrap_or_else(|err| Case {
+                    id: "pt7.launch_cut",
+                    status: Status::Error,
+                    ms: None,
+                    note: Some(format!("{err:#}")),
+                }));
                 cases.push(render_mesh(&gpu).unwrap_or_else(|err| Case {
                     id: "render.mesh_1m",
                     status: Status::Error,
