@@ -43,3 +43,4 @@ All platforms.
 - [Simulations](../../../examples/simulations.atidarla/) — `orbit`
 - [Stage deck](../../../examples/stage-deck.atidarla/) — `drift`, `pick`
 - [Texture sharing](../../../examples/texture-sharing.atidarla/) — `drift`
+- [Two outputs](../../../examples/two-outputs.atidarla/) — `drift`

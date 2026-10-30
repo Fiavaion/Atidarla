@@ -38,3 +38,4 @@ All platforms.
 - [Render Textures](../../../examples/render-textures.atidarla/) — `sphere_look`
 - [Stage deck](../../../examples/stage-deck.atidarla/) — `sunset`, `glow_ramp`
 - [Time effects](../../../examples/time-effects.atidarla/) — `columns`
+- [Two outputs](../../../examples/two-outputs.atidarla/) — `sky`

@@ -472,7 +472,7 @@ impl OutputMapper {
             }
         };
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("atd-output-map"),
+            label: None,
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: &self.targets[target].1,
                 depth_slice: None,

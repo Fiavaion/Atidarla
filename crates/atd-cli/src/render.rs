@@ -471,6 +471,9 @@ pub fn classify(type_id: &str) -> Option<Class> {
         "pnt.emitter" | "pnt.solver" => Stateful,
         "pnt.particles" => Stateful,
         "img.render" | "msh.platonic" => Pure,
+        // Maps its input into the output image; the native window is the
+        // app's, so a render (and `check`) produces the mapped image.
+        "cmp.window" => Pure,
         "mat.line" | "mat.matcap" | "mat.pbr" | "mat.point_sprite" | "mat.toon" | "mat.unlit" => {
             Pure
         }
@@ -767,6 +770,28 @@ mod tests {
             "{:?}",
             a.engine.status(shapes)
         );
+    }
+
+    /// Both outputs of the two-outputs example (`cmp.window`, slices, warps,
+    /// masks, soft edges) render to the same frames twice, at the windows'
+    /// own resolution.
+    #[test]
+    fn two_renders_of_each_output_are_identical() {
+        let Some(mut a) = renderer() else { return };
+        let mut b = renderer().unwrap();
+        assert_eq!(classify("cmp.window"), Some(Class::Pure));
+        let dir = example("two-outputs");
+        for node in ["left", "right"] {
+            let o = RenderOptions {
+                node: Some(node.into()),
+                ..opts(0..8)
+            };
+            a.load(&dir, &o).unwrap();
+            b.load(&dir, &o).unwrap();
+            let (fa, fb) = (render(&mut a, 0..8), render(&mut b, 0..8));
+            assert_eq!(fa, fb, "{node}");
+            assert_ne!(fa[0].1, fa[7].1, "{node} animates");
+        }
     }
 
     /// The Python operators example (`docs/python-ops.md`) renders to the
