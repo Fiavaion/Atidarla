@@ -30,6 +30,7 @@ All platforms.
 
 ## Examples
 
+- [Beat clock](../../../examples/beat-clock.atidarla/) — `colour`
 - [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `colour`
 - [Pack: Audio Pulse](../../../examples/pack-audio-pulse.atidarla/) — `colour`
 - [Pack: LFO Bank](../../../examples/pack-lfo-bank.atidarla/) — `hue`

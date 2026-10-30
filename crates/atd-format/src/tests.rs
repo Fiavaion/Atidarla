@@ -498,3 +498,43 @@ fn project_errors_name_the_file() {
     assert!(save(&dir, &p).is_err());
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// A network saved before the beat clock grew tap, sources and pulses
+/// (M3 FR-S4): it still loads, validates, keeps the parameters it had and
+/// saves back unchanged (rule 8).
+const OLD_BEAT: &str = r#"# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 2
+
+[[node]]
+id = 0
+name = "clock"
+type = "sig.beat"
+pos = [0.0, 0.0]
+params.beats_per_bar = 3
+params.bpm = 90.0
+
+[[node]]
+id = 1
+name = "bar_phase"
+type = "sig.select"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+params.channels = "bar_phase"
+"#;
+
+#[test]
+fn a_network_saved_before_the_beat_clock_grew_still_loads() {
+    let reg = registry();
+    let net = network_from_str(OLD_BEAT).unwrap().validated(&reg).unwrap();
+    let clock = net.node_by_name("clock").unwrap();
+    assert_eq!(clock.params["bpm"].value, json!(90.0));
+    assert_eq!(clock.params["beats_per_bar"].value, json!(3));
+    assert!(!clock.params.contains_key("source"));
+    // The new parameters take their defaults: the internal clock.
+    assert_eq!(
+        net.param_value(&reg, clock.id, "source"),
+        Some(&json!("internal"))
+    );
+    assert_eq!(network_to_string(&net).unwrap(), OLD_BEAT);
+}

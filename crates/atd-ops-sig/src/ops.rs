@@ -74,6 +74,22 @@ pub(crate) fn noise1(t: f64, seed: i64) -> f32 {
 }
 
 const WAVES: &[&str] = &["sine", "triangle", "square", "ramp"];
+const SYNCS: &[&str] = &["off", "beats"];
+
+/// The clock input's position in beats (`beat` + `beat_phase`, the
+/// channels of `sig.beat`), if `sync` asks for it. `Ok(None)`: not synced.
+fn clock_beats(ctx: &SigCtx<'_>) -> Result<Option<f64>, String> {
+    if ctx.params.str("sync") != "beats" {
+        return Ok(None);
+    }
+    ctx.inputs
+        .get(0)
+        .and_then(|c| Some(f64::from(c.value("beat")?) + f64::from(c.value("beat_phase")?)))
+        .map(Some)
+        .ok_or_else(|| {
+            "sync needs a clock input with beat and beat_phase channels (Beat)".to_owned()
+        })
+}
 const MATH_OPS: &[&str] = &[
     "add", "subtract", "multiply", "divide", "maximum", "minimum",
 ];
@@ -116,7 +132,16 @@ struct Lfo;
 impl SigOp for Lfo {
     fn cook(&mut self, ctx: &mut SigCtx<'_>) -> Result<(), String> {
         let p = ctx.params;
-        let x = ctx.time * f64::from(p.f32("frequency")) + f64::from(p.f32("phase"));
+        // Synced, the frequency is in cycles per beat and the phase follows
+        // the clock's.
+        let at = match clock_beats(ctx) {
+            Ok(beats) => beats.unwrap_or(ctx.time),
+            Err(e) => {
+                ctx.output.set_single(&[], &[]);
+                return Err(e);
+            }
+        };
+        let x = at * f64::from(p.f32("frequency")) + f64::from(p.f32("phase"));
         let v = p.f32("offset") + p.f32("amplitude") * wave(p.str("waveform"), x);
         ctx.output.set_single(&["lfo"], &[v]);
         Ok(())
@@ -145,16 +170,44 @@ impl SigOp for Noise {
 
 #[derive(Default)]
 struct Timer {
+    /// Seconds, or beats when synced.
     elapsed: f64,
+    /// The clock's beat the count started from (synced).
+    origin: f64,
 }
 impl SigOp for Timer {
     fn cook(&mut self, ctx: &mut SigCtx<'_>) -> Result<(), String> {
         let p = ctx.params;
         let length = f64::from(p.f32("length")).max(1e-6);
-        if p.bool("reset") {
-            self.elapsed = 0.0;
-        } else if p.bool("play") {
-            self.elapsed += ctx.dt;
+        match clock_beats(ctx) {
+            Err(e) => {
+                ctx.output.set_single(&[], &[]);
+                return Err(e);
+            }
+            Ok(Some(beats)) => {
+                // Locked to the clock: the count is the clock's beats since
+                // the origin (0, so cycles line up with the bar, until Reset
+                // restarts the count at the current beat).
+                if p.bool("reset") {
+                    self.origin = beats;
+                } else if p.bool("play") {
+                    // A clock that rewinds (resync) takes the count with it.
+                    if beats < self.origin {
+                        self.origin = 0.0;
+                    }
+                } else {
+                    // Paused: hold the count while the clock goes on.
+                    self.origin = beats - self.elapsed;
+                }
+                self.elapsed = (beats - self.origin).max(0.0);
+            }
+            Ok(None) => {
+                if p.bool("reset") {
+                    self.elapsed = 0.0;
+                } else if p.bool("play") {
+                    self.elapsed += ctx.dt;
+                }
+            }
         }
         let seconds = if p.bool("loop") {
             self.elapsed % length
@@ -165,35 +218,6 @@ impl SigOp for Timer {
         ctx.output.set_single(
             &["seconds", "fraction", "cycles"],
             &[seconds as f32, (seconds / length) as f32, cycles as f32],
-        );
-        Ok(())
-    }
-}
-
-#[derive(Default)]
-struct Beat {
-    beats: f64,
-}
-impl SigOp for Beat {
-    fn cook(&mut self, ctx: &mut SigCtx<'_>) -> Result<(), String> {
-        let p = ctx.params;
-        if p.bool("reset") {
-            self.beats = 0.0;
-        } else {
-            // Integrating keeps the phase continuous when the tempo changes.
-            self.beats += ctx.dt * f64::from(p.f32("bpm")) / 60.0;
-        }
-        let per_bar = p.i64("beats_per_bar").max(1) as f64;
-        let beat = self.beats.floor();
-        let bar = (self.beats / per_bar).floor();
-        ctx.output.set_single(
-            &["beat", "beat_phase", "bar", "bar_phase"],
-            &[
-                beat as f32,
-                (self.beats - beat) as f32,
-                bar as f32,
-                ((self.beats / per_bar) - bar) as f32,
-            ],
         );
         Ok(())
     }
@@ -387,19 +411,21 @@ pub static DEFS: &[Def] = &[
             sig(
                 "lfo",
                 "LFO",
-                "A low-frequency oscillator: sine, triangle, square or ramp over time. Outputs channel `lfo`.",
-                &[],
+                "A low-frequency oscillator: sine, triangle, square or ramp over time, or over the beats of a clock. Outputs channel `lfo`.",
+                &["clock"],
                 vec![
                     ParamSchema::menu("waveform", "Waveform", WAVES, "sine")
                         .help("Shape of one cycle."),
                     ParamSchema::float("frequency", "Frequency", 1.0, None, None)
-                        .help("Cycles per second."),
+                        .help("Cycles per second; with Sync on beats, cycles per beat (0.25 = one cycle per bar of four)."),
                     ParamSchema::float("amplitude", "Amplitude", 1.0, None, None)
                         .help("Output = offset + amplitude × wave."),
                     ParamSchema::float("offset", "Offset", 0.0, None, None)
                         .help("Added to the scaled wave."),
                     ParamSchema::float("phase", "Phase", 0.0, None, None)
                         .help("Shift in cycles (0–1)."),
+                    ParamSchema::menu("sync", "Sync", SYNCS, "off")
+                        .help("`beats` locks the wave to the beats of the clock input (a Beat operator), so it stays in step through tempo changes, taps and resyncs."),
                 ],
                 true,
             )
@@ -435,41 +461,23 @@ pub static DEFS: &[Def] = &[
             sig(
                 "timer",
                 "Timer",
-                "Counts seconds while playing: `seconds`, `fraction` of the length and completed `cycles`.",
-                &[],
+                "Counts seconds while playing: `seconds`, `fraction` of the length and completed `cycles`. Synced, it counts the beats of a clock instead.",
+                &["clock"],
                 vec![
                     ParamSchema::float("length", "Length", 4.0, Some(0.0), None)
-                        .help("Cycle length in seconds."),
+                        .help("Cycle length in seconds; with Sync on beats, in beats (4 = one bar of four)."),
                     ParamSchema::toggle("loop", "Loop", true)
                         .help("Wrap around at the end instead of holding."),
                     ParamSchema::toggle("play", "Play", true).help("Advance the timer."),
                     ParamSchema::toggle("reset", "Reset", false)
                         .help("While on, holds the timer at zero."),
+                    ParamSchema::menu("sync", "Sync", SYNCS, "off")
+                        .help("`beats` counts the beats of the clock input (a Beat operator) instead of seconds, so cycles stay in step with the bar; the `seconds` channel then reads in beats. Reset restarts the count at the current beat."),
                 ],
                 true,
             )
         },
         create: || Box::<Timer>::default(),
-    },
-    Def {
-        schema: || {
-            sig(
-                "beat",
-                "Beat",
-                "A tempo clock: `beat` count, `beat_phase` 0–1 within the beat, `bar` count and `bar_phase`.",
-                &[],
-                vec![
-                    ParamSchema::float("bpm", "BPM", 120.0, Some(0.0), Some(999.0))
-                        .help("Tempo in beats per minute; changes keep the phase continuous."),
-                    ParamSchema::int("beats_per_bar", "Beats per Bar", 4, Some(1), Some(64))
-                        .help("Beats in one bar."),
-                    ParamSchema::toggle("reset", "Reset", false)
-                        .help("While on, holds the clock at beat zero."),
-                ],
-                true,
-            )
-        },
-        create: || Box::<Beat>::default(),
     },
     Def {
         schema: || {
@@ -870,36 +878,157 @@ mod tests {
         );
     }
 
+    fn clock_channels(beat: f32, phase: f32) -> Channels {
+        Channels::single(&["beat", "beat_phase", "bar"], &[beat, phase, 0.0])
+    }
+
     #[test]
-    fn beat_counts_and_keeps_phase_across_tempo_changes() {
+    fn synced_lfo_is_phase_locked_to_the_clock_beat() {
         let mut h = Harness::new();
-        let n = h.node("beat", &[("bpm", json!(120.0))]);
-        let mut op = create("beat");
-        let mut out = Channels::default();
-        for _ in 0..5 {
-            out = h.run(op.as_mut(), n, &[], 0.0, 0.25); // 1.25 s at 2 beats/s
+        let clock = h.source(&[]);
+        let n = h.node("lfo", &[("sync", json!("beats"))]);
+        let mut op = create("lfo");
+        // One cycle per beat: the wave is the clock's beat phase, whatever
+        // the beat count, the wall time and the frame length.
+        for (beat, phase, time, dt) in [
+            (0.0, 0.25, 0.0, 0.0),
+            (7.0, 0.25, 123.4, 0.016),
+            (4096.0, 0.25, 9.0, 1.0),
+        ] {
+            h.sig.insert(clock, clock_channels(beat, phase));
+            let out = h.run(op.as_mut(), n, &[Some(clock)], time, dt);
+            assert!(
+                approx(out.value("lfo").unwrap(), 1.0),
+                "sine peaks a quarter beat in: {:?}",
+                out.value("lfo")
+            );
         }
-        assert!(
-            approx(out.value("beat").unwrap(), 2.0)
-                && approx(out.value("beat_phase").unwrap(), 0.5)
-        );
+        // A quarter the frequency: one cycle per bar of four beats, so the
+        // same beat phase on beats 0 and 4 gives the same value and beat 1
+        // is a quarter of the way round.
         h.net
             .apply(
                 &h.reg,
                 Edit::SetParam {
                     node: n,
-                    param: "bpm".into(),
-                    value: Some(Param::constant(json!(60.0))),
+                    param: "frequency".into(),
+                    value: Some(Param::constant(json!(0.25))),
                 },
             )
             .unwrap();
-        out = h.run(op.as_mut(), n, &[], 0.0, 0.25);
+        let at = |h: &mut Harness, op: &mut dyn SigOp, beat: f32| {
+            h.sig.insert(clock, clock_channels(beat, 0.0));
+            h.run(op, n, &[Some(clock)], 0.0, 0.0).value("lfo").unwrap()
+        };
+        assert!(approx(
+            at(&mut h, op.as_mut(), 0.0),
+            at(&mut h, op.as_mut(), 4.0)
+        ));
+        assert!(approx(at(&mut h, op.as_mut(), 1.0), 1.0));
+        // A resync (the beat count drops to 0) takes the wave with it.
+        assert!(approx(at(&mut h, op.as_mut(), 0.0), 0.0));
+    }
+
+    #[test]
+    fn synced_lfo_needs_a_clock_and_unsynced_ignores_one() {
+        let mut h = Harness::new();
+        let clock = h.source(&[("beat", 3.0), ("beat_phase", 0.5)]);
+        let synced = h.node("lfo", &[("sync", json!("beats"))]);
+        let mut out = Channels::default();
+        let mut ctx = SigCtx {
+            inputs: SigInputs::new(&[], &h.sig),
+            output: &mut out,
+            params: Params::new(&h.net, &h.reg, &h.sig, synced),
+            time: 0.0,
+            dt: 0.0,
+            frame: 0,
+        };
+        let err = create("lfo").cook(&mut ctx).unwrap_err();
+        assert!(err.contains("clock input"), "{err}");
+        // Off: the clock input is not read, as before.
+        let free = h.node("lfo", &[("frequency", json!(1.0))]);
+        let a = h.run(create("lfo").as_mut(), free, &[Some(clock)], 0.25, 0.0);
+        let b = h.run(create("lfo").as_mut(), free, &[], 0.25, 0.0);
+        assert_eq!(a.value("lfo"), b.value("lfo"));
+        assert!(approx(a.value("lfo").unwrap(), 1.0));
+    }
+
+    #[test]
+    fn synced_timer_counts_clock_beats_in_step_with_the_bar() {
+        let mut h = Harness::new();
+        let clock = h.source(&[]);
+        let n = h.node("timer", &[("sync", json!("beats")), ("length", json!(4.0))]);
+        let mut op = create("timer");
+        let run = |h: &mut Harness, op: &mut dyn SigOp, beat: f32, phase: f32| {
+            h.sig.insert(clock, clock_channels(beat, phase));
+            h.run(op, n, &[Some(clock)], 0.0, 0.016)
+        };
+        // Joined mid-song: the cycles line up with the bar, not with when
+        // the timer started.
+        let out = run(&mut h, op.as_mut(), 6.0, 0.5);
         assert!(
-            approx(out.value("beat_phase").unwrap(), 0.75),
-            "phase continues: {:?}",
-            out.value("beat_phase")
+            approx(out.value("seconds").unwrap(), 2.5) && approx(out.value("cycles").unwrap(), 1.0)
         );
-        assert!(approx(out.value("bar_phase").unwrap(), 2.75 / 4.0));
+        assert!(approx(out.value("fraction").unwrap(), 0.625));
+        // Paused: holds while the clock goes on.
+        h.net
+            .apply(
+                &h.reg,
+                Edit::SetParam {
+                    node: n,
+                    param: "play".into(),
+                    value: Some(Param::constant(json!(false))),
+                },
+            )
+            .unwrap();
+        let held = run(&mut h, op.as_mut(), 8.0, 0.0);
+        assert!(approx(held.value("seconds").unwrap(), 2.5));
+        // Resumed, it carries on from the held count in step with the clock.
+        h.net
+            .apply(
+                &h.reg,
+                Edit::SetParam {
+                    node: n,
+                    param: "play".into(),
+                    value: Some(Param::constant(json!(true))),
+                },
+            )
+            .unwrap();
+        let out = run(&mut h, op.as_mut(), 9.0, 0.0);
+        assert!(approx(out.value("seconds").unwrap(), 3.5));
+        // Reset restarts the count at the current beat.
+        h.net
+            .apply(
+                &h.reg,
+                Edit::SetParam {
+                    node: n,
+                    param: "reset".into(),
+                    value: Some(Param::constant(json!(true))),
+                },
+            )
+            .unwrap();
+        assert!(approx(
+            run(&mut h, op.as_mut(), 10.0, 0.0)
+                .value("seconds")
+                .unwrap(),
+            0.0
+        ));
+        h.net
+            .apply(
+                &h.reg,
+                Edit::SetParam {
+                    node: n,
+                    param: "reset".into(),
+                    value: Some(Param::constant(json!(false))),
+                },
+            )
+            .unwrap();
+        assert!(approx(
+            run(&mut h, op.as_mut(), 11.0, 0.0)
+                .value("seconds")
+                .unwrap(),
+            1.0
+        ));
     }
 
     #[test]

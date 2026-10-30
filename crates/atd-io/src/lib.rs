@@ -32,6 +32,8 @@ pub mod dmx;
 pub mod image;
 pub mod input;
 pub mod midi;
+pub mod midi_clock;
+pub mod midi_clock_out;
 pub mod osc;
 pub mod timecode;
 pub mod video;

@@ -27,7 +27,7 @@ impl Rng {
 fn random_value(name: &str, kind: &ParamKind, rng: &mut Rng) -> Option<Value> {
     // Keep I/O on safe targets.
     match name {
-        "device" | "midi_device" => return Some(json!("virtual")),
+        "device" | "midi_device" | "out_device" => return Some(json!("virtual")),
         "audio_device" => return Some(json!("test-tone")),
         "host" => return Some(json!("127.0.0.1")),
         "port" => return Some(json!(0)),
