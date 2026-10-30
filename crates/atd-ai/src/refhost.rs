@@ -178,8 +178,8 @@ fn session(conn: TcpStream, opts: &RefHostOptions, started: Instant, frames: &At
                     "vram_mb": null,
                     "runtimes": ["cpu-reference"],
                     "transports": ["shm", "inline"],
-                    "adapters": ["builtin"],
-                    "models": ["builtin.echo", "builtin.invert"],
+                    "adapters": ["builtin", "diffusion.sd"],
+                    "models": ["builtin.echo", "builtin.invert", "builtin.prompts"],
                 }))
             }
             "host.health" => Ok(json!({
@@ -191,7 +191,7 @@ fn session(conn: TcpStream, opts: &RefHostOptions, started: Instant, frames: &At
             })),
             "model.load" => {
                 let m = p["model_id"].as_str().unwrap_or_default().to_owned();
-                if m == "builtin.invert" || m == "builtin.echo" {
+                if m == "builtin.invert" || m == "builtin.echo" || m == "builtin.prompts" {
                     let mut models = models.lock().expect("models");
                     if !models.contains(&m) {
                         models.push(m.clone());
@@ -242,9 +242,14 @@ fn frame(job: &Job, ring: Option<&mut FrameRing>, models: &[String]) -> FrameOut
     );
     let len = (w * h * 4) as usize;
     let invert = model == "builtin.invert";
+    // `builtin.prompts` stands in for a diffusion model in tests: it paints
+    // the weighted mix of a colour per prompt, so a prompt blend shows.
+    let prompted = (model == "builtin.prompts").then(|| prompt_colour(&p["params"]["prompts"]));
     let apply = |src: &[u8], dst: &mut [u8]| {
         for (d, s) in dst.chunks_exact_mut(4).zip(src.chunks_exact(4)) {
-            if invert {
+            if let Some(c) = prompted {
+                d.copy_from_slice(&c);
+            } else if invert {
                 d.copy_from_slice(&[255 - s[0], 255 - s[1], 255 - s[2], s[3]]);
             } else {
                 d.copy_from_slice(s);
@@ -281,6 +286,28 @@ fn frame(job: &Job, ring: Option<&mut FrameRing>, models: &[String]) -> FrameOut
         }
         _ => Err((codes::BAD_SLOT, "frame size does not match".into())),
     }
+}
+
+/// The weighted mix of each prompt's colour (an FNV-1a hash of its text).
+fn prompt_colour(prompts: &Value) -> [u8; 4] {
+    let mut sum = [0.0f64; 3];
+    let mut total = 0.0;
+    for p in prompts.as_array().into_iter().flatten() {
+        let w = p["weight"].as_f64().unwrap_or(0.0);
+        let mut h: u32 = 0x811c_9dc5;
+        for b in p["text"].as_str().unwrap_or_default().bytes() {
+            h = (h ^ u32::from(b)).wrapping_mul(0x0100_0193);
+        }
+        for (i, s) in sum.iter_mut().enumerate() {
+            *s += w * f64::from((h >> (8 * i)) as u8);
+        }
+        total += w;
+    }
+    if total <= 0.0 {
+        return [0, 0, 0, 255];
+    }
+    let c = |i: usize| (sum[i] / total).round() as u8;
+    [c(0), c(1), c(2), 255]
 }
 
 /// Exits the process once `pid` is gone (checked every second), so a host

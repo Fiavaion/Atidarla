@@ -18,6 +18,8 @@
 //! (`atd-ops-img`), so launches are undoable, saved, recordable and
 //! deterministic offline.
 
+pub mod ai;
+
 use std::collections::BTreeMap;
 
 use atd_core::graph::{Edit, Network, Node, NodeId, Param};

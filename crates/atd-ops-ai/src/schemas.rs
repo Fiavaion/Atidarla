@@ -66,7 +66,7 @@ fn common(route: &str, size: i64) -> Vec<ParamSchema> {
         ),
         ParamSchema::float("effect", "Effect", 0.5, Some(0.0), Some(1.0))
             .help("Strength of the desaturate-and-tint effect on the input shown before the first result (and when stale under `passthrough`)."),
-        ParamSchema::int("in_flight", "In Flight", 2, Some(1), Some(4))
+        ParamSchema::int("in_flight", "In Flight", 1, Some(1), Some(4))
             .help("Frames sent to the host at once. More hides network latency; fewer keeps the result closer to the input."),
         ParamSchema::float("budget_ms", "Latency Budget", 0.0, Some(0.0), Some(5000.0))
             .help("When the round trip stays above this many milliseconds for 3 s, the node moves to the next host on its route; 0 turns it off."),
@@ -74,7 +74,9 @@ fn common(route: &str, size: i64) -> Vec<ParamSchema> {
 }
 
 fn prompt_params() -> Vec<ParamSchema> {
-    let mut v = Vec::new();
+    let mut v = vec![ParamSchema::string("prompts_from", "Prompts From", "").help(
+        "The name of a Stage deck's Mixer: the Prompt Clips playing on its crossfader sides A and B become prompts 1 and 2, blended by the crossfader, with the leading clip's seed, negative and LoRA (AI clips). Empty: the prompts below.",
+    )];
     for i in 0..PROMPTS {
         let n = i + 1;
         let default = if i == 0 { "a watercolour painting" } else { "" };

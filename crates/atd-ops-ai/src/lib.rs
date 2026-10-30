@@ -2,6 +2,7 @@
 //! asynchronously and reach the frame loop only through the Output
 //! Governor, plus Control Prep, which prepares control images on the GPU.
 
+pub mod clip;
 pub mod control;
 pub mod node;
 pub mod schemas;
@@ -17,9 +18,11 @@ pub fn register(registry: &mut Registry) {
             .register(schemas::schema(type_id))
             .expect("AI operator schemas are valid and unique");
     }
-    registry
-        .register(control::schema())
-        .expect("Control Prep schema is valid");
+    for schema in [control::schema(), clip::schema()] {
+        registry
+            .register(schema)
+            .expect("AI operator schemas are valid and unique");
+    }
 }
 
 /// Registers this family's GPU implementations, running on the
@@ -37,6 +40,7 @@ pub fn library_with(library: &mut OpLibrary, supervisor: &'static Supervisor) {
         });
     }
     library.add(control::schema().type_id, control::create);
+    library.add(clip::schema().type_id, clip::create);
 }
 
 #[cfg(test)]
@@ -47,7 +51,7 @@ mod tests {
     fn schemas_register_with_budgets_and_help() {
         let mut registry = Registry::default();
         register(&mut registry);
-        assert_eq!(registry.iter().count(), schemas::HOSTED.len() + 1);
+        assert_eq!(registry.iter().count(), schemas::HOSTED.len() + 2);
         for op in registry.iter() {
             assert!(op.type_id.starts_with("ai."), "{}", op.type_id);
             assert!(op.cook_budget_us > 0, "{}", op.type_id);

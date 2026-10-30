@@ -566,7 +566,7 @@ pub fn classify(type_id: &str) -> Option<Class> {
         // wire.
         return Some(Waits);
     }
-    if type_id == "ai.control_prep" {
+    if type_id == "ai.control_prep" || type_id == "ai.prompt" {
         return Some(Pure);
     }
     if type_id.starts_with("ai.") {
