@@ -4,6 +4,7 @@
 
 mod attributes;
 mod fields;
+mod foreach;
 mod neighbours;
 mod shaping;
 mod solver;

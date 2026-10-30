@@ -212,15 +212,44 @@ fn batch_chains_steady_state_allocations() {
     n.wire(age, solver, "prev");
     let r4 = n.node(&mut e, "img.render_points", &[]);
     n.wire(age, r4, "geo");
+    // 4. For-Each blocks: four pieces with a deformer and colours keyed by
+    // the pass; eight counted passes of an animated wave.
+    let chunks = n.chain(&mut e, column, "pnt.piece", &[("size", json!(2048))]);
+    let begin = n.chain(
+        &mut e,
+        chunks,
+        "pnt.foreach",
+        &[("mode", json!("pieces")), ("iterations", json!(4))],
+    );
+    let tint = n.chain(
+        &mut e,
+        begin,
+        "pnt.randomize",
+        &[("key", json!("iteration"))],
+    );
+    let lean = n.chain(&mut e, tint, "pnt.twist", &[]);
+    n.animate(lean, "angle", "45 * sin(time)");
+    let end = n.chain(&mut e, lean, "pnt.foreach_end", &[]);
+    n.wire(end, begin, "end");
+    let begin2 = n.chain(&mut e, sphere, "pnt.foreach", &[("iterations", json!(8))]);
+    let ripple = n.chain(&mut e, begin2, "pnt.wave", &[]);
+    n.animate(ripple, "phase", "time * 45");
+    let end2 = n.chain(&mut e, ripple, "pnt.foreach_end", &[]);
+    n.wire(end2, begin2, "end");
+    let r5 = n.node(&mut e, "img.render_points", &[]);
+    n.wire(end, r5, "geo");
+    let r6 = n.node(&mut e, "img.render_points", &[]);
+    n.wire(end2, r6, "geo");
     e.edit("chains", n.edits).unwrap();
-    let out = [r1, r2, r3, r4];
+    let out = [r1, r2, r3, r4, r5, r6];
     let mut t = 0.0;
     for _ in 0..40 {
         e.cook(&out, t).unwrap();
         t += 1.0 / 60.0;
     }
     for node in [
-        sys, emit, floor, colour, cut, rand, nrm, links, solver, age, r1, r2, r3, r4,
+        sys, emit, floor, colour, cut, rand, nrm, links, solver, age, begin, end, begin2, end2, r1,
+        r2, r3, r4, r5, r6,
     ] {
         assert_eq!(e.error(node), None);
     }

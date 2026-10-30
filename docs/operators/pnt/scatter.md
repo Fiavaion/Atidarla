@@ -37,5 +37,6 @@ All platforms.
 
 - [PNT Constellation](../../../examples/pnt-constellation.atidarla/) — `sphere`, `field`
 - [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `column`, `ring`
+- [PNT For-Each](../../../examples/pnt-foreach.atidarla/) — `column`, `strip`
 - [PNT Fountain](../../../examples/pnt-fountain.atidarla/) — `ring`
 - [PNT Solver](../../../examples/pnt-solver.atidarla/) — `disk`

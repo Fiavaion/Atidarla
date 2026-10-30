@@ -72,22 +72,60 @@ loop's body makes one pass per outer pass.
 Design §3.2: "M2 For-Each runs a body of per-element PNT ops once over all elements, with the
 piece or iteration index as an attribute" (RESEARCH §2.3: compiled to one dispatch).
 
-**Built: `pnt.piece` (For-Each Begin)** writes a `piece` number to every point: by chunks of
-N consecutive points, by buckets of an attribute's value (for example `copynum` from Copy to
-Points, or a coordinate), or by cells of a spatial grid. The body is then the ordinary
-operators run once over all points, and those that take a per-point key act per piece:
-**Randomize** gains Key Attribute (values seeded by `piece`, so every piece gets its own
-random value, colour, scale…), and Group, Delete, Subset, Sort and Colour by Attribute already
-read any attribute. Per-piece parameters beyond these (a different rotation per piece, an
-expression of `@piece`) are the Kernel DSL's job (A12, Proposed).
+**Built: `pnt.piece`** writes a `piece` number to every point: by chunks of N consecutive
+points, by buckets of an attribute's value (for example `copynum` from Copy to Points, or a
+coordinate), or by cells of a spatial grid. Operators that take a per-point key then act per
+piece in one dispatch over all points: **Randomize** has Key Attribute (values seeded by
+`piece`), and Group, Delete, Subset, Sort and Colour by Attribute read any attribute.
 
-**Not built:** iterations ("repeat the body N times", unrolled into N dispatches per operator
-with per-iteration parameters at dynamic uniform offsets, as Sort already does for its
-stages), and running an MSH body per piece (left out of M2 by the design).
+**Built (2026-10-30): For-Each blocks, a body evaluated per pass.** Mark ratified For-Each
+loops for M2 on 2026-10-30. Where the draft was ambiguous (an "iteration" unrolled per
+operator with dynamic uniform offsets, or a body run per piece), the simplest option
+consistent with it was taken: the same engine loops as the Solver's sub-steps.
+
+- **`pnt.foreach` (For-Each, the Begin)**: inputs `in` and `end` (feedback). Wiring
+  `pnt.foreach_end`'s output into `end` closes the block, as a Solver's `prev` does, so the
+  engine knows the loop; Begin never reads `end`. Parameters: Mode (count, pieces),
+  Iterations (1 to 256, the bound) and Piece Attribute (`piece` by default).
+  `GeoOp::repeat` returns `Repeat::Iterations(n)`: the body cooks n times with the frame's
+  `dt`, each pass submitted on its own (its uniforms are its own).
+- **Pass k** gets the whole input (count) or the points whose piece attribute equals k,
+  compacted on the GPU (pieces: an integer scan, the count stays on the GPU; pieces numbered
+  n and up are left out, so grid-cell pieces, which are hashes, need the chunks or attribute
+  rule). Every point of pass k carries `iteration = k` (a `u32` attribute, also a detail
+  value), so the body differs per pass through operators keyed by an attribute: Randomize
+  keyed by `iteration`, Attribute Math reading it (fit to an offset, say), Group, Delete,
+  Colour by Attribute. Per-pass parameters through expressions (an `iteration` variable)
+  are not built: the expression language has no loop context yet, and the Kernel DSL (A12)
+  covers per-element code.
+- **Begin writes into buffers of its own** (made when the input's attributes or size change,
+  not per frame), handed to the body uniquely, so the body works in place and binds the same
+  buffers in every pass: no bind group per pass, whatever the count.
+- **`pnt.foreach_end` (For-Each End)** copies each pass's attributes after the previous
+  passes' (`copy_buffer_to_buffer`, no bind groups), and the pass's live count from its
+  header into a small table. After the last pass it outputs the merged geometry, pass 0
+  first: directly with a CPU count when every pass had one, else compacted by the copied
+  counts (a flags kernel over the passes' start offsets, then the shared `Compact`), so a
+  count never leaves the GPU. Its room is the first pass's size times the passes, grown (a
+  copy) if a later pass is larger. Attributes are the first non-empty pass's; a later pass
+  without one gives zeros; primitives and groups are not carried. Outside a block it passes
+  its input through.
+- Left out of M2, as designed: an MSH body per piece; loops nested in a loop's body (the
+  inner loop makes one pass per outer pass).
+
+Evidence: `tests/batch/foreach.rs` (count: twelve points from three passes, `P` shifted by
+the pass, `iteration` and `id` in pass order, the same every frame; pieces: pass k is piece
+k, GPU-counted; pieces beyond Iterations left out; a two-component piece attribute is a node
+error; End outside a block passes through), `tests/alloc_batch.rs` (a four-piece and an
+eight-pass block: no buffer, bind-group or texture creation after warm-up), the example
+`examples/pnt-foreach.atidarla`.
 
 ## Questions for Mark
 
 1. ~~Solver sub-steps~~: ratified 2026-10-30 and built (above), by engine loops instead of
    flatten-time unrolling.
-2. For-Each as "a piece attribute plus operators keyed by it" until the Kernel DSL: accept it
-   as M2's For-Each, or wait for A12?
+2. ~~For-Each~~: ratified 2026-10-30 and built (above) as blocks evaluated per pass; the
+   `piece` attribute with keyed operators remains for one-dispatch work.
+3. **Per-pass parameters by expression**: add an `iteration` variable to parameter
+   expressions (a change to the expression language in `atd-core`), or leave per-pass
+   variation to attribute-keyed operators and the Kernel DSL?

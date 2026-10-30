@@ -37,4 +37,5 @@ All platforms.
 
 ## Examples
 
+- [PNT For-Each](../../../examples/pnt-foreach.atidarla/) — `spread`, `place`
 - [PNT Solver](../../../examples/pnt-solver.atidarla/) — `warm`

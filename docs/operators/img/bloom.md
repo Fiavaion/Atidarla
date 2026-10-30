@@ -33,6 +33,7 @@ All platforms.
 - [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `glow`
 - [Particles](../../../examples/particles.atidarla/) — `glow`
 - [PNT Constellation](../../../examples/pnt-constellation.atidarla/) — `glow`
+- [PNT For-Each](../../../examples/pnt-foreach.atidarla/) — `glow`
 - [PNT Fountain](../../../examples/pnt-fountain.atidarla/) — `glow`
 - [PNT Solver](../../../examples/pnt-solver.atidarla/) — `glow`
 - [Render Solids](../../../examples/render-solids.atidarla/) — `bloom`
