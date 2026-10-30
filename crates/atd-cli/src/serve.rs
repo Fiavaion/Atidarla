@@ -224,6 +224,23 @@ impl Workspace for ServeWorkspace {
         out
     }
 
+    /// The first deck's clock (`beat` + `beat_phase`), or the show's
+    /// seconds at 120 BPM without one, as the Stage panel reads it.
+    fn beat(&self) -> Option<f64> {
+        let stage = atd_stage::Stage::read(self.network(), self.engine.registry());
+        let ch = stage
+            .decks
+            .first()
+            .and_then(|d| d.clock())
+            .and_then(|c| self.flat.view(c))
+            .and_then(|v| self.engine.channels(v));
+        Some(atd_stage::beat_position(
+            ch.and_then(|c| c.value("beat")),
+            ch.and_then(|c| c.value("beat_phase")),
+            self.time,
+        ))
+    }
+
     fn status(&self, node: NodeId) -> Option<String> {
         self.engine.status(self.flat.view(node)?).map(str::to_owned)
     }
@@ -405,6 +422,17 @@ pub fn run(args: ServeArgs) -> Result<()> {
             }
         }
         ws.frame();
+        // In-show cues (FR-G5) fire as the clock passes their beat.
+        if !agent.cues.is_empty()
+            && let Some(beat) = ws.beat()
+        {
+            for (m, r) in agent.fire_cues(&mut ws, beat) {
+                match r {
+                    Ok(v) => log::info!("cue: {}.{} = {v}", m.node, m.param),
+                    Err(e) => log::warn!("cue: {}.{} refused: {e}", m.node, m.param),
+                }
+            }
+        }
         if args
             .seconds
             .is_some_and(|s| start.elapsed().as_secs_f64() >= s)

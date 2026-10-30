@@ -21,6 +21,7 @@ atd-ai.workspace = true
 atd-io.workspace = true
 rosc.workspace = true
 atd-agent.workspace = true
+atd-stage.workspace = true
 atd-timeline.workspace = true
 atd-py.workspace = true
 atd-ops-img.workspace = true

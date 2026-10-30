@@ -19,6 +19,7 @@ use atd_core::pack::{self, PackDef, ParamTarget, Version};
 use atd_core::registry::{OpFamily, OperatorSchema};
 use serde_json::{Map, Value, json};
 
+use crate::cues::{self, CueContext, CueQueue, Move, Quantum};
 use crate::lock::{Refusal, Scope, ShowLock};
 use crate::workspace::Workspace;
 
@@ -238,6 +239,20 @@ pub fn specs() -> Vec<ToolSpec> {
             scope: Some(Scope::Stage),
         },
         ToolSpec {
+            name: "cue",
+            description: "An in-show cue: words such as `darker, slower on the next drop` or `set brightness to 0.4 now` become moves of whitelisted parameters (Show Lock `allow` entries), within their ranges, fired on the clock: `now` on the next beat, by default on the next bar, `next drop` on the next 16-beat boundary, `next phrase` on the next 32. Returns the planned moves and queues them; never edits the graph.",
+            schema: obj(
+                json!({
+                    "text": {"type": "string", "description": "The cue, as the performer said it."},
+                    "beat": {"type": "number", "description": "The current beat position (default: the show's clock)."},
+                    "quantum": {"type": "string", "enum": ["beat", "bar", "drop", "phrase"], "description": "Overrides the timing the words ask for."},
+                    "queue": {"type": "boolean", "default": true, "description": "False: only plan, queue nothing."}
+                }),
+                &["text"],
+            ),
+            scope: Some(Scope::Stage),
+        },
+        ToolSpec {
             name: "python_exec",
             description: "Runs Python in the project's interpreter and returns what it printed. Only in sessions the user granted `python.exec`.",
             schema: obj(json!({"code": {"type": "string"}}), &["code"]),
@@ -260,6 +275,8 @@ pub struct Agent {
     staged: Vec<Edit>,
     /// What each staged edit is, for review.
     notes: Vec<String>,
+    /// Cue moves waiting for their beat (FR-G5); [`Self::fire_cues`] applies them.
+    pub cues: CueQueue,
 }
 
 impl Agent {
@@ -272,6 +289,7 @@ impl Agent {
             staged_packs: Vec::new(),
             staged: Vec::new(),
             notes: Vec::new(),
+            cues: CueQueue::default(),
         }
     }
 
@@ -594,6 +612,28 @@ impl Agent {
                 )?;
                 Ok(Output::Json(json!({"crossfader": v.clamp(0.0, 1.0)})))
             }
+            "cue" => {
+                let text = need("text")?;
+                let now = a
+                    .get("beat")
+                    .and_then(Value::as_f64)
+                    .or_else(|| ws.beat())
+                    .ok_or("this workspace has no clock; pass `beat`")?;
+                let quantum = match s("quantum") {
+                    Some(q) => Some(Quantum::parse(q).ok_or_else(|| format!("no quantum `{q}`"))?),
+                    None => None,
+                };
+                // Cues move the live show, not the staged preview.
+                let plan = CueContext::capture(ws.network(), ws.registry(), &self.lock)
+                    .plan(text, now, quantum);
+                let queue = a.get("queue").and_then(Value::as_bool).unwrap_or(true);
+                if queue {
+                    self.cues.push(plan.moves.iter().cloned());
+                }
+                let mut out = serde_json::to_value(&plan).map_err(|e| e.to_string())?;
+                out["queued"] = json!(queue && !plan.moves.is_empty());
+                Ok(Output::Json(out))
+            }
             "python_exec" => {
                 let out = ws.python_exec(need("code")?)?;
                 Ok(Output::Json(json!({"output": out})))
@@ -841,6 +881,24 @@ impl Agent {
         self.staged.extend(edits);
         self.notes.push(note);
         Ok(())
+    }
+
+    /// Applies the cue moves due at `beat`, each one undo step, checked
+    /// against the show and the lock as they are now. A host calls this as
+    /// its clock advances.
+    pub fn fire_cues(
+        &mut self,
+        ws: &mut dyn Workspace,
+        beat: f64,
+    ) -> Vec<(Move, Result<f64, String>)> {
+        self.cues
+            .due(beat)
+            .into_iter()
+            .map(|m| {
+                let r = cues::apply_move(ws, &self.lock, &m);
+                (m, r)
+            })
+            .collect()
     }
 
     /// Applies the staged changes as one undo step and cooks.

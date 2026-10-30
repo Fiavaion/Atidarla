@@ -24,6 +24,11 @@ pub trait Workspace {
     ) -> Result<(), String> {
         Err("this workspace cannot add Packs".into())
     }
+    /// The beat position of the show's clock (`atd_stage::beat_position`
+    /// beats), when the workspace has one. In-show cues are timed by it.
+    fn beat(&self) -> Option<f64> {
+        None
+    }
     /// Cooks the network once and returns every node error.
     fn cook_errors(&mut self) -> Vec<(NodeId, String)>;
     /// The node's status line, if it has one.

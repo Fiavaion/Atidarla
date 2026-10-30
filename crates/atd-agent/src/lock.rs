@@ -166,6 +166,17 @@ impl ShowLock {
         s
     }
 
+    /// The whitelist entry covering `node.param`, engaged or not (`pack`:
+    /// the Pack `node` is an instance of). In-show cues move only these.
+    pub fn rule(&self, node: &str, pack: Option<&str>, param: &str) -> Option<&Allow> {
+        self.allow.iter().find(|a| {
+            let by_node =
+                a.node.as_deref() == Some(node) && a.param.as_deref().is_none_or(|p| p == param);
+            let by_pack = a.pack.is_some() && a.pack.as_deref() == pack;
+            by_node || by_pack
+        })
+    }
+
     /// Whether moving `node.param` to `value` (numeric, when it is) is
     /// allowed. `pack` is the Pack `node` is an instance of, if any.
     pub fn check_param(
@@ -178,13 +189,7 @@ impl ShowLock {
         if !self.engaged {
             return Ok(());
         }
-        let rule = self.allow.iter().find(|a| {
-            let by_node =
-                a.node.as_deref() == Some(node) && a.param.as_deref().is_none_or(|p| p == param);
-            let by_pack = a.pack.is_some() && a.pack.as_deref() == pack;
-            by_node || by_pack
-        });
-        let Some(rule) = rule else {
+        let Some(rule) = self.rule(node, pack, param) else {
             return Err(Refusal::NotAllowed {
                 node: node.to_owned(),
                 param: param.to_owned(),

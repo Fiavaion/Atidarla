@@ -75,7 +75,7 @@ pub fn handle(agent: &mut Agent, ws: &mut dyn Workspace, msg: &Value) -> Option<
 }
 
 /// What the server tells a client about working with Atidarla.
-const INSTRUCTIONS: &str = "Atidarla is a node-based real-time visual instrument. Build patches with list_ops / get_schema / create_node / connect / set_param. Changes are staged: review_changes shows them; accept_changes (when offered) applies them as one undo step and returns node errors to fix. Wire types must match (IMG→IMG, SIG→SIG, GEO→GEO). Image operators are img.*, channel (audio/control) operators sig.*, points pnt.*, meshes msh.*. Use screenshot_viewer to look at an image node.";
+const INSTRUCTIONS: &str = "Atidarla is a node-based real-time visual instrument. Build patches with list_ops / get_schema / create_node / connect / set_param. Changes are staged: review_changes shows them; accept_changes (when offered) applies them as one undo step and returns node errors to fix. Wire types must match (IMG→IMG, SIG→SIG, GEO→GEO). Image operators are img.*, channel (audio/control) operators sig.*, points pnt.*, meshes msh.*. Use screenshot_viewer to look at an image node. create_pack turns nodes into a reusable Pack (staged like other edits). During a show, cue turns a performer's words (`darker, slower on the next drop`) into moves of whitelisted parameters, fired on the beat.";
 
 /// A request from a transport, with where to send the answer.
 pub type Request = (Value, Sender<Option<Value>>);
