@@ -34,5 +34,6 @@ pub mod input;
 pub mod mapping;
 pub mod midi;
 pub mod osc;
+pub mod oscquery;
 pub mod timecode;
 pub mod video;

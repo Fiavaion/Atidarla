@@ -59,6 +59,7 @@ snap = "1.1"
 png = "0.18"
 zune-jpeg = "0.4"
 midir = "0.11"
+mdns-sd = { version = "0.21", default-features = false, features = ["logging"] }
 gilrs = "0.11"
 ab_glyph_rasterizer = "0.1"
 skrifa = "0.44"
