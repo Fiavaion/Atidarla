@@ -88,6 +88,8 @@ struct Panels {
     /// Recording the viewed image to a movie (FR-S10).
     record: crate::record::RecordPanel,
     outputs: crate::outputs::OutputsPanel,
+    /// The model manager window (FR-A12).
+    models: crate::models_panel::ModelsPanel,
 }
 
 impl AtidarlaApp {
@@ -202,6 +204,7 @@ impl AtidarlaApp {
                 extra: Vec::new(),
                 record: Default::default(),
                 outputs: Default::default(),
+                models: Default::default(),
             },
             smoke: smoke.map(Smoke::new),
             start: Instant::now(),
@@ -332,6 +335,13 @@ impl eframe::App for AtidarlaApp {
                         self.panels.control.open = true;
                     }
                     if ui
+                        .button("Models")
+                        .on_hover_text("AI models: licences, downloads and checks")
+                        .clicked()
+                    {
+                        self.panels.models.open = true;
+                    }
+                    if ui
                         .button(tab_title(Tab::Textport))
                         .on_hover_text("Python console over the open project")
                         .clicked()
@@ -392,6 +402,8 @@ impl eframe::App for AtidarlaApp {
         }
         p.control
             .window(ui.ctx(), p.engine.as_ref(), &mut self.project.meta.mappings);
+        let meta = &mut self.project.meta;
+        p.models.window(ui.ctx(), &mut meta.ai, &meta.models);
         self.cook_and_present(ui.ctx(), frame);
         self.textport_frame(ui.ctx());
         if let Some(smoke) = &mut self.smoke {

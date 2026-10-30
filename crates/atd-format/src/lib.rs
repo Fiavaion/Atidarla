@@ -2,7 +2,8 @@
 //!
 //! ```text
 //! myshow.atidarla/
-//!   project.toml          name, description, output resolution
+//!   project.toml          name, description, output resolution, AI settings and
+//!                         the models the project needs (see [`models`])
 //!   networks/main.toml    the patch: nodes, inputs, parameters
 //!   packs/<name>/         the project's copy of each Pack it uses (see [`pack`])
 //!   mappings.toml         MIDI/OSC mappings and OSC settings (see [`mappings`])
@@ -22,6 +23,7 @@
 //! relative to the project folder (`Params::resolve` in `atd-gpu`).
 
 pub mod mappings;
+pub mod models;
 mod network;
 pub mod pack;
 pub mod timeline;
@@ -34,6 +36,7 @@ use atd_core::pack::PackSet;
 use toml_edit::{Array, DocumentMut, Item, Value};
 
 pub use mappings::{Mappings, mappings_from_str, mappings_to_string};
+pub use models::{AiSettings, LicenceClass, ModelPin};
 pub use network::{network_from_str, network_to_string};
 pub use pack::{Library, load_pack, pack_from_str, pack_to_string, save_pack};
 pub use timeline::{TimelineDoc, timeline_from_str, timeline_to_string};
@@ -90,6 +93,11 @@ pub struct Project {
     pub mappings: Mappings,
     /// The timeline (`timeline.toml`); `None` when the project has none.
     pub timeline: Option<TimelineDoc>,
+    /// `[ai]` in `project.toml`.
+    pub ai: AiSettings,
+    /// `[[models]]` in `project.toml`: the models the project needs, by
+    /// catalogue ID (the files live in the per-user model cache, PRD A61).
+    pub models: BTreeMap<String, ModelPin>,
 }
 
 impl Project {
@@ -103,6 +111,8 @@ impl Project {
             packs: PackSet::default(),
             mappings: Mappings::default(),
             timeline: None,
+            ai: AiSettings::default(),
+            models: BTreeMap::new(),
         }
     }
 
@@ -144,6 +154,7 @@ pub fn project_to_string(p: &Project) -> String {
     res.push(i64::from(p.resolution[0]));
     res.push(i64::from(p.resolution[1]));
     doc.insert("resolution", Item::Value(Value::Array(res)));
+    models::write(&mut doc, &p.ai, &p.models);
     doc.to_string()
 }
 
@@ -155,7 +166,14 @@ pub fn project_from_str(source: &str) -> Result<Project, FormatError> {
     let root = doc.as_table();
     network::only_keys(
         root,
-        &["format", "name", "description", "resolution"],
+        &[
+            "format",
+            "name",
+            "description",
+            "resolution",
+            "ai",
+            "models",
+        ],
         "the file",
     )?;
     network::check_format(root)?;
@@ -180,6 +198,7 @@ pub fn project_from_str(source: &str) -> Result<Project, FormatError> {
             [v[0], v[1]]
         }
     };
+    let (ai, models) = models::read(root)?;
     Ok(Project {
         name,
         description,
@@ -188,6 +207,8 @@ pub fn project_from_str(source: &str) -> Result<Project, FormatError> {
         packs: PackSet::default(),
         mappings: Mappings::default(),
         timeline: None,
+        ai,
+        models,
     })
 }
 
@@ -361,3 +382,6 @@ mod mappings_tests;
 
 #[cfg(test)]
 mod timeline_tests;
+
+#[cfg(test)]
+mod models_tests;

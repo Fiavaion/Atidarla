@@ -232,32 +232,6 @@ fn texture(
     })
 }
 
-/// Model folder per A61 (`ATD_MODELS_DIR`, else the per-user cache).
-fn model_dir(id: &str) -> std::path::PathBuf {
-    let root = if let Some(d) = std::env::var_os("ATD_MODELS_DIR") {
-        std::path::PathBuf::from(d)
-    } else if cfg!(target_os = "macos") {
-        std::env::var_os("HOME")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_default()
-            .join("Library/Caches/Atidarla/models")
-    } else if cfg!(windows) {
-        std::env::var_os("LOCALAPPDATA")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_default()
-            .join("Atidarla/models")
-    } else {
-        std::env::var_os("XDG_CACHE_HOME")
-            .map(std::path::PathBuf::from)
-            .or_else(|| {
-                std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".cache"))
-            })
-            .unwrap_or_default()
-            .join("atidarla/models")
-    };
-    root.join(id)
-}
-
 /// A model given as an id resolves to its folder in the model cache; one
 /// given as a path (or a built-in) is used as it is.
 fn model_path(adapter: &str, model: &str) -> Option<String> {
@@ -268,7 +242,7 @@ fn model_path(adapter: &str, model: &str) -> Option<String> {
     if p.is_absolute() || model.contains('/') || model.contains('\\') {
         return Some(model.to_owned());
     }
-    let dir = model_dir(model);
+    let dir = atd_ai::models::model_dir(model);
     // An ONNX model folder holds `model.onnx`.
     let onnx = dir.join("model.onnx");
     Some(

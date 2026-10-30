@@ -13,6 +13,7 @@
 pub mod client;
 pub mod egress;
 pub mod link;
+pub mod models;
 pub mod protocol;
 pub mod refhost;
 pub mod ring;

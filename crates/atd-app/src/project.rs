@@ -13,6 +13,8 @@ use atd_format::Project;
 use atd_gpu::engine::Engine;
 use serde_json::Value;
 
+type ModelPins = std::collections::BTreeMap<String, atd_format::ModelPin>;
+
 /// Something that would discard unsaved changes, waiting for confirmation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
@@ -43,6 +45,8 @@ pub struct ProjectState {
     saved_mappings: atd_format::Mappings,
     /// The timeline as last opened or saved.
     saved_timeline: Option<atd_format::TimelineDoc>,
+    /// `[ai]` and `[[models]]` as last opened or saved.
+    saved_ai: (atd_format::AiSettings, ModelPins),
     dialog: Option<Dialog>,
     /// An action waiting for "discard unsaved changes?".
     pub confirm: Option<Action>,
@@ -69,6 +73,7 @@ impl ProjectState {
             saved: net.clone(),
             saved_mappings: Default::default(),
             saved_timeline: None,
+            saved_ai: Default::default(),
             dialog: None,
             confirm: None,
             message: None,
@@ -83,6 +88,8 @@ impl ProjectState {
         *engine.network() != self.saved
             || self.meta.mappings != self.saved_mappings
             || self.meta.timeline != self.saved_timeline
+            || self.meta.ai != self.saved_ai.0
+            || self.meta.models != self.saved_ai.1
     }
 
     /// The window title: project name, and a dot when there are unsaved
@@ -153,6 +160,7 @@ impl ProjectState {
                     self.python = (!python.is_empty()).then_some(python);
                     self.saved_mappings = meta.mappings.clone();
                     self.saved_timeline = meta.timeline.clone();
+                    self.saved_ai = (meta.ai.clone(), meta.models.clone());
                     self.kernels = (!kernels.is_empty()).then_some(kernels);
                     self.meta = meta;
                     self.dir = Some(dir);
@@ -214,6 +222,7 @@ impl ProjectState {
                 self.saved = engine.network().clone();
                 self.saved_mappings = self.meta.mappings.clone();
                 self.saved_timeline = self.meta.timeline.clone();
+                self.saved_ai = (self.meta.ai.clone(), self.meta.models.clone());
                 self.dir = Some(dir.to_owned());
                 self.message = Some((format!("Saved {}", dir.display()), false));
             }
@@ -767,6 +776,21 @@ pub(crate) mod tests {
             std::fs::read(dir.join("networks/main.toml")).unwrap(),
             before
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+    /// The Models window's "commercial-safe only" toggle is a project edit.
+    #[test]
+    fn ai_settings_are_unsaved_changes_until_saved() {
+        let Some(mut e) = engine() else { return };
+        let dir = std::env::temp_dir().join(format!("atd-app-ai-{}.atidarla", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut state = ProjectState::untitled(e.network());
+        assert!(!state.dirty(&e));
+        state.meta.ai.commercial_safe_only = true;
+        assert!(state.dirty(&e));
+        state.save_to(&mut e, &dir, Vec::new());
+        assert!(!state.dirty(&e), "{:?}", state.message);
+        assert!(atd_format::load(&dir).unwrap().ai.commercial_safe_only);
         std::fs::remove_dir_all(&dir).ok();
     }
 }

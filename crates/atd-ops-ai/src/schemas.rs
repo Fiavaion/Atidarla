@@ -152,23 +152,23 @@ pub fn schema(type_id: &str) -> OperatorSchema {
                     "Estimates depth: near is bright, far is dark.",
                 ),
                 "segment" => (
-                    "segformer-b0-ade",
+                    "",
                     "Segments people and objects: the mask is in alpha, classes are coloured.",
                 ),
                 "pose" => (
-                    "rtmpose-s",
+                    "dwpose",
                     "Finds body keypoints and draws the skeleton over black.",
                 ),
                 "flow" => (
-                    "raft-small",
+                    "raft",
                     "Estimates optical flow between consecutive frames: red and green carry the horizontal and vertical motion around mid-grey.",
                 ),
                 "background" => (
-                    "u2netp",
+                    "birefnet-lite",
                     "Removes the background: the input with the subject's mask in alpha.",
                 ),
                 "upscale" => (
-                    "realesrgan-x4",
+                    "swin2sr-x4",
                     "Upscales the input with a super-resolution model.",
                 ),
                 _ => ("", "Runs an ONNX model of your choice on the input."),
