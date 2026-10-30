@@ -281,6 +281,64 @@ impl CookMode {
     }
 }
 
+/// Parameter values set from outside the graph each frame (MIDI/OSC
+/// mappings, timeline tracks): above bindings, expressions and stored
+/// values, never saved and never undone (M3, decision A54). Lookup
+/// allocates nothing.
+#[derive(Debug, Default, Clone)]
+pub struct LiveValues {
+    nodes: HashMap<NodeId, Vec<(String, Value)>>,
+}
+
+impl LiveValues {
+    /// The live value of `node`'s `param`.
+    pub fn get(&self, node: NodeId, param: &str) -> Option<&Value> {
+        self.nodes
+            .get(&node)?
+            .iter()
+            .find(|(name, _)| name == param)
+            .map(|(_, v)| v)
+    }
+
+    /// Sets or clears one value; whether anything changed.
+    pub fn set(&mut self, node: NodeId, param: &str, value: Option<Value>) -> bool {
+        let list = self.nodes.entry(node).or_default();
+        let at = list.iter().position(|(name, _)| name == param);
+        let changed = match (at, value) {
+            (Some(i), Some(v)) if list[i].1 == v => false,
+            (Some(i), Some(v)) => {
+                list[i].1 = v;
+                true
+            }
+            (None, Some(v)) => {
+                list.push((param.to_owned(), v));
+                true
+            }
+            (Some(i), None) => {
+                list.remove(i);
+                true
+            }
+            (None, None) => false,
+        };
+        if list.is_empty() {
+            self.nodes.remove(&node);
+        }
+        changed
+    }
+
+    /// Clears everything; the nodes that had values.
+    pub fn clear(&mut self) -> Vec<NodeId> {
+        self.nodes.drain().map(|(n, _)| n).collect()
+    }
+
+    /// Every (node, parameter, value), in no particular order.
+    pub fn iter(&self) -> impl Iterator<Item = (NodeId, &str, &Value)> {
+        self.nodes
+            .iter()
+            .flat_map(|(n, list)| list.iter().map(move |(p, v)| (*n, p.as_str(), v)))
+    }
+}
+
 /// Read access to a node's parameters, with schema defaults and channel
 /// bindings resolved, and the engine settings they are read under (project
 /// folder, expressions, cook mode).
@@ -294,6 +352,8 @@ pub struct Params<'a> {
     project_dir: Option<&'a Path>,
     /// Expression values this frame (FR-P2).
     exprs: Option<&'a ExprTable>,
+    /// Live values (MIDI/OSC mappings, timeline), above everything else.
+    live: Option<&'a LiveValues>,
     mode: CookMode,
 }
 
@@ -313,8 +373,20 @@ impl<'a> Params<'a> {
             node,
             project_dir: None,
             exprs: None,
+            live: None,
             mode: CookMode::Live,
         }
+    }
+
+    /// The same parameters with `live` values on top (for tests and tools).
+    pub fn with_live(mut self, live: &'a LiveValues) -> Self {
+        self.live = Some(live);
+        self
+    }
+
+    /// The parameter's live value, if one is set (see [`LiveValues`]).
+    pub fn live(&self, name: &str) -> Option<&'a Value> {
+        self.live?.get(self.node, name)
     }
 
     /// The same parameters with relative paths resolved against `dir`.
@@ -345,9 +417,11 @@ impl<'a> Params<'a> {
         }
     }
 
-    /// The stored value (or schema default), ignoring bindings.
+    /// The live value if one is set, else the stored value (or schema
+    /// default), ignoring bindings.
     pub fn value(&self, name: &str) -> Option<&'a Value> {
-        self.net.param_value(self.registry, self.node, name)
+        self.live(name)
+            .or_else(|| self.net.param_value(self.registry, self.node, name))
     }
 
     /// The bound channel's current value, if the parameter is bound and the
@@ -366,6 +440,9 @@ impl<'a> Params<'a> {
     /// A number parameter: its bound channel, else its expression, else
     /// its value.
     pub fn f32(&self, name: &str) -> f32 {
+        if let Some(v) = self.live(name).and_then(Value::as_f64) {
+            return v as f32;
+        }
         if let Some(v) = self.bound(name) {
             return v;
         }
@@ -376,6 +453,9 @@ impl<'a> Params<'a> {
     }
 
     pub fn i64(&self, name: &str) -> i64 {
+        if let Some(v) = self.live(name).and_then(Value::as_f64) {
+            return v.round() as i64;
+        }
         if let Some(v) = self.bound(name) {
             return v.round() as i64;
         }
@@ -386,6 +466,11 @@ impl<'a> Params<'a> {
     }
 
     pub fn bool(&self, name: &str) -> bool {
+        if let Some(v) = self.live(name) {
+            return v
+                .as_bool()
+                .unwrap_or_else(|| v.as_f64().is_some_and(|x| x > 0.5));
+        }
         if let Some(v) = self.bound(name) {
             return v > 0.5;
         }
@@ -943,6 +1028,8 @@ pub struct Engine {
     project_dir: Option<PathBuf>,
     /// Compiled parameter expressions (FR-P2, A22).
     exprs: ExprTable,
+    /// Live parameter values (see [`LiveValues`]).
+    live: LiveValues,
     /// The Python worker for expressions outside the native subset.
     python: Option<Box<dyn PythonHost>>,
     py_jobs: Vec<PyJob>,
@@ -1020,6 +1107,7 @@ impl Engine {
             released: Vec::new(),
             project_dir: None,
             exprs: ExprTable::default(),
+            live: LiveValues::default(),
             python: None,
             py_jobs: Vec::new(),
             py_results: Vec::new(),
@@ -1041,6 +1129,31 @@ impl Engine {
     /// index); an offline render starting part-way sets its first frame.
     pub fn set_frame(&mut self, frame: u64) {
         self.frame = frame;
+    }
+
+    /// Sets (`Some`) or clears (`None`) the live value of `node`'s
+    /// `param`: it wins over the parameter's binding, expression and stored
+    /// value until cleared, is not an edit (no undo step, not saved) and
+    /// marks the node for cooking when it changes. For MIDI/OSC mappings and
+    /// the timeline (M3); unknown nodes are ignored.
+    pub fn set_live(&mut self, node: NodeId, param: &str, value: Option<Value>) {
+        if self.net.node(node).is_none() {
+            return;
+        }
+        if self.live.set(node, param, value) {
+            self.scheduler.mark_dirty(&self.net, vec![node]);
+        }
+    }
+
+    /// Clears every live value (for example when a show stops).
+    pub fn clear_live(&mut self) {
+        let nodes = self.live.clear();
+        self.scheduler.mark_dirty(&self.net, nodes);
+    }
+
+    /// The live values set now.
+    pub fn live_values(&self) -> &LiveValues {
+        &self.live
     }
 
     /// The value `param`'s expression gave on `node`'s last cook (for
@@ -1189,6 +1302,8 @@ impl Engine {
     }
 
     fn after_change(&mut self, dirty: Vec<NodeId>) {
+        let net = &self.net;
+        self.live.nodes.retain(|id, _| net.node(*id).is_some());
         let alive = |id: &NodeId| self.net.node(*id).is_some();
         let removed: Vec<NodeId> = self
             .gpu_ops
@@ -1278,6 +1393,7 @@ impl Engine {
             again,
             project_dir,
             exprs,
+            live,
             python,
             py_jobs,
             py_results,
@@ -1379,6 +1495,7 @@ impl Engine {
                         node: id,
                         project_dir: project_dir.as_deref(),
                         exprs: Some(exprs),
+                        live: Some(live),
                         mode,
                     },
                     has_texture: texture_source.is_some_and(|s| results.contains_key(&s)),
@@ -1470,6 +1587,7 @@ impl Engine {
                         node: id,
                         project_dir: project_dir.as_deref(),
                         exprs: Some(exprs),
+                        live: Some(live),
                         mode,
                     },
                     time,
@@ -1529,6 +1647,7 @@ impl Engine {
                         node: id,
                         project_dir: project_dir.as_deref(),
                         exprs: Some(exprs),
+                        live: Some(live),
                         mode,
                     },
                     time,
@@ -1586,6 +1705,7 @@ impl Engine {
                         node: id,
                         project_dir: project_dir.as_deref(),
                         exprs: Some(exprs),
+                        live: Some(live),
                         mode,
                     },
                     time,
@@ -1658,6 +1778,7 @@ impl Engine {
                             node: id,
                             project_dir: project_dir.as_deref(),
                             exprs: Some(exprs),
+                            live: Some(live),
                             mode,
                         },
                         input_size,
@@ -1706,6 +1827,7 @@ impl Engine {
                     node: id,
                     project_dir: project_dir.as_deref(),
                     exprs: Some(exprs),
+                    live: Some(live),
                     mode,
                 },
                 time,

@@ -449,3 +449,38 @@ fn sinks_cook_without_being_viewed() {
         "viewing adds the viewed node; the sink is cached"
     );
 }
+
+/// Live values (M3: MIDI/OSC mappings, the timeline) win over the stored
+/// value, recook the node, are not edits (no undo step, nothing saved) and
+/// fall back to the stored value when cleared.
+#[test]
+fn live_values_override_without_editing() {
+    let Some(mut e) = engine() else {
+        return no_gpu();
+    };
+    let fill = add(&mut e, "img.fill", "fill1");
+    set_colour(&mut e, fill, [1.0, 0.0, 0.0, 1.0]);
+    e.cook(&[fill], 0.0).unwrap();
+    assert_eq!(pixel(&e, fill), [255, 0, 0, 255]);
+    let saved = e.network().clone();
+
+    e.set_live(fill, "colour", Some(json!([0.0, 1.0, 0.0, 1.0])));
+    e.cook(&[fill], 1.0).unwrap();
+    assert_eq!(pixel(&e, fill), [0, 255, 0, 255]);
+    assert_eq!(e.network(), &saved, "a live value is not an edit");
+    let cooks = e.stat(fill).unwrap().cooks;
+    // The same value again changes nothing and cooks nothing.
+    e.set_live(fill, "colour", Some(json!([0.0, 1.0, 0.0, 1.0])));
+    e.cook(&[fill], 2.0).unwrap();
+    assert_eq!(e.stat(fill).unwrap().cooks, cooks);
+
+    e.set_live(fill, "colour", None);
+    e.cook(&[fill], 3.0).unwrap();
+    assert_eq!(pixel(&e, fill), [255, 0, 0, 255]);
+
+    // Removing the node drops its live values.
+    e.set_live(fill, "colour", Some(json!([0.0, 0.0, 1.0, 1.0])));
+    assert_eq!(e.live_values().iter().count(), 1);
+    e.edit("remove", [Edit::RemoveNode { id: fill }]).unwrap();
+    assert_eq!(e.live_values().iter().count(), 0);
+}
