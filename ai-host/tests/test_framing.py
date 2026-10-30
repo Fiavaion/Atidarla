@@ -38,6 +38,9 @@ def test_empty_payload_is_allowed():
         b'{"id":1}',  # no newline
         b"{" + b" " * MAX_LINE + b"}\n",
     ],
+    # Short ids: pytest puts the id in an environment variable, which
+    # Windows caps at 32767 characters (the last case is longer).
+    ids=["short-payload", "negative-payload", "string-payload", "not-json", "not-object", "no-newline", "line-too-long"],
 )
 def test_bad_framing_is_rejected(raw):
     with pytest.raises(FramingError):
