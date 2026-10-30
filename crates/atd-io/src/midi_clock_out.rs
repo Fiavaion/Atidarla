@@ -289,8 +289,11 @@ mod tests {
         let mean = |w: &[Instant]| (w[w.len() - 1] - w[0]).as_secs_f64() / (w.len() - 1) as f64;
         let early = mean(&t[1..8]);
         let late = mean(&t[t.len() - 12..]);
-        assert!((early - 1.0 / 24.0).abs() / (1.0 / 24.0) < 0.05, "{early}");
-        assert!((late - 1.0 / 96.0).abs() / (1.0 / 96.0) < 0.05, "{late}");
+        // One late wake-up among a dozen 10 ms intervals moves the mean by
+        // several percent on a shared runner; a 4x tempo change still shows.
+        let tol = if strict() { 0.05 } else { 0.2 };
+        assert!((early - 1.0 / 24.0).abs() / (1.0 / 24.0) < tol, "{early}");
+        assert!((late - 1.0 / 96.0).abs() / (1.0 / 96.0) < tol, "{late}");
     }
 
     #[test]
@@ -309,7 +312,8 @@ mod tests {
         assert_eq!(sent[1].0, [0xFB]);
         let first = sent.iter().find(|(m, _)| m == &[0xF8]).unwrap().1;
         let wait = (first - begun).as_secs_f64();
-        assert!((wait - 0.1).abs() < 0.02, "{wait}");
+        let tol = if strict() { 0.02 } else { 0.05 };
+        assert!((wait - 0.1).abs() < tol, "{wait}");
     }
 
     #[test]
