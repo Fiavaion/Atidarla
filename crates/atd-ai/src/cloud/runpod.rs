@@ -58,6 +58,10 @@ pub enum RunpodError {
         "pod {pod_id} exists but this machine does not know its host token; terminate it and bring it up again"
     )]
     NoToken { pod_id: String },
+    #[error(
+        "no pod exists yet and no container image was given: build and push ai-host/Dockerfile, then pass its image name"
+    )]
+    NoImage,
     #[error("cannot save the pod's host token: {0}")]
     Secrets(String),
 }
@@ -400,6 +404,9 @@ impl RunpodHost {
                 (pod.id, token)
             }
             None => {
+                if self.spec.image.trim().is_empty() {
+                    return Err(RunpodError::NoImage);
+                }
                 progress(Phase::Creating);
                 let token = random_token();
                 super::write_secret(&self.secrets, &keys, &token)
