@@ -1,6 +1,6 @@
 # Atidarla — PRD.md
 
-**Version:** 1.2 (A4, A6, A7, A10, A18, A19 ratified) · **Date:** 15 October 2026 · **Owner:** Mark
+**Version:** 1.3 (A9, A12, A24–A52 ratified 2026-10-30; see §0) · **Date:** 30 October 2026 · **Owner:** Mark
 **Companion:** `RESEARCH.md` v1.0 (evidence for every decision below; section refs as `R§n`)
 **Supersedes:** NascD PRD v0.4 (11 July 2026)
 **Execution:** Claude Code, milestone by milestone (M0–M6, then M7+ horizon). Each milestone ends only when every acceptance criterion passes.
@@ -423,7 +423,7 @@ Linux as a supported platform (A18) · Multi-machine frame-locked sync and outpu
 ---
 
 ## 12. Open questions (resolve during M0)
-1. Ratify the remaining Proposed decisions (A5, A8, A9, A11–A14).
+1. Ratify the remaining Proposed decisions (A13, A14, A20; the others were ratified by 2026-10-30).
 2. Confirm PT-3 after the RTX 4070 benchmark.
 3. Which cloud providers to support first (proposal: Decart + self-hosted Runpod container; Daydream once its API terms and Scope licence are clear).
 4. Should the NCAD AI estate (Meitheal orchestrator) be the reference LAN host implementation?

@@ -8,7 +8,7 @@ smallest correct versions, and what is left for a decision.
 ## What already exists
 
 - **State on the wire** (design D6): any GEO feedback input reads the previous frame's value,
-  and the engine hands that value over in place when nothing else reads it (GEO-1). Particles
+  and the engine hands that value over in place when nothing else reads it (A26, was GEO-1). Particles
   uses this: Particles → forces → `prev`.
 - **Nested networks** (FR-P4): a Pack is a network with sockets and promoted parameters,
   flattened into its nodes when a network loads or changes (`atd_core::pack`), so the engine
