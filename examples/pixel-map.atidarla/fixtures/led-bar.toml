@@ -1,0 +1,4 @@
+# A project fixture type: an LED bar with a dimmer, RGB and a strobe
+# channel left at 0 (strobe off).
+name = "LED bar, dimmer + RGB + strobe"
+channels = ["dimmer", "red", "green", "blue", "none"]

@@ -482,7 +482,8 @@ pub fn classify(type_id: &str) -> Option<Class> {
         "img.analyze" => OneFrameLate,
         "img.share_in" | "sig.audio_in" | "sig.input" | "sig.midi_in" | "sig.osc_in"
         | "sig.timecode_in" => LiveInput,
-        "img.share_out" | "sig.audio_out" | "sig.dmx_out" | "sig.midi_out" | "sig.osc_out" => Sink,
+        "img.share_out" | "img.pixel_map" | "sig.audio_out" | "sig.dmx_out" | "sig.midi_out"
+        | "sig.osc_out" => Sink,
         _ => return None,
     })
 }

@@ -354,6 +354,7 @@ dependencies = [
  "rosc",
  "snap",
  "thiserror 2.0.21",
+ "toml_edit",
  "zune-jpeg 0.4.21",
 ]
 

@@ -1,0 +1,17 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "Pixel map"
+description = '''
+LED pixel mapping to DMX (FR-S7). Pixel Map (img.pixel_map) samples the moving noise image
+for the fixtures in patch.toml and outputs the DMX slot values of universe 1 as channels;
+DMX Out sends universe 1 to 127.0.0.1 over Art-Net.
+
+The patch places a 60-pixel GRB strip along the bottom of the image, two PARs (the built-in
+dimmer + RGBW type and "led-bar", a project fixture type in fixtures/led-bar.toml) and an
+8 x 4 serpentine grid of RGB pixels over the top half on universe 2. Edit patch.toml while
+the project runs: the map reloads on save.
+
+Try: set Pixel Map's Send to artnet to send both universes itself, and watch the packets
+with any Art-Net monitor.
+'''
+resolution = [640, 360]

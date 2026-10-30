@@ -17,6 +17,7 @@ mod movie;
 pub mod nca;
 mod ops;
 mod ops2;
+mod pixel_map;
 mod resolution;
 mod share;
 pub mod stage;
@@ -133,6 +134,7 @@ pub fn register(registry: &mut Registry) {
             movie::schema(),
             text::schema(),
             analyze::schema(),
+            pixel_map::schema(),
             wgsl::schema(),
             compute::schema(),
             share::out_schema(),
@@ -159,6 +161,7 @@ pub fn library(library: &mut OpLibrary) {
     library.add(stage::layer_schema().type_id, stage::create_layer);
     library.add(stage::mixer_schema().type_id, stage::create_mixer);
     library.add_img_to_sig(analyze::schema().type_id, analyze::create);
+    library.add_img_to_sig(pixel_map::schema().type_id, pixel_map::create);
     for (schema, factory) in STATEFUL {
         library.add(schema().type_id, factory);
     }
@@ -188,7 +191,7 @@ mod tests {
         register(&mut registry);
         assert_eq!(
             registry.len(),
-            DEFS.len() + DEFS2.len() + STATEFUL.len() + 10
+            DEFS.len() + DEFS2.len() + STATEFUL.len() + 11
         );
         for op in registry.iter() {
             assert!(op.cook_budget_us > 0, "{} has a cook budget", op.type_id);
@@ -229,6 +232,7 @@ mod tests {
         assert!(lib.contains(&movie::schema().type_id));
         assert!(lib.contains(&text::schema().type_id));
         assert!(lib.contains(&analyze::schema().type_id));
+        assert!(lib.contains(&pixel_map::schema().type_id));
         assert!(lib.contains(&wgsl::schema().type_id));
         assert!(lib.contains(&compute::schema().type_id));
         assert!(lib.contains(&share::out_schema().type_id));

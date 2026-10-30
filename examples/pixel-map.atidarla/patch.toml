@@ -1,0 +1,36 @@
+# DMX patch for Pixel Map (docs/dmx.md). Coordinates are 0-1 over the image,
+# origin top-left.
+
+# 60 WS2812 pixels along the bottom edge: universe 1, slots 1-180.
+[[fixture]]
+id = "strip"
+type = "pixel-grb"
+universe = 1
+address = 1
+count = 60
+line = [[0.0, 0.95], [1.0, 0.95]]
+
+# Two PARs: one averaging the lower-left quarter, one sampling a point.
+[[fixture]]
+id = "par-left"
+type = "drgbw"
+universe = 1
+address = 201
+rect = [0.0, 0.5, 0.5, 0.3]
+
+[[fixture]]
+id = "par-right"
+type = "led-bar"
+universe = 1
+address = 211
+point = [0.75, 0.65]
+
+# An 8 x 4 serpentine pixel grid over the top half: universe 2.
+[[fixture]]
+id = "wall"
+type = "pixel-rgb"
+universe = 2
+address = 1
+rect = [0.0, 0.0, 1.0, 0.5]
+grid = [8, 4]
+snake = true

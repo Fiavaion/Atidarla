@@ -6,7 +6,7 @@
 //! cook path through short, non-blocking hand-offs, so the render thread
 //! never waits on a device or the network (CLAUDE.md rule 1).
 //!
-//! **Status (M1 pre-work):** OSC in and out ([`osc`]); live audio capture ([`audio_in`]); HAP movie playback ([`video`]); MIDI ([`midi`]); DMX over Art-Net and sACN ([`dmx`]). Other protocols land
+//! **Status (M1 pre-work):** OSC in and out ([`osc`]); live audio capture ([`audio_in`]); HAP movie playback ([`video`]); MIDI ([`midi`]); DMX over Art-Net and sACN ([`dmx`]) with fixtures and pixel mapping ([`fixture`]). Other protocols land
 //! with their operators.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -29,6 +29,7 @@ pub(crate) fn source_addr(target: SocketAddr) -> SocketAddr {
 pub mod audio_in;
 pub mod audio_out;
 pub mod dmx;
+pub mod fixture;
 pub mod image;
 pub mod input;
 pub mod midi;

@@ -116,7 +116,7 @@ through and do not emit offline.
 | Waits | Work on a worker thread; offline the cook waits for it. | Kernel (`pnt.kernel`: compile; a file once; state on the wire), Movie In (opening and every frame; playhead `cue + time * speed`), Audio File In (decode; playhead from time), Text (rasteriser), WGSL (compile; a file once), Compute (compile; a file once; persistent `state` images and buffers also make it stateful), ISF shaders (compile; persistent buffers also make one stateful), Python operators (`py.*`, [`docs/python-ops.md`](python-ops.md): each frame waits for its own result, at most the operator's timeout plus 3 s; those with `state` are also stateful; they run only with `--allow-python-ops`). MSH: every operator (`msh.*`, [`design/msh-operators.md`](design/msh-operators.md)): cooked on a worker thread; offline the cook reads GPU inputs back and waits for the result, so frame *i* uses the inputs of frame *i*. |
 | One frame late | Values are those of the previous frame, always exactly one. | Analyze (GPU readback). Also every Python expression. |
 | Live input | Opens nothing; idle value; `render` warns. | Share In (black), Audio In (no channels), Input Devices (keys up, no gamepad, pointer at rest), MIDI In (no channels), OSC In (no channels), Timecode In (all zero, unlocked). |
-| Sink | Passes its input through; emits nothing; `render` warns. | Share Out, Audio Out, DMX Out, MIDI Out, OSC Out. |
+| Sink | Passes its input through; emits nothing; `render` warns. | Share Out, Audio Out, DMX Out, MIDI Out, OSC Out. Pixel Map sends nothing; its channels (cooked only when something rendered reads them) are its readback, exactly one frame late. |
 
 ## Evidence
 
