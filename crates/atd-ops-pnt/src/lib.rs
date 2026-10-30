@@ -24,11 +24,14 @@
 //! | `pnt.normals`, `smooth`, `connect` (grid hash) | `P` (any) | `N`; the attribute; lines, `near`, `neardist` |
 //! | `pnt.kernel` | the attributes its code reads (Kernel DSL) | the attributes its code writes |
 //! | `pnt.solver`, `pnt.piece` | `init`, `prev`; an attribute or `P` | the state; `piece` |
+//! | `pnt.foreach`, `pnt.foreach_end` | every attribute (pieces: one attribute) | every attribute, `iteration`; the passes merged |
 //! | `img.render_points` (IMG) | `P`, `Cd`, polylines | an image |
 
 mod attr;
 mod emitter;
 mod field;
+mod foreach;
+mod fuse;
 mod kernel;
 mod kit;
 mod neighbours;
@@ -106,6 +109,8 @@ const OPS: &[(Schema, Factory)] = &[
     (solver::solver_schema, solver::create_solver),
     (solver::piece_schema, solver::create_piece),
     (kernel::schema, kernel::create),
+    (foreach::begin_schema, foreach::create_begin),
+    (foreach::end_schema, foreach::create_end),
 ];
 
 /// Every schema this crate registers (PNT operators and Render Points).
@@ -132,6 +137,7 @@ pub fn library(library: &mut OpLibrary) {
         library.add_geo(schema().type_id, *create);
     }
     library.add(render::schema().type_id, render::create);
+    library.set_point_fuser(fuse::create);
     for id in field::ids() {
         library.add_geo(format!("pnt.{id}"), move |d| field::create(d, id));
     }

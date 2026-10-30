@@ -3,7 +3,7 @@
 **Status:** built ahead of M2's formal start at Mark's request (2026-10-18), for review, on the
 geometry core ([`geometry-core.md`](geometry-core.md)). PRD §9 M2 AC5 asks for PNT ≥ 30
 operators "including particles, forces, Solver Block, For-Each and a deformer stack": there are
-now **34 PNT operators** (31 new) plus line drawing in Render Points. Nothing relies on a PRD
+now **34 PNT operators** (31 new; 36 since 2026-10-30 with For-Each and For-Each End) plus line drawing in Render Points. Nothing relies on a PRD
 decision still marked Proposed; the open points are under "Questions". Design notes for Solver
 and For-Each: [`docs/design/solver-foreach.md`](../../design/solver-foreach.md).
 
@@ -23,7 +23,7 @@ offline class in `classify()` (`crates/atd-cli/src/render.rs`, `docs/render.md`)
 | Deformers | Transform (with `v`, `N`), Bend, Twist, Taper, Wave (linear, radial) | `src/transform.rs`, `src/field.rs` |
 | Attributes (any type) | Attribute (constant, ramp, index, noise), Attribute Math (19 operations, A op B), Randomize (uniform, normal, direction; by `id` or a key attribute), Colour by Attribute (ramps into `Cd`) | `src/attr.rs` |
 | Neighbours (GPU grid hash) | Normals (covariance, closed-form smallest eigenvector), Smooth (weighted average, iterations), Connect (k nearest as two-point polylines, `near`, `neardist`) | `src/neighbours.rs` |
-| Loops and pieces | Solver (loop entry: `init`, `prev` feedback; a Pack around it is a Solver Block), Piece (For-Each Begin: `piece` by chunks, attribute buckets or grid cells) | `src/solver.rs` |
+| Loops and pieces | Solver (loop entry: `init`, `prev` feedback; Sub-steps; a Pack around it is a Solver Block), Piece (`piece` by chunks, attribute buckets or grid cells), For-Each and For-Each End (a body evaluated per pass, count or pieces, merged; added 2026-10-30) | `src/solver.rs`, `src/foreach.rs` |
 | Render Points (IMG) | Draw: points, lines (polyline primitives as a line list) or both | `src/render.rs` |
 
 Offline classes: Stateful: Emitter, Solver (with Particles); every other new operator is Pure.
@@ -100,12 +100,37 @@ the top-level loop's result; Piece and Randomize keyed by piece.
   Applied to Compact, Sort, Merge, Copy to Points, Emitter and the geometry core's Particles
   (its output is unchanged: the core's tests, examples and PT-2 numbers above).
 
+## Added 2026-10-30: sub-steps, For-Each blocks, deformer fusion
+
+Mark ratified all three for M2 on 2026-10-30 (questions 1-3 below). Design and choices:
+[`solver-foreach.md`](../../design/solver-foreach.md) (loops, sub-steps, For-Each) and
+[`geometry-attributes.md`](../../design/geometry-attributes.md) §9 "Deformer fusion".
+
+- **Engine loops** (`atd_gpu::engine`, `GeoOp::repeat`, `Repeat`, `GeoCtx::iteration` and
+  `iterations`): a GEO node with a feedback input heads a loop; the engine unrolls the frame's
+  plan into passes, submits between passes and divides `dt` for sub-steps. No format change.
+- **Solver** gains Sub-steps (1-64): four sub-steps at 50 fps are bit-identical to one step at
+  200 fps.
+- **For-Each** (`pnt.foreach`) and **For-Each End** (`pnt.foreach_end`): count or pieces, up to
+  256 passes, `iteration` on every point; End merges the passes (compacting GPU counts on the
+  GPU). Example `examples/pnt-foreach.atidarla`; offline class Pure.
+- **Deformer fusion** (`GeoOp::point_stage`, `PointFuser`, `OpLibrary::set_point_fuser`,
+  `Engine::set_fusion`, `Engine::fused_last_frame`; `src/fuse.rs`): Bend, Twist, Taper, Wave,
+  Attract, Vortex, Drag, Gravity, Collide, Integrate and Transform fuse; Wind and Turbulence do
+  not (noise-library rounding on Metal). Fused buffers equal unfused ones byte for byte. Bench
+  `pnt.fusion_30_transforms_2m`: fused p50 1.26-1.61 ms, unfused 8.48-9.18 ms (M5 Pro, Metal,
+  indicative). Transform is now one kernel over `P`, `v`, `N`.
+- **Buffer pool**: a frame's returned buffers are kept in a fixed order, so loops keep their
+  bind groups cached (`tests/alloc_batch.rs`).
+
+Evidence: the 2026-10-30 row of the pre-work log in [`../M2.md`](../M2.md).
+
 ## Not done
 
-- Solver sub-steps and For-Each iterations (designed in `solver-foreach.md`, question 1-2).
-- Deformer fusion in the planner: measured above (1.67 → 0.15 ms for 30 transforms; the noise
-  stack is half arithmetic); a planner rewrite that composes straight runs of Transforms (or
-  joins per-point kernels) needs the engine, not this crate.
+- Per-pass parameters by expression (an `iteration` variable in expressions): per-pass
+  variation is through attribute-keyed operators (`solver-foreach.md` question 3).
+- Loops nested in a loop's body make one pass per outer pass; an MSH body per piece.
+- Fusion of `pnt.noise` and the noise-based forces (Wind, Turbulence).
 - Per-piece parameters other than a key attribute (Kernel DSL).
 - The static `attributes` list in `OperatorSchema` (as the geometry core says: one coordinated
   change); attributes are named in each operator's summary and help.
@@ -115,12 +140,9 @@ the top-level loop's result; Piece and Randomize keyed by piece.
 
 ## Questions for Mark
 
-1. **Solver sub-steps** by flatten-time unrolling of a Solver Block Pack and a `dt` scale in the
-   geometry's detail values: build in M2, or is one step per frame enough for now?
-2. **For-Each** as "a `piece` attribute plus operators keyed by it" until the Kernel DSL: accept
-   as M2's For-Each?
-3. **Fusion**: 30 cheap deformers cost 1.7 ms at 2M points (under the 3 ms threshold); composing
-   them would cost 0.15 ms. Worth an engine-side fusion of Transform runs in M2, or later?
+1. ~~Solver sub-steps~~: ratified 2026-10-30, built (engine loops, not flatten-time unrolling).
+2. ~~For-Each~~: ratified 2026-10-30, built as blocks evaluated per pass (Piece stays).
+3. ~~Fusion~~: ratified 2026-10-30, built in the engine for per-point stages.
 4. **Split** as Delete + Invert, and **Delete by attribute comparison** instead of expressions:
    enough for M2?
 5. **Render Points lines** (one-pixel polylines): keep in Render Points, or move to the 3D
@@ -130,9 +152,10 @@ the top-level loop's result; Piece and Randomize keyed by piece.
 
 | ID | Decision | Rationale |
 |---|---|---|
-| A30 (was PNT-1) | PNT operators that change the point count (Delete, Subset, Age, Merge, Copy, Emitter) give GPU-counted results when any count is only on the GPU, and never read a count back. | Rule 1; compaction by an integer scan keeps order and determinism (A29, was GEO-4). |
-| A31 (was PNT-2) | The Solver Block is a Pack around `pnt.solver` (init + feedback); sub-steps, if built, unroll at flatten time. | State stays on the wire (D6); no container type in the engine. |
-| A32 (was PNT-3) | For-Each in M2 is a `piece` attribute (Piece) and operators keyed by an attribute (Randomize, Group, Delete, Sort, Colour); per-piece parameters wait for the Kernel DSL. | Design §3.2 "once over all elements with the piece index as an attribute"; one dispatch per operator. |
+| A30 (was PNT-1) | PNT operators that change the point count (Delete, Subset, Age, Merge, Copy, Emitter) give GPU-counted results when any count is only on the GPU, and never read a count back. | Rule 1; compaction by an integer scan keeps order and determinism (GEO-4). |
+| A31 (was PNT-2; amended 2026-10-30) | The Solver Block is a Pack around `pnt.solver` (init + feedback); sub-steps are engine loops (`GeoOp::repeat`): the body cooks N times a frame with `dt / N`, each pass submitted on its own. | State stays on the wire (D6); no container type in the engine and no file-format change. |
+| A32 (was PNT-3; amended 2026-10-30) | For-Each in M2 is a block (`pnt.foreach` … `pnt.foreach_end`, closed by a feedback wire) whose body cooks once per pass (count or pieces, at most 256) with an `iteration` attribute, plus the `piece` attribute and keyed operators for one-dispatch work; per-pass parameters by expression wait. | Ratified 2026-10-30; same engine loops as sub-steps. |
+| A56 (was PNT-5) | The engine fuses straight runs of per-point stages (`GeoOp::point_stage`) whose inner results cannot be read into one kernel; stage code is shared with the unfused kernels and inputs pass through an opaque XOR, so fused output is byte-identical. | Design D9 after S3; 30 Transforms at 2M points 5.7-6.7× faster on an M5 Pro. |
 | A33 (was PNT-4) | Operators that write a new header each frame bind a fixed header of their own and copy it to the pooled output header. | Bind-group caches keyed by pooled headers thrash when many operators rotate headers (measured: 6 bind groups a frame before, 0 after). |
 
 ## For the other areas

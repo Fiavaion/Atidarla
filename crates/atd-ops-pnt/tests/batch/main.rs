@@ -4,6 +4,8 @@
 
 mod attributes;
 mod fields;
+mod foreach;
+mod fusion;
 mod neighbours;
 mod shaping;
 mod solver;
@@ -97,6 +99,15 @@ impl<'a> Build<'a> {
         let n = self.node(ty, params);
         self.wire(from, n, "in");
         n
+    }
+
+    /// Sets a parameter of a node added earlier.
+    pub fn set(&mut self, node: NodeId, param: &str, value: Value) {
+        self.edits.push(Edit::SetParam {
+            node,
+            param: param.into(),
+            value: Some(Param::constant(value)),
+        });
     }
 
     pub fn wire(&mut self, from: NodeId, to: NodeId, socket: &str) {

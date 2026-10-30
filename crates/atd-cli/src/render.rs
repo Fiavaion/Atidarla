@@ -464,7 +464,7 @@ pub fn classify(type_id: &str) -> Option<Class> {
         // The M2 PNT batch (`docs/milestones/m2/pnt-batch.md`).
         "pnt.age" | "pnt.attract" | "pnt.attribute" | "pnt.attribute_math" | "pnt.bend"
         | "pnt.collide" | "pnt.colour" | "pnt.connect" | "pnt.copy" | "pnt.delete" | "pnt.drag"
-        | "pnt.gravity" | "pnt.group" | "pnt.integrate" | "pnt.merge" | "pnt.normals"
+        | "pnt.foreach" | "pnt.foreach_end" | "pnt.gravity" | "pnt.group" | "pnt.integrate" | "pnt.merge" | "pnt.normals"
         | "pnt.piece" | "pnt.randomize" | "pnt.scatter" | "pnt.smooth" | "pnt.sort"
         | "pnt.subset" | "pnt.taper" | "pnt.transform" | "pnt.turbulence" | "pnt.twist"
         | "pnt.vortex" | "pnt.wave" | "pnt.wind" => Pure,

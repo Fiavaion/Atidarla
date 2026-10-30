@@ -15,7 +15,7 @@
 
 use atd_core::geo::{AttrType, names};
 use atd_core::registry::{OperatorSchema, ParamSchema};
-use atd_gpu::engine::{GeoCtx, GeoOp, Params};
+use atd_gpu::engine::{GeoCtx, GeoOp, Params, PointStage, STAGE_BYTES};
 use atd_gpu::geo::kernels::{Bind, Packer};
 
 use crate::kit::{self, Missing, PointKernel, menu_index, unit, vec3};
@@ -55,7 +55,7 @@ struct Spec {
     budget_us: u32,
 }
 
-const DECL: &str = "struct Params {
+pub(crate) const DECL: &str = "struct Params {
     a: vec4f,
     b: vec4f,
     c: vec4f,
@@ -64,6 +64,8 @@ const DECL: &str = "struct Params {
     seed: u32,
     mode: u32,
     extra: u32,
+    // Always 0 (see `crate::fuse::OPAQUE`).
+    zero: vec4u,
 };
 ";
 
@@ -578,43 +580,83 @@ pub fn schemas() -> Vec<OperatorSchema> {
         .collect()
 }
 
+/// Field operators never fused. Wind calls the curl-noise library, and two
+/// Winds in one fused kernel round differently from two kernels on Metal (up
+/// to 4 ulps of `v`, measured 2026-10-30): the compiler treats the two
+/// inlined copies of that large function differently. Turbulence calls it
+/// too (its own repeats matched, but it is left out on the same grounds).
+/// The deformers and the other forces give identical bytes fused.
+const NOT_FUSED: &[&str] = &["wind", "turbulence"];
+
+/// The WGSL `fn point(i: u32)` of field operator `id` (over `P` and `v`
+/// with uniforms `params: Params`, [`DECL`]), for fusion.
+pub(crate) fn body(id: &str) -> Option<&'static str> {
+    SPECS.iter().find(|s| s.id == id).map(|s| s.body)
+}
+
 /// Short names (`attract`, …) of every field operator.
 pub fn ids() -> impl Iterator<Item = &'static str> {
     SPECS.iter().map(|s| s.id)
 }
 
-/// A field operator instance of `id` (its short name, such as `attract`).
-pub fn create(device: &wgpu::Device, id: &str) -> Box<dyn GeoOp> {
-    let spec = spec(id);
-    let (binds, decls) = match spec.target {
+/// The unfused kernel's WGSL for `spec` after the prelude: the uniforms,
+/// the bindings, the stage function and `fn point(i: u32)`, which loads the
+/// point, runs the stage and stores what it writes.
+fn kernel_source(spec: &Spec) -> String {
+    let (decls, load, store) = match spec.target {
         Target::Velocity => (
-            &[Bind::ReadWrite, Bind::Read][..],
             "@group(0) @binding(2) var<storage, read_write> v: array<vec4f>;
 @group(0) @binding(3) var<storage, read> P: array<vec4f>;
 ",
+            "var p = atd_opaque(P[i], z);
+    var w = atd_opaque(v[i], z);",
+            "v[i] = w;",
         ),
         Target::Position => (
-            &[Bind::ReadWrite][..],
             "@group(0) @binding(2) var<storage, read_write> P: array<vec4f>;
 ",
+            "var p = atd_opaque(P[i], z);
+    var w = vec4f(0.0);",
+            "P[i] = p;",
         ),
         Target::Both => (
-            &[Bind::ReadWrite, Bind::ReadWrite][..],
             "@group(0) @binding(2) var<storage, read_write> P: array<vec4f>;
 @group(0) @binding(3) var<storage, read_write> v: array<vec4f>;
 ",
+            "var p = atd_opaque(P[i], z);
+    var w = atd_opaque(v[i], z);",
+            "P[i] = p;
+    v[i] = w;",
         ),
+    };
+    format!(
+        "{DECL}{decls}{}{}
+fn point(i: u32) {{
+    let z = params.zero.x;
+    {load}
+    var n = vec4f(0.0);
+    {}(&p, &w, &n, params);
+    {store}
+}}
+",
+        crate::fuse::OPAQUE,
+        crate::fuse::stage_function(spec.id, spec.body, "Params"),
+        crate::fuse::function(spec.id),
+    )
+}
+
+/// A field operator instance of `id` (its short name, such as `attract`).
+pub fn create(device: &wgpu::Device, id: &str) -> Box<dyn GeoOp> {
+    let spec = spec(id);
+    let binds = match spec.target {
+        Target::Velocity => &[Bind::ReadWrite, Bind::Read][..],
+        Target::Position => &[Bind::ReadWrite][..],
+        Target::Both => &[Bind::ReadWrite, Bind::ReadWrite][..],
     };
     let label = format!("pnt.{}", spec.id);
     Box::new(Field {
         spec,
-        kernel: PointKernel::new(
-            device,
-            &label,
-            &format!("{DECL}{decls}{}\n", spec.body),
-            binds,
-            80,
-        ),
+        kernel: PointKernel::new(device, &label, &kernel_source(spec), binds, 96),
     })
 }
 
@@ -623,7 +665,37 @@ struct Field {
     kernel: PointKernel,
 }
 
+impl Field {
+    /// The uniforms of one cook (the same for the fused stage).
+    fn uniforms(&self, params: &Params<'_>, dt: f64) -> Packer<96> {
+        let v = (self.spec.pack)(params);
+        let mut u = Packer::<96>::new();
+        u.vec4(v.a)
+            .vec4(v.b)
+            .vec4(v.c)
+            .vec4(v.d)
+            .f32(dt as f32)
+            .u32(v.seed)
+            .u32(v.mode)
+            .u32(v.extra);
+        u
+    }
+}
+
 impl GeoOp for Field {
+    fn point_stage(&self, params: &Params<'_>, dt: f64) -> Option<PointStage> {
+        if NOT_FUSED.contains(&self.spec.id) {
+            return None;
+        }
+        let mut uniforms = [0u8; STAGE_BYTES];
+        uniforms[..96].copy_from_slice(self.uniforms(params, dt).bytes());
+        Some(PointStage {
+            kind: self.spec.id,
+            uniforms,
+            velocity: self.spec.target != Target::Position,
+        })
+    }
+
     fn cook(&mut self, ctx: &mut GeoCtx<'_>) -> Result<(), String> {
         let Some(mut g) = ctx.take_input(0) else {
             ctx.output.clear();
@@ -634,16 +706,7 @@ impl GeoOp for Field {
             return Ok(());
         }
         let hdr = kit::header_of(&g)?;
-        let v = (self.spec.pack)(&ctx.params);
-        let mut u = Packer::<80>::new();
-        u.vec4(v.a)
-            .vec4(v.b)
-            .vec4(v.c)
-            .vec4(v.d)
-            .f32(ctx.dt as f32)
-            .u32(v.seed)
-            .u32(v.mode)
-            .u32(v.extra);
+        let u = self.uniforms(&ctx.params, ctx.dt);
         match self.spec.target {
             Target::Velocity => {
                 let pos = kit::readable(ctx, &g, names::P, AttrType::VEC3)?;
@@ -672,26 +735,13 @@ mod tests {
     #[test]
     fn every_field_kernel_is_valid_wgsl() {
         for s in SPECS {
-            let decls = match s.target {
-                Target::Velocity => {
-                    "@group(0) @binding(2) var<storage, read_write> v: array<vec4f>;
-@group(0) @binding(3) var<storage, read> P: array<vec4f>;"
-                }
-                Target::Position => {
-                    "@group(0) @binding(2) var<storage, read_write> P: array<vec4f>;"
-                }
-                Target::Both => {
-                    "@group(0) @binding(2) var<storage, read_write> P: array<vec4f>;
-@group(0) @binding(3) var<storage, read_write> v: array<vec4f>;"
-                }
-            };
             let src = format!(
-                "{}{DECL}{decls}\n{}
+                "{}{}
 @group(0) @binding(0) var<uniform> params: Params;
 @group(0) @binding(1) var<storage, read> hdr: GeoHeader;
 @compute @workgroup_size(256) fn main(@builtin(global_invocation_id) gid: vec3u) {{ if (gid.x < hdr.count) {{ point(gid.x); }} }}",
                 kit::prelude(),
-                s.body
+                kernel_source(s)
             );
             let module = naga::front::wgsl::parse_str(&src)
                 .unwrap_or_else(|e| panic!("{}: {}", s.id, e.emit_to_string(&src)));

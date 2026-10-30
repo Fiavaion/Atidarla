@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use atd_core::geo::{AttrType, names};
 use atd_core::registry::{OperatorSchema, ParamSchema};
-use atd_gpu::engine::{GeoCtx, GeoOp};
+use atd_gpu::engine::{GeoCtx, GeoOp, Params, Repeat};
 use atd_gpu::geo::kernels::{Bind, Packer};
 
 use crate::kit::{self, PointKernel, desc, menu_index, typed_access};
@@ -18,13 +18,15 @@ pub fn solver_schema() -> OperatorSchema {
     let mut s = crate::pnt(
         "solver",
         "Solver",
-        "The entry of a simulation loop: outputs `init` at the start (first frame, Reset, until Start Frame, or while `prev` has no geometry), then the previous frame's state from `prev`. Wire the end of the body (for example Gravity → Collide → Integrate → Age) into `prev`; the body may sit in a Pack (a Solver Block). The state is updated in place when nothing else reads it.",
+        "The entry of a simulation loop: outputs `init` at the start (first frame, Reset, until Start Frame, or while `prev` has no geometry), then the previous frame's state from `prev`. Wire the end of the body (for example Gravity → Collide → Integrate → Age) into `prev`; the body may sit in a Pack (a Solver Block). The state is updated in place when nothing else reads it. Sub-steps run the body several times per frame with a smaller step.",
         &[("init", false), ("prev", true)],
         vec![
             ParamSchema::toggle("reset", "Reset", false)
                 .help("While on, outputs `init` every frame (the simulation restarts when it is turned off)."),
             ParamSchema::int("start_frame", "Start Frame", 0, Some(0), None)
                 .help("Up to this frame the output is `init`; the simulation runs from the next."),
+            ParamSchema::int("substeps", "Sub-steps", 1, Some(1), Some(i64::from(MAX_SUBSTEPS)))
+                .help("Runs the loop's body this many times per frame, each with the frame's step divided among them (a finer, steadier simulation at the same frame rate; the body costs that many times more)."),
         ],
         20,
     );
@@ -40,17 +42,31 @@ pub fn create_solver(_device: &wgpu::Device) -> Box<dyn GeoOp> {
     Box::new(Solver { started: false })
 }
 
+/// Most sub-steps per frame.
+pub const MAX_SUBSTEPS: u32 = 64;
+
 impl GeoOp for Solver {
+    fn repeat(&self, params: &Params<'_>) -> Repeat {
+        Repeat::SubSteps(params.i64("substeps").clamp(1, i64::from(MAX_SUBSTEPS)) as u32)
+    }
+
     fn cook(&mut self, ctx: &mut GeoCtx<'_>) -> Result<(), String> {
         let p = ctx.params;
         let start = p.i64("start_frame").max(0) as u64;
         let has_prev = ctx.input(1).is_some_and(|g| g.points() > 0);
-        let restart = !self.started || p.bool("reset") || ctx.frame <= start || !has_prev;
+        // A frame's later sub-steps continue from the one before (`prev` is
+        // the body's end as the last sub-step left it).
+        let first = ctx.iteration == 0;
+        let restart =
+            !has_prev || first && (!self.started || p.bool("reset") || ctx.frame <= start);
         self.started = true;
-        let out = if restart {
+        let out = if !restart {
+            ctx.take_input(1)
+        } else if first {
             ctx.take_input(0)
         } else {
-            ctx.take_input(1)
+            // `init` may have been handed over to the first sub-step.
+            ctx.input(0).cloned()
         };
         *ctx.output = out.unwrap_or_default();
         Ok(())

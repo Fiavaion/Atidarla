@@ -153,6 +153,9 @@ fn s3_deformer_stack_fused_and_unfused() {
     // (a) 30 Transforms of 1° each about Z, animated through the uniform
     // scale (1 + 0 × time keeps it at 1 but makes every node cook).
     let Some(mut a) = engine() else { return };
+    // The engine fuses such a run now; this measures the nodes one by one
+    // (`atidarla bench` has the fused case, `pnt.fusion_30_transforms_2m`).
+    a.set_fusion(false);
     let rot = [("rotate", json!([0.0, 0.0, 1.0]))];
     let end_a = stack(
         &mut a,

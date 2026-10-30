@@ -183,7 +183,7 @@ fn batch_chains_steady_state_allocations() {
     let rand = n.chain(&mut e, math, "pnt.randomize", &[]);
     let r2 = n.node(&mut e, "img.render_points", &[]);
     n.wire(rand, r2, "geo");
-    // 3. Neighbours and a solver.
+    // 3. Neighbours and a solver (three sub-steps a frame).
     let sphere = n.node(
         &mut e,
         "pnt.scatter",
@@ -195,7 +195,7 @@ fn batch_chains_steady_state_allocations() {
     let links = n.chain(&mut e, nrm, "pnt.connect", &[("radius", json!(0.1))]);
     let r3 = n.node(&mut e, "img.render_points", &[("draw", json!("both"))]);
     n.wire(links, r3, "geo");
-    let solver = n.node(&mut e, "pnt.solver", &[]);
+    let solver = n.node(&mut e, "pnt.solver", &[("substeps", json!(3))]);
     n.wire(sphere, solver, "init");
     let pull = n.chain(&mut e, solver, "pnt.attract", &[]);
     let step = n.chain(&mut e, pull, "pnt.integrate", &[]);
@@ -212,15 +212,58 @@ fn batch_chains_steady_state_allocations() {
     n.wire(age, solver, "prev");
     let r4 = n.node(&mut e, "img.render_points", &[]);
     n.wire(age, r4, "geo");
+    // 4. For-Each blocks: four pieces with a deformer and colours keyed by
+    // the pass; eight counted passes of an animated wave.
+    let chunks = n.chain(&mut e, column, "pnt.piece", &[("size", json!(2048))]);
+    let begin = n.chain(
+        &mut e,
+        chunks,
+        "pnt.foreach",
+        &[("mode", json!("pieces")), ("iterations", json!(4))],
+    );
+    let tint = n.chain(
+        &mut e,
+        begin,
+        "pnt.randomize",
+        &[("key", json!("iteration"))],
+    );
+    let lean = n.chain(&mut e, tint, "pnt.twist", &[]);
+    n.animate(lean, "angle", "45 * sin(time)");
+    let end = n.chain(&mut e, lean, "pnt.foreach_end", &[]);
+    n.wire(end, begin, "end");
+    let begin2 = n.chain(&mut e, sphere, "pnt.foreach", &[("iterations", json!(8))]);
+    let ripple = n.chain(&mut e, begin2, "pnt.wave", &[]);
+    n.animate(ripple, "phase", "time * 45");
+    let end2 = n.chain(&mut e, ripple, "pnt.foreach_end", &[]);
+    n.wire(end2, begin2, "end");
+    let r5 = n.node(&mut e, "img.render_points", &[]);
+    n.wire(end, r5, "geo");
+    let r6 = n.node(&mut e, "img.render_points", &[]);
+    n.wire(end2, r6, "geo");
     e.edit("chains", n.edits).unwrap();
-    let out = [r1, r2, r3, r4];
+    let out = [r1, r2, r3, r4, r5, r6];
     let mut t = 0.0;
     for _ in 0..40 {
         e.cook(&out, t).unwrap();
         t += 1.0 / 60.0;
     }
+    // Fused pipelines are built on a worker thread: warm up until they are
+    // in use (Bend + Wave in chain 2 fuse).
+    for _ in 0..5000 {
+        if !e.pending() {
+            break;
+        }
+        e.cook(&out, t).unwrap();
+        t += 1.0 / 60.0;
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert!(!e.pending(), "fused pipelines built");
+    e.cook(&out, t).unwrap();
+    t += 1.0 / 60.0;
+    assert!(e.fused_last_frame() >= 2, "a fused run is part of the test");
     for node in [
-        sys, emit, floor, colour, cut, rand, nrm, links, solver, age, r1, r2, r3, r4,
+        sys, emit, floor, colour, cut, rand, nrm, links, solver, age, begin, end, begin2, end2, r1,
+        r2, r3, r4, r5, r6,
     ] {
         assert_eq!(e.error(node), None);
     }

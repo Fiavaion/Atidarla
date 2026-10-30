@@ -30,3 +30,4 @@ All platforms.
 ## Examples
 
 - [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `both`
+- [PNT For-Each](../../../examples/pnt-foreach.atidarla/) — `both`

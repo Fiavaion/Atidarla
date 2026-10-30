@@ -1,0 +1,152 @@
+# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 16
+
+[[node]]
+id = 0
+name = "column"
+type = "pnt.scatter"
+pos = [0.0, 0.0]
+params.count = 4000
+params.shape = "box"
+params.size = [0.3, 1.6, 0.3]
+
+[[node]]
+id = 1
+name = "copies"
+type = "pnt.foreach"
+pos = [220.0, 0.0]
+inputs.end = { node = 6, output = "out" }
+inputs.in = { node = 0, output = "out" }
+params.iterations = 6
+
+[[node]]
+id = 2
+name = "spread"
+type = "pnt.attribute_math"
+pos = [440.0, 0.0]
+inputs.in = { node = 1, output = "out" }
+params.a = "iteration"
+params.constant = [-2.5, 0.4, 0.0, 0.0]
+params.constant2 = [2.5, 0.4, 0.0, 0.0]
+params.operation = "fit"
+params.range = [0.0, 5.0]
+params.result = "offset"
+params.result_type = "vec3"
+
+[[node]]
+id = 3
+name = "swirl"
+type = "pnt.twist"
+pos = [660.0, 0.0]
+inputs.in = { node = 2, output = "out" }
+params.angle = { value = 90.0, expr = "180 * sin(time * 0.7)" }
+
+[[node]]
+id = 4
+name = "place"
+type = "pnt.attribute_math"
+pos = [880.0, 0.0]
+inputs.in = { node = 3, output = "out" }
+params.a = "P"
+params.b = "offset"
+params.b_from = "attribute"
+params.operation = "add"
+
+[[node]]
+id = 5
+name = "tint"
+type = "pnt.randomize"
+pos = [1100.0, 0.0]
+inputs.in = { node = 4, output = "out" }
+params.key = "iteration"
+params.min = [0.2, 0.3, 0.8, 1.0]
+
+[[node]]
+id = 6
+name = "merge_copies"
+type = "pnt.foreach_end"
+pos = [1320.0, 0.0]
+inputs.in = { node = 5, output = "out" }
+
+[[node]]
+id = 7
+name = "strip"
+type = "pnt.scatter"
+pos = [0.0, 220.0]
+params.centre = [0.0, -1.3, 0.0]
+params.count = 6000
+params.shape = "rectangle"
+params.size = [5.0, 0.4, 0.0]
+
+[[node]]
+id = 8
+name = "bands"
+type = "pnt.piece"
+pos = [220.0, 220.0]
+inputs.in = { node = 7, output = "out" }
+params.attribute = "P"
+params.low = -2.5
+params.rule = "attribute"
+
+[[node]]
+id = 9
+name = "per_band"
+type = "pnt.foreach"
+pos = [440.0, 220.0]
+inputs.end = { node = 12, output = "out" }
+inputs.in = { node = 8, output = "out" }
+params.iterations = 5
+params.mode = "pieces"
+
+[[node]]
+id = 10
+name = "band_colour"
+type = "pnt.randomize"
+pos = [660.0, 220.0]
+inputs.in = { node = 9, output = "out" }
+params.key = "iteration"
+params.max = [1.0, 0.8, 0.3, 1.0]
+params.min = [0.8, 0.2, 0.1, 1.0]
+
+[[node]]
+id = 11
+name = "ripple"
+type = "pnt.wave"
+pos = [880.0, 220.0]
+inputs.in = { node = 10, output = "out" }
+params.amplitude = 0.12
+params.phase = { value = 0.0, expr = "time * 120" }
+
+[[node]]
+id = 12
+name = "merge_bands"
+type = "pnt.foreach_end"
+pos = [1100.0, 220.0]
+inputs.in = { node = 11, output = "out" }
+
+[[node]]
+id = 13
+name = "both"
+type = "pnt.merge"
+pos = [1540.0, 110.0]
+inputs.a = { node = 6, output = "out" }
+inputs.b = { node = 12, output = "out" }
+
+[[node]]
+id = 14
+name = "draw"
+type = "img.render_points"
+pos = [1760.0, 110.0]
+inputs.geo = { node = 13, output = "out" }
+params.height = 3.4
+params.intensity = 0.6
+
+[[node]]
+id = 15
+name = "glow"
+type = "img.bloom"
+pos = [1980.0, 110.0]
+inputs.in = { node = 14, output = "out" }
+params.intensity = 0.5
+params.threshold = 0.5

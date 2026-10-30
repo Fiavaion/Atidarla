@@ -4,6 +4,7 @@
 use atd_core::graph::{Edit, Endpoint, Network, Node, NodeId, Param, Wire};
 use atd_core::pack::{PackDef, PackInput, PackOutput, PackSet};
 use atd_core::registry::Registry;
+use atd_gpu::engine::CookMode;
 use serde_json::json;
 
 use crate::*;
@@ -60,6 +61,96 @@ fn a_solver_loop_integrates_and_resets() {
     .unwrap();
     cook(&mut e, &[step], 5);
     assert_rows(&floats(&e, step, "v"), &[[0.0, -10.0 * DT, 0.0]; 4], 1e-6);
+}
+
+/// Grid → Solver (Sub-steps `n`) → Gravity → Integrate → back.
+fn falling_in(b: &mut Build<'_>, substeps: u32) -> (NodeId, NodeId) {
+    let (solver, step) = falling(b);
+    b.set(solver, "substeps", json!(substeps));
+    (solver, step)
+}
+
+/// Four sub-steps per frame at 50 fps are one step per frame at 200 fps,
+/// bit for bit (offline, the step is divided exactly), and the state carries
+/// over from frame to frame.
+#[test]
+fn solver_substeps_equal_a_four_times_finer_frame_rate() {
+    let _g = serial();
+    let Some(mut e) = engine(8) else { return };
+    let mut b = Build::new(&mut e);
+    let (_, step) = falling_in(&mut b, 4);
+    b.done();
+    for f in 0..5 {
+        cook(&mut e, &[step], f);
+    }
+    let Some(mut fine) = engine(8) else { return };
+    fine.set_mode(CookMode::Offline { fps: 200.0 });
+    let mut b = Build::new(&mut fine);
+    let (_, fine_step) = falling(&mut b);
+    b.done();
+    for f in 0..20 {
+        cook(&mut fine, &[fine_step], f);
+    }
+    assert_eq!(floats(&e, step, "P"), floats(&fine, fine_step, "P"));
+    assert_eq!(floats(&e, step, "v"), floats(&fine, fine_step, "v"));
+    assert_rows(&floats(&e, step, "v"), &[[0.0, -50.0 * DT, 0.0]; 4], 1e-5);
+}
+
+/// One frame of four sub-steps from init: v = −10 dt; y falls by
+/// 10 (dt/4)² (1 + 2 + 3 + 4).
+#[test]
+fn one_frame_of_substeps_from_init() {
+    let _g = serial();
+    let Some(mut e) = engine(8) else { return };
+    let mut b = Build::new(&mut e);
+    let (_, step) = falling_in(&mut b, 4);
+    b.done();
+    cook(&mut e, &[step], 0);
+    assert_rows(&floats(&e, step, "v"), &[[0.0, -10.0 * DT, 0.0]; 4], 1e-6);
+    let h = DT / 4.0;
+    let dy = -10.0 * h * h * 10.0;
+    let p = floats(&e, step, "P");
+    assert!(close(&p[0], &[-1.0, -1.0 + dy, 0.0], 1e-6), "{p:?}");
+}
+
+/// Each sub-step's uniforms reach its own dispatches: an Emitter in a
+/// four-sub-step loop gives every particle a different id, in order.
+#[test]
+fn an_emitter_in_substeps_numbers_every_particle_once() {
+    let _g = serial();
+    let Some(mut e) = engine(8) else { return };
+    let mut b = Build::new(&mut e);
+    let sys = b.node(
+        "pnt.particles",
+        &[
+            ("capacity", json!(1000)),
+            ("rate", json!(0.0)),
+            ("attract", json!(0.0)),
+            ("drag", json!(0.0)),
+            ("curl_amplitude", json!(0.0)),
+        ],
+    );
+    let solver = b.node("pnt.solver", &[("substeps", json!(4))]);
+    b.wire(sys, solver, "init");
+    let src = line3(&mut b);
+    let emit = b.after(
+        solver,
+        "pnt.emitter",
+        &[("rate", json!(500.0)), ("life", json!(10.0))],
+    );
+    b.wire(src, emit, "source");
+    b.wire(emit, solver, "prev");
+    b.done();
+    for f in 0..5 {
+        cook(&mut e, &[emit], f);
+    }
+    // 500 per second for five frames of 1/50 s, emitted over 20 sub-steps.
+    assert_eq!(count(&e, emit), 50);
+    let base = 1u32 << 30;
+    assert_eq!(
+        words(&e, emit, "id"),
+        (base..base + 50).collect::<Vec<u32>>()
+    );
 }
 
 #[test]

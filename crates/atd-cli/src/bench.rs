@@ -365,6 +365,165 @@ fn pt2(gpu: &GpuContext) -> anyhow::Result<Case> {
     })
 }
 
+/// Deformer fusion (design: geometry-attributes.md §3.2): 30 Transforms over
+/// 2M points, animated so every node cooks every frame, cooked fused (one
+/// pass) and unfused (30 passes) on two engines of one device. Reports the
+/// GPU time of each (p50 over 100 frames) and checks that both give the same
+/// bytes of `P`.
+fn fusion(gpu: &GpuContext) -> anyhow::Result<Case> {
+    use atd_core::graph::{Edit, Endpoint, Node, NodeId, Param, Wire};
+    use atd_gpu::engine::{Engine, EngineConfig, OpLibrary};
+    use serde_json::json;
+
+    let features = atd_gpu::optional_features(&gpu.adapter)
+        | (gpu.adapter.features() & wgpu::Features::TIMESTAMP_QUERY);
+    let (device, queue) = pollster::block_on(gpu.adapter.request_device(&wgpu::DeviceDescriptor {
+        label: Some("atd-bench-fusion"),
+        required_features: features,
+        required_limits: atd_gpu::required_limits(&gpu.adapter),
+        ..Default::default()
+    }))
+    .context("creating the fusion device")?;
+    let software = gpu.adapter.get_info().device_type == wgpu::DeviceType::Cpu;
+    let points = if software { 20_000 } else { 2_000_000 };
+    let build = |fused: bool| -> anyhow::Result<(Engine, NodeId)> {
+        let mut library = OpLibrary::default();
+        atd_ops_pnt::library(&mut library);
+        let mut e = Engine::new(
+            device.clone(),
+            queue.clone(),
+            crate::builtin_registry(),
+            library,
+            EngineConfig::default(),
+        );
+        e.set_fusion(fused);
+        let mut edits = Vec::new();
+        let mut last = e.alloc_id();
+        edits.push(Edit::AddNode {
+            node: Node::new(last, "pnt.points", "cloud"),
+        });
+        for (param, value) in [("shape", json!("random")), ("count", json!(points))] {
+            edits.push(Edit::SetParam {
+                node: last,
+                param: param.into(),
+                value: Some(Param::constant(value)),
+            });
+        }
+        for k in 0..30 {
+            let d = e.alloc_id();
+            edits.push(Edit::AddNode {
+                node: Node::new(d, "pnt.transform", format!("turn{k}")),
+            });
+            edits.push(Edit::SetParam {
+                node: d,
+                param: "rotate".into(),
+                value: Some(Param::constant(json!([0.0, 0.0, 1.0]))),
+            });
+            edits.push(Edit::SetParam {
+                node: d,
+                param: "uniform_scale".into(),
+                value: Some(Param {
+                    value: json!(1.0),
+                    expr: Some("1 + 0 * time".into()),
+                    bind: None,
+                }),
+            });
+            edits.push(Edit::Connect {
+                wire: Wire::new(Endpoint::new(last, "out"), Endpoint::new(d, "in")),
+            });
+            last = d;
+        }
+        e.edit("stack", edits).context("building the stack")?;
+        Ok((e, last))
+    };
+    let pct = |v: &mut Vec<f64>, p: f64| {
+        v.sort_by(f64::total_cmp);
+        v[((v.len() - 1) as f64 * p).round() as usize]
+    };
+    let timer = atd_gpu::timer::GpuTimer::new(&device, &queue);
+    let measure = |e: &mut Engine, end: NodeId| -> anyhow::Result<(f64, f64)> {
+        let mut t = 0.0;
+        // Warm up, and wait for the fused pipeline (built on a worker).
+        for k in 0.. {
+            e.cook(&[end], t)?;
+            let _ = e.device().poll(wgpu::PollType::wait_indefinitely());
+            t += 1.0 / 60.0;
+            if k >= 10 && !e.pending() {
+                break;
+            }
+            anyhow::ensure!(k < 5000, "the fused pipeline never arrived");
+        }
+        let mut gpu_ms = Vec::new();
+        let mut wall = Vec::new();
+        for _ in 0..if software { 3 } else { 100 } {
+            let start = std::time::Instant::now();
+            if let Some(timer) = &timer {
+                timer.start(e.device(), e.queue());
+            }
+            e.cook(&[end], t)?;
+            match &timer {
+                Some(timer) => gpu_ms.push(
+                    timer
+                        .stop(e.device(), e.queue())
+                        .map_err(anyhow::Error::msg)?,
+                ),
+                None => {
+                    let _ = e.device().poll(wgpu::PollType::wait_indefinitely());
+                }
+            }
+            wall.push(start.elapsed().as_secs_f64() * 1e3);
+            t += 1.0 / 60.0;
+        }
+        // Some adapters report zero for every timestamp (Metal here): no
+        // GPU split then.
+        let gpu_p50 = if gpu_ms.is_empty() {
+            f64::NAN
+        } else {
+            Some(pct(&mut gpu_ms, 0.5))
+                .filter(|&ms| ms > 0.0)
+                .unwrap_or(f64::NAN)
+        };
+        Ok((gpu_p50, pct(&mut wall, 0.5)))
+    };
+    let (mut fused, end_f) = build(true)?;
+    let (f_gpu, f_wall) = measure(&mut fused, end_f)?;
+    anyhow::ensure!(
+        fused.fused_last_frame() == 30,
+        "the stack fused ({} of 30 nodes)",
+        fused.fused_last_frame()
+    );
+    let (mut plain, end_p) = build(false)?;
+    let (p_gpu, p_wall) = measure(&mut plain, end_p)?;
+    let bytes = |e: &Engine, n: NodeId| -> anyhow::Result<Vec<u8>> {
+        let a = e
+            .geometry(n)
+            .and_then(|g| g.point("P"))
+            .context("the stack's P")?;
+        atd_gpu::geo::readback::read_blocking(e.device(), e.queue(), e.buffer_pool(), a)
+            .map_err(anyhow::Error::msg)
+    };
+    // Same frame on both: one more cook at the same time.
+    fused.cook(&[end_f], 100.0)?;
+    plain.cook(&[end_p], 100.0)?;
+    let same = bytes(&fused, end_f)? == bytes(&plain, end_p)?;
+    anyhow::ensure!(same, "fused and unfused `P` differ");
+    let gpu = if f_gpu.is_nan() || p_gpu.is_nan() {
+        "no usable GPU timestamps on this adapter".to_owned()
+    } else {
+        format!("GPU p50 fused {f_gpu:.3} ms, unfused {p_gpu:.3} ms")
+    };
+    Ok(Case {
+        id: "pnt.fusion_30_transforms_2m",
+        status: Status::Ok,
+        ms: Some(f_wall),
+        note: Some(format!(
+            "30 Transforms over {points} points, every node cooking every frame, frame time including GPU completion: fused (one pass) p50 {f_wall:.2} ms, unfused (30 passes) p50 {p_wall:.2} ms ({:.1}× faster); {gpu}; `P` byte-identical{}",
+            p_wall / f_wall,
+            if software { " (software adapter)" } else { "" }
+        )),
+    })
+}
+
 /// A latitude-longitude sphere of `n × n` quads with smooth normals (the
 /// geometry of `render.mesh_1m`; MSH primitives are not in this crate).
 fn bench_sphere(n: u32) -> atd_gpu::geo::Geometry {
@@ -759,6 +918,12 @@ pub fn run(out: Option<&Path>, use_gpu: bool) -> anyhow::Result<()> {
                 });
                 cases.push(pt7_launch_cut(&gpu).unwrap_or_else(|err| Case {
                     id: "pt7.launch_cut",
+                    status: Status::Error,
+                    ms: None,
+                    note: Some(format!("{err:#}")),
+                }));
+                cases.push(fusion(&gpu).unwrap_or_else(|err| Case {
+                    id: "pnt.fusion_30_transforms_2m",
                     status: Status::Error,
                     ms: None,
                     note: Some(format!("{err:#}")),

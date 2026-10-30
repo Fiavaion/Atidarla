@@ -42,6 +42,7 @@ every IMG and SIG operator (CLAUDE.md rule 7); each operator's page in
 | [pnt-deformers](pnt-deformers.atidarla/) | Twist, Taper, Bend and Wave on a column; Copy to Points with random sizes and colours (M2) |
 | [pnt-constellation](pnt-constellation.atidarla/) | Smooth, Normals, Sort and Connect on the GPU grid hash; lines in Render Points (M2) |
 | [pnt-solver](pnt-solver.atidarla/) | A Solver loop (Attract, Turbulence, Drag, Integrate, Age) over pieces coloured per piece (M2) |
+| [pnt-foreach](pnt-foreach.atidarla/) | For-Each blocks: six counted copies of a column, and a strip coloured band by band (pieces) (M2) |
 
 One example per shipped Pack ([`packs/`](../packs/README.md), `docs/packs.md`). Each project
 carries its own copy of the Pack in `packs/<name>/` (a test keeps it equal to the library's):
