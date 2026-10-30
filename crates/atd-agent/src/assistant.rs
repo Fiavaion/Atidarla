@@ -194,6 +194,30 @@ Rules:\n\
     s
 }
 
+/// Tool calls a model wrote into its text instead of the tool-call field
+/// (qwen2.5-coder 7B through Ollama does this): every JSON object in the
+/// text, fenced or not, whose `name` is one of the offered tools.
+fn calls_in_text(text: &str, tools: &[Value]) -> Vec<Value> {
+    let known = |n: &str| tools.iter().any(|t| t["function"]["name"] == n);
+    let mut calls = Vec::new();
+    let mut i = 0;
+    while let Some(off) = text[i..].find('{') {
+        let start = i + off;
+        let mut values = serde_json::Deserializer::from_str(&text[start..]).into_iter::<Value>();
+        match values.next() {
+            Some(Ok(v)) if v["name"].as_str().is_some_and(known) => {
+                let args = v.get("arguments").or_else(|| v.get("parameters"));
+                calls.push(
+                    json!({"name": v["name"], "arguments": args.cloned().unwrap_or(json!({}))}),
+                );
+                i = start + values.byte_offset();
+            }
+            _ => i = start + 1,
+        }
+    }
+    calls
+}
+
 /// How a request went.
 #[derive(Debug, Clone, Default)]
 pub struct Run {
@@ -226,6 +250,9 @@ pub fn build(
     ];
     let mut run = Run::default();
     let mut nudged = false;
+    let (mut last_failed, mut repeats, mut repairs) = (Vec::<String>::new(), 0, 0);
+    // ATD_AGENT_TRACE=1 prints every tool call and the start of its result.
+    let trace = std::env::var("ATD_AGENT_TRACE").is_ok_and(|v| v == "1");
     while run.steps < max_steps {
         run.steps += 1;
         let reply = match llm.chat(&messages, &tools) {
@@ -235,7 +262,10 @@ pub fn build(
                 break;
             }
         };
-        let calls = reply["tool_calls"].as_array().cloned().unwrap_or_default();
+        let mut calls = reply["tool_calls"].as_array().cloned().unwrap_or_default();
+        if calls.is_empty() {
+            calls = calls_in_text(reply["content"].as_str().unwrap_or_default(), &tools);
+        }
         let mut assistant =
             json!({"role": "assistant", "content": reply["content"].as_str().unwrap_or_default()});
         let calls: Vec<Value> = calls
@@ -267,8 +297,20 @@ pub fn build(
                 messages.push(json!({"role": "user", "content": "Call accept_changes now, then fix any errors it reports."}));
                 continue;
             }
+            // Stopped with failed calls or node errors: ask for a repair
+            // a few times before giving up.
+            let mut problems = last_failed.clone();
+            problems.extend(run.errors.iter().map(|e| format!("node error {e}")));
+            if !problems.is_empty() && repairs < 3 {
+                repairs += 1;
+                messages.push(json!({"role": "user", "content": format!(
+                    "The request is not done; these failed:\n{}\nFix them with tool calls (use the operator types and node names the errors suggest), then call accept_changes.",
+                    problems.join("\n"))}));
+                continue;
+            }
             break;
         }
+        let mut failed = Vec::new();
         for c in &calls {
             let name = c["name"].as_str().unwrap_or_default();
             let mut args = c["arguments"].clone();
@@ -276,9 +318,15 @@ pub fn build(
                 args = serde_json::from_str(s).unwrap_or(json!({}));
             }
             let out = agent.call(ws, name, &args);
+            if trace {
+                let mut o = output_text(&out);
+                o.truncate(160);
+                eprintln!("[{}] {name} {args} -> {o}", run.steps);
+            }
             run.tool_calls += 1;
-            if matches!(out, Output::Error(_)) {
+            if let Output::Error(e) = &out {
                 run.tool_errors += 1;
+                failed.push(format!("{name} {args}: {e}"));
             }
             if name == "accept_changes"
                 && let Output::Json(v) = &out
@@ -306,6 +354,20 @@ pub fn build(
                 json!({"role": "tool", "tool_call_id": c["id"], "name": name, "content": text}),
             );
         }
+        // A small model can repeat the same failing calls turn after turn:
+        // say so plainly, then give up on the third repeat.
+        if !failed.is_empty() && failed == last_failed {
+            repeats += 1;
+            if repeats >= 3 {
+                break;
+            }
+            messages.push(json!({"role": "user", "content": format!(
+                "These calls failed again with the same errors. Do not repeat them; read each error and change the call (use the operator types and node names the errors suggest):\n{}",
+                failed.join("\n"))}));
+        } else {
+            repeats = 0;
+        }
+        last_failed = failed;
     }
     // Whatever is still staged is applied for the record (the eval judges
     // the network the model left).
@@ -347,6 +409,23 @@ mod tests {
         fn name(&self) -> String {
             "script".into()
         }
+    }
+
+    #[test]
+    fn tool_calls_written_as_text_are_found() {
+        let tools = [
+            json!({"function": {"name": "create_node"}}),
+            json!({"function": {"name": "connect"}}),
+        ];
+        let text = "{\"name\": \"create_node\", \"arguments\": {\"type\": \"img.noise\"}}\n\
+```json\n{\"name\": \"connect\", \"parameters\": {\"from\": \"a\", \"to\": \"b\"}}\n```\n\
+{\"name\": \"rm_rf\", \"arguments\": {}} and {not json";
+        let calls = calls_in_text(text, &tools);
+        assert_eq!(calls.len(), 2, "{calls:?}");
+        assert_eq!(calls[0]["arguments"]["type"], "img.noise");
+        assert_eq!(calls[1]["name"], "connect");
+        assert_eq!(calls[1]["arguments"]["to"], "b");
+        assert!(calls_in_text("done, the network is built", &tools).is_empty());
     }
 
     #[test]

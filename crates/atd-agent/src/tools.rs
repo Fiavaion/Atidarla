@@ -14,7 +14,7 @@ use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
 use atd_core::graph::{Edit, Endpoint, Network, Node, NodeId, Param, Wire};
-use atd_core::registry::{OpFamily, OperatorSchema};
+use atd_core::registry::{OpFamily, OperatorSchema, ParamKind};
 use serde_json::{Map, Value, json};
 
 use crate::lock::{Refusal, Scope, ShowLock};
@@ -303,7 +303,7 @@ impl Agent {
                 let op = ws
                     .registry()
                     .get(t)
-                    .ok_or_else(|| format!("no operator type `{t}`; see list_ops"))?;
+                    .ok_or_else(|| unknown_type(ws.registry(), t))?;
                 Ok(Output::Json(schema_json(op)))
             }
             "get_network" => {
@@ -316,7 +316,7 @@ impl Agent {
                 let op = ws
                     .registry()
                     .get(t)
-                    .ok_or_else(|| format!("no operator type `{t}`; see list_ops"))?
+                    .ok_or_else(|| unknown_type(ws.registry(), t))?
                     .clone();
                 let mut net = self.view(ws).clone();
                 let id = net.alloc_id();
@@ -574,6 +574,18 @@ impl Agent {
         let mut p = current.unwrap_or_else(|| Param::constant(schema.default.clone()));
         if let Some(v) = a.get("value") {
             p.value = v.clone();
+            // Models often quote numbers ("0.5"); a quoted number, toggle or
+            // list is taken as itself for parameters that are not text.
+            if let Some(text) = v.as_str()
+                && !matches!(
+                    schema.kind,
+                    ParamKind::String | ParamKind::Menu { .. } | ParamKind::Path
+                )
+                && let Ok(parsed) = serde_json::from_str::<Value>(text.trim())
+                && !parsed.is_string()
+            {
+                p.value = parsed;
+            }
         }
         if let Some(e) = a.get("expression").and_then(Value::as_str) {
             p.expr = (!e.trim().is_empty()).then(|| e.to_owned());
@@ -662,7 +674,40 @@ fn find(net: &Network, r: &str) -> Result<NodeId, String> {
     {
         return Ok(NodeId(i));
     }
-    Err(format!("no node named `{r}`; see get_network"))
+    let names: Vec<&str> = net.nodes().map(|n| n.name.as_str()).collect();
+    Err(if names.is_empty() {
+        format!("no node named `{r}`: the network is empty; create it first")
+    } else {
+        format!("no node named `{r}`; nodes are: {}", names.join(", "))
+    })
+}
+
+/// The error for an operator type that does not exist, with the types that
+/// share its last part (`ai.noise` → `img.noise`) so a model can correct
+/// itself.
+fn unknown_type(registry: &atd_core::Registry, t: &str) -> String {
+    let tail = t
+        .rsplit(['.', '_'])
+        .next()
+        .unwrap_or(t)
+        .to_ascii_lowercase();
+    let near: Vec<&str> = registry
+        .iter()
+        .map(|o| o.type_id.as_str())
+        .filter(|id| !tail.is_empty() && id.to_ascii_lowercase().contains(&tail))
+        .take(8)
+        .collect();
+    if near.is_empty() {
+        format!("no operator type `{t}`; see list_ops")
+    } else {
+        format!(
+            "no operator type `{t}`; did you mean {}?",
+            near.iter()
+                .map(|n| format!("`{n}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
 }
 
 fn family_name(f: OpFamily) -> &'static str {
