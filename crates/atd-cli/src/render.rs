@@ -745,6 +745,30 @@ mod tests {
         assert!(level.is_some_and(|l| l > 0.0), "{level:?}");
     }
 
+    /// M3 Stage: the deck example (layers switching on the clock's beats,
+    /// a wipe, a fade) renders to identical frames twice, and the layer
+    /// driven by an LFO changes clip within the range.
+    #[test]
+    fn two_renders_of_the_stage_deck_are_identical() {
+        let Some(mut a) = renderer() else { return };
+        let mut b = renderer().unwrap();
+        assert_eq!(classify("img.layer"), Some(Class::Stateful));
+        let dir = example("stage-deck");
+        a.load(&dir, &opts(0..60)).unwrap();
+        b.load(&dir, &opts(0..60)).unwrap();
+        let (fa, fb) = (render(&mut a, 0..60), render(&mut b, 0..60));
+        assert_eq!(fa, fb);
+        assert_ne!(fa[0].1, fa[59].1);
+        let shapes = a.engine.network().node_by_name("shapes").unwrap().id;
+        assert!(
+            a.engine
+                .status(shapes)
+                .is_some_and(|s| s.starts_with("playing ")),
+            "{:?}",
+            a.engine.status(shapes)
+        );
+    }
+
     /// The Python operators example (`docs/python-ops.md`) renders to the
     /// same frames twice when allowed; without --allow-python-ops the render
     /// stops and says why.

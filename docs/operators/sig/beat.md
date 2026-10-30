@@ -31,3 +31,4 @@ All platforms.
 ## Examples
 
 - [Beat switcher](../../../examples/beat-switcher.atidarla/) — `clock`
+- [Stage deck](../../../examples/stage-deck.atidarla/) — `clock`

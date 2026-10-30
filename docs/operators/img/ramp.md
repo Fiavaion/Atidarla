@@ -36,4 +36,5 @@ All platforms.
 - [Pack: Film Grain](../../../examples/pack-film-grain.atidarla/) — `sky`
 - [Pack: LFO Bank](../../../examples/pack-lfo-bank.atidarla/) — `backdrop`
 - [Render Textures](../../../examples/render-textures.atidarla/) — `sphere_look`
+- [Stage deck](../../../examples/stage-deck.atidarla/) — `sunset`, `glow_ramp`
 - [Time effects](../../../examples/time-effects.atidarla/) — `columns`
