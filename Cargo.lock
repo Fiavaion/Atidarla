@@ -247,6 +247,7 @@ dependencies = [
  "atd-ops-sig",
  "atd-py",
  "atd-stage",
+ "atd-timeline",
  "eframe",
  "egui",
  "env_logger",
@@ -278,6 +279,7 @@ dependencies = [
  "atd-ops-pnt",
  "atd-ops-sig",
  "atd-py",
+ "atd-timeline",
  "clap",
  "env_logger",
  "log",
@@ -508,6 +510,15 @@ dependencies = [
 [[package]]
 name = "atd-timeline"
 version = "0.0.1"
+dependencies = [
+ "atd-core",
+ "atd-format",
+ "atd-gpu",
+ "atd-io",
+ "atd-ops-img",
+ "atd-ops-sig",
+ "serde_json",
+]
 
 [[package]]
 name = "atomic-waker"

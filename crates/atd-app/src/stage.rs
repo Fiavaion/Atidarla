@@ -4,7 +4,7 @@
 //! the layers switch, quantise and fade inside their own cooks.
 
 use atd_core::graph::{Edit, NodeId, Param};
-use atd_gpu::engine::{Engine, EngineError};
+use atd_gpu::engine::Engine;
 use atd_stage::{Deck, LaunchMode, Launcher, LayerStatus, Stage};
 use egui::{Color32, RichText, Ui};
 use serde_json::json;
@@ -19,8 +19,6 @@ pub struct StagePanel {
     deck: Option<NodeId>,
     /// A flash clip held down: (layer, slot).
     held: Option<(NodeId, usize)>,
-    /// Nodes requested this frame, reused.
-    requested: Vec<NodeId>,
     message: Option<String>,
 }
 
@@ -39,12 +37,9 @@ impl StagePanel {
     /// Cooks one frame like [`Engine::cook_frame`] (the viewed node and
     /// every sink), plus the Stage deck, so the show keeps playing whatever
     /// is viewed; first runs one-shot returns and the autopilot.
-    pub fn cook_frame(
-        &mut self,
-        engine: &mut Engine,
-        viewed: Option<NodeId>,
-        time: f64,
-    ) -> Result<usize, EngineError> {
+    /// Advances the Stage one frame (autopilot, one-shot returns) and
+    /// returns the deck's mixer, which must cook whatever node is viewed.
+    pub fn frame(&mut self, engine: &mut Engine, time: f64) -> Option<NodeId> {
         let stage = Stage::read(engine.network(), engine.registry());
         let deck = stage.deck();
         if self.deck != deck.map(|d| d.mixer) {
@@ -56,19 +51,7 @@ impl StagePanel {
             let edits = self.launcher.tick(deck, now(engine, deck, time));
             self.apply(engine, "Stage autopilot", edits);
         }
-        let mut requested = std::mem::take(&mut self.requested);
-        requested.clear();
-        requested.extend(viewed);
-        requested.extend(deck.map(|d| d.mixer).filter(|m| Some(*m) != viewed));
-        let registry = engine.registry();
-        for node in engine.network().nodes() {
-            if registry.get(&node.type_id).is_some_and(|s| s.sink) && Some(node.id) != viewed {
-                requested.push(node.id);
-            }
-        }
-        let result = engine.cook(&requested, time);
-        self.requested = requested;
-        result
+        self.deck
     }
 
     fn apply(&mut self, engine: &mut Engine, label: &str, edits: Vec<Edit>) {

@@ -28,3 +28,4 @@ All platforms.
 
 - [Beat switcher](../../../examples/beat-switcher.atidarla/) — `solid`
 - [Stage deck](../../../examples/stage-deck.atidarla/) — `strobe`
+- [Timeline show](../../../examples/timeline-show.atidarla/) — `tint`

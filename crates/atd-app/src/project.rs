@@ -41,6 +41,8 @@ pub struct ProjectState {
     saved: Network,
     /// The mappings as last opened or saved.
     saved_mappings: atd_format::Mappings,
+    /// The timeline as last opened or saved.
+    saved_timeline: Option<atd_format::TimelineDoc>,
     dialog: Option<Dialog>,
     /// An action waiting for "discard unsaved changes?".
     pub confirm: Option<Action>,
@@ -63,6 +65,7 @@ impl ProjectState {
             meta: Project::new("Untitled"),
             saved: net.clone(),
             saved_mappings: Default::default(),
+            saved_timeline: None,
             dialog: None,
             confirm: None,
             message: None,
@@ -73,7 +76,9 @@ impl ProjectState {
     }
 
     pub fn dirty(&self, engine: &Engine) -> bool {
-        *engine.network() != self.saved || self.meta.mappings != self.saved_mappings
+        *engine.network() != self.saved
+            || self.meta.mappings != self.saved_mappings
+            || self.meta.timeline != self.saved_timeline
     }
 
     /// The window title: project name, and a dot when there are unsaved
@@ -132,6 +137,7 @@ impl ProjectState {
                     self.python_ask = !python.is_empty() && !python.is_allowed();
                     self.python = (!python.is_empty()).then_some(python);
                     self.saved_mappings = meta.mappings.clone();
+                    self.saved_timeline = meta.timeline.clone();
                     self.meta = meta;
                     self.dir = Some(dir);
                     self.opened += 1;
@@ -184,6 +190,7 @@ impl ProjectState {
             Ok(()) => {
                 self.saved = engine.network().clone();
                 self.saved_mappings = self.meta.mappings.clone();
+                self.saved_timeline = self.meta.timeline.clone();
                 self.dir = Some(dir.to_owned());
                 self.message = Some((format!("Saved {}", dir.display()), false));
             }

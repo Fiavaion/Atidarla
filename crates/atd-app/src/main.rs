@@ -12,6 +12,7 @@ mod smoke;
 mod stage;
 mod suggest;
 mod textport;
+mod timeline;
 mod viewer;
 
 use std::process::ExitCode;

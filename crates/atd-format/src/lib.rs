@@ -6,6 +6,7 @@
 //!   networks/main.toml    the patch: nodes, inputs, parameters
 //!   packs/<name>/         the project's copy of each Pack it uses (see [`pack`])
 //!   mappings.toml         MIDI/OSC mappings and OSC settings (see [`mappings`])
+//!   timeline.toml         keyframe tracks, markers and cues (optional, see [`timeline`])
 //!   media/ shaders/ ...   files the patch refers to by relative path
 //!   .cache/               binaries, ignored by Git
 //! ```
@@ -23,6 +24,7 @@
 pub mod mappings;
 mod network;
 pub mod pack;
+pub mod timeline;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -34,6 +36,7 @@ use toml_edit::{Array, DocumentMut, Item, Value};
 pub use mappings::{Mappings, mappings_from_str, mappings_to_string};
 pub use network::{network_from_str, network_to_string};
 pub use pack::{Library, load_pack, pack_from_str, pack_to_string, save_pack};
+pub use timeline::{TimelineDoc, timeline_from_str, timeline_to_string};
 
 /// The file format version this build reads and writes.
 pub const FORMAT: i64 = 1;
@@ -85,6 +88,8 @@ pub struct Project {
     pub packs: PackSet,
     /// MIDI/OSC mappings (`mappings.toml`; none when the file is absent).
     pub mappings: Mappings,
+    /// The timeline (`timeline.toml`); `None` when the project has none.
+    pub timeline: Option<TimelineDoc>,
 }
 
 impl Project {
@@ -97,6 +102,7 @@ impl Project {
             networks: BTreeMap::from([(MAIN.to_owned(), Network::default())]),
             packs: PackSet::default(),
             mappings: Mappings::default(),
+            timeline: None,
         }
     }
 
@@ -181,6 +187,7 @@ pub fn project_from_str(source: &str) -> Result<Project, FormatError> {
         networks: BTreeMap::new(),
         packs: PackSet::default(),
         mappings: Mappings::default(),
+        timeline: None,
     })
 }
 
@@ -255,11 +262,17 @@ pub fn load(dir: &Path) -> Result<Project, FormatError> {
         }
         project.packs.insert(def);
     }
+    let path = dir.join(timeline::FILE);
+    if path.exists() {
+        let text = std::fs::read_to_string(&path).map_err(io(&path))?;
+        project.timeline = Some(timeline_from_str(&text).map_err(|e| e.in_file(timeline::FILE))?);
+    }
     Ok(project)
 }
 
 /// Writes a project folder, creating it if needed. Network files no longer
-/// in the project are removed; other files in the folder are left alone.
+/// in the project are removed, and `timeline.toml` when the project has no
+/// timeline; other files in the folder are left alone.
 pub fn save(dir: &Path, project: &Project) -> Result<(), FormatError> {
     for id in project.networks.keys() {
         if !valid_network_id(id) {
@@ -278,6 +291,10 @@ pub fn save(dir: &Path, project: &Project) -> Result<(), FormatError> {
     if write_mappings {
         let text = mappings_to_string(&project.mappings).map_err(|e| e.in_file(mappings::FILE))?;
         files.push((PathBuf::from(mappings::FILE), text));
+    }
+    if let Some(tl) = &project.timeline {
+        let text = timeline_to_string(tl).map_err(|e| e.in_file(timeline::FILE))?;
+        files.push((PathBuf::from(timeline::FILE), text));
     }
     let networks = dir.join("networks");
     std::fs::create_dir_all(&networks).map_err(io(&networks))?;
@@ -302,6 +319,10 @@ pub fn save(dir: &Path, project: &Project) -> Result<(), FormatError> {
     // No mappings left: the file goes, so the folder matches the project.
     if !write_mappings && mappings_path.exists() {
         std::fs::remove_file(&mappings_path).map_err(io(&mappings_path))?;
+    }
+    let tl = dir.join(timeline::FILE);
+    if project.timeline.is_none() && tl.exists() {
+        std::fs::remove_file(&tl).map_err(io(&tl))?;
     }
     let packs = dir.join("packs");
     for def in project.packs.iter() {
@@ -337,3 +358,6 @@ mod pack_tests;
 
 #[cfg(test)]
 mod mappings_tests;
+
+#[cfg(test)]
+mod timeline_tests;

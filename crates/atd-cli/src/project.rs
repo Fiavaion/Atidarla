@@ -202,6 +202,19 @@ fn check_one(dir: &Path, gpu: Option<&atd_gpu::GpuContext>, opts: CheckOptions) 
     if py_count > 0 {
         summary += &format!(", {py_count} Python operators");
     }
+    if let Some(doc) = &project.timeline {
+        let file = atd_format::timeline::FILE;
+        canonical(dir, file, &atd_format::timeline_to_string(doc)?)?;
+        let bound = atd_timeline::Timeline::bind(doc.clone(), &main, &registry);
+        if let Some(e) = bound.problems().first() {
+            bail!("{file}: {e}");
+        }
+        summary += &format!(
+            ", timeline {} tracks {} cues",
+            doc.tracks.len(),
+            doc.cues.len()
+        );
+    }
     let Some(gpu) = gpu else {
         return Ok(summary);
     };

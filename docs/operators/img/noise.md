@@ -45,3 +45,4 @@ All platforms.
 - [Render Textures](../../../examples/render-textures.atidarla/) — `noise`
 - [Stage deck](../../../examples/stage-deck.atidarla/) — `tunnel_noise`, `grid_noise`
 - [Texture sharing](../../../examples/texture-sharing.atidarla/) — `pattern`
+- [Timeline show](../../../examples/timeline-show.atidarla/) — `clouds`

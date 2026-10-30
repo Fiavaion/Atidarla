@@ -19,6 +19,7 @@ atd-gpu.workspace = true
 atd-format.workspace = true
 atd-io.workspace = true
 rosc.workspace = true
+atd-timeline.workspace = true
 atd-py.workspace = true
 atd-ops-img.workspace = true
 atd-ops-sig.workspace = true

@@ -80,6 +80,9 @@ struct Panels {
     stage: crate::stage::StagePanel,
     /// MIDI/OSC mappings, learn and OSCQuery.
     control: crate::mappings::Control,
+    timeline: crate::timeline::TimelinePanel,
+    /// Nodes cooked every frame besides the viewed one (reused).
+    extra: Vec<NodeId>,
 }
 
 impl AtidarlaApp {
@@ -188,6 +191,8 @@ impl AtidarlaApp {
                 textport: Default::default(),
                 stage: Default::default(),
                 control: crate::mappings::Control::new(oscquery),
+                timeline: Default::default(),
+                extra: Vec::new(),
             },
             smoke: smoke.map(Smoke::new),
             start: Instant::now(),
@@ -708,7 +713,13 @@ impl AtidarlaApp {
         }
         let viewed = p.viewed;
         p.time = self.start.elapsed().as_secs_f64();
-        let cooked = match p.stage.cook_frame(engine, viewed, p.time) {
+        let (tl, opened) = (&mut self.project.meta.timeline, self.project.opened);
+        p.timeline.frame(engine, tl, opened, p.time);
+        let deck = p.stage.frame(engine, p.time);
+        p.extra.clear();
+        p.extra.extend(deck);
+        p.extra.extend_from_slice(p.timeline.watched());
+        let cooked = match engine.cook_frame_with(viewed, &p.extra, p.time) {
             Ok(n) => n,
             Err(e) => {
                 p.patch.status(e.to_string());
@@ -721,7 +732,7 @@ impl AtidarlaApp {
             }
             return;
         };
-        if cooked > 0 {
+        if cooked > 0 || p.timeline.playing() {
             // Something changed or is animating: keep frames coming.
             ctx.request_repaint();
         }
@@ -786,7 +797,9 @@ impl TabViewer for Panels {
                 Some(engine) => self.stage.ui(ui, engine, self.time),
                 None => placeholder(ui, "No GPU device: the engine is unavailable."),
             },
-            Tab::Timeline => placeholder(ui, "Keyframes, cues and timecode arrive in M3."),
+            Tab::Timeline => self
+                .timeline
+                .ui(ui, self.engine.as_mut(), self.patch.selected),
             Tab::Parameters => match (&mut self.engine, self.patch.selected) {
                 (Some(engine), Some(node)) => {
                     egui::ScrollArea::vertical().show(ui, |ui| {

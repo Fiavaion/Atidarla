@@ -31,3 +31,4 @@ All platforms.
 
 - [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `kaleidoscope1`
 - [Stage deck](../../../examples/stage-deck.atidarla/) — `tunnel`
+- [Timeline show](../../../examples/timeline-show.atidarla/) — `kaleido`

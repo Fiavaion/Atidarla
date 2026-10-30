@@ -2221,12 +2221,29 @@ impl Engine {
     /// every sink (operators with external side effects, such as OSC Out),
     /// which must run even when nothing downstream is viewed.
     pub fn cook_frame(&mut self, viewed: Option<NodeId>, time: f64) -> Result<usize, EngineError> {
+        self.cook_frame_with(viewed, &[], time)
+    }
+
+    /// [`Self::cook_frame`] plus `extra` nodes that must cook this frame
+    /// whatever is viewed (the Stage's deck, nodes the timeline watches).
+    /// Allocates nothing after warm-up.
+    pub fn cook_frame_with(
+        &mut self,
+        viewed: Option<NodeId>,
+        extra: &[NodeId],
+        time: f64,
+    ) -> Result<usize, EngineError> {
         let mut requested = std::mem::take(&mut self.requested);
         requested.clear();
         requested.extend(viewed);
         for node in self.net.nodes() {
             if self.registry.get(&node.type_id).is_some_and(|s| s.sink) && Some(node.id) != viewed {
                 requested.push(node.id);
+            }
+        }
+        for &n in extra {
+            if !requested.contains(&n) && self.net.node(n).is_some() {
+                requested.push(n);
             }
         }
         let result = self.cook(&requested, time);
