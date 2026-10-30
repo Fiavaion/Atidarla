@@ -397,6 +397,7 @@ dependencies = [
  "atd-gpu",
  "atd-interop",
  "atd-ops-img",
+ "atd-stage",
  "pollster 0.4.0",
  "serde_json",
  "wgpu",
