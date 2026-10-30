@@ -521,8 +521,18 @@ impl eframe::App for AtidarlaApp {
         }
         self.learn_frame(ui.ctx());
         let p = &mut self.panels;
-        p.assistant
-            .frame(ui.ctx(), p.engine.as_mut(), self.project.dir.as_deref());
+        let beat = match &p.engine {
+            Some(engine) if p.assistant.wants_beat() => {
+                Some(crate::stage::show_beat(engine, p.time))
+            }
+            _ => None,
+        };
+        p.assistant.frame(
+            ui.ctx(),
+            p.engine.as_mut(),
+            self.project.dir.as_deref(),
+            beat,
+        );
         self.cook_and_present(ui.ctx(), frame);
         self.textport_frame(ui.ctx());
         if let Some(smoke) = &mut self.smoke {

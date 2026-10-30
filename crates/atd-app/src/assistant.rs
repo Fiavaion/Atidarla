@@ -23,7 +23,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 
 use atd_agent::assistant::{self, Anthropic, Llm, Ollama};
-use atd_agent::{Agent, NetworkWorkspace, Scope, ShowLock, tools};
+use atd_agent::cues::{CueContext, CueQueue, apply_move};
+use atd_agent::{Agent, NetworkWorkspace, Scope, ShowLock, Workspace, tools};
 use atd_core::Registry;
 use atd_core::graph::{Edit, Network, NodeId};
 use atd_gpu::engine::Engine;
@@ -142,6 +143,24 @@ pub struct Review {
 
 /// The open patch as Accept sees it: the engine in the app, a network with
 /// a history in tests.
+/// The open show as a cue sees it: moves apply through the engine's undo.
+struct LiveShow<'a>(&'a mut Engine);
+
+impl Workspace for LiveShow<'_> {
+    fn network(&self) -> &Network {
+        self.0.network()
+    }
+    fn registry(&self) -> &Registry {
+        self.0.registry()
+    }
+    fn apply(&mut self, label: &str, edits: Vec<Edit>) -> Result<(), String> {
+        self.0.edit(label, edits).map_err(|e| e.to_string())
+    }
+    fn cook_errors(&mut self) -> Vec<(NodeId, String)> {
+        Vec::new()
+    }
+}
+
 pub trait Live {
     fn network(&self) -> &Network;
     /// Applies `edits` as one undo step.
@@ -366,6 +385,7 @@ fn explain_job(make: MakeLlm, messages: Vec<Value>, tx: Sender<Progress>) {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Intent {
     Build,
+    Cue,
     Explain(Option<NodeId>),
     Accept,
 }
@@ -384,8 +404,12 @@ pub struct AssistantPanel {
     provider: Provider,
     pub model: String,
     pub prompt: String,
-    /// Placeholder for in-show cues (see [`Self::cue_ui`]).
+    /// The in-show cue being typed, a cue waiting on a fresh Show Lock
+    /// read, and the moves queued for their beat (FR-G5).
     cue: String,
+    cue_waiting: Option<String>,
+    pub cues: CueQueue,
+    cue_notes: Vec<String>,
     job: Option<Receiver<Progress>>,
     stop: Arc<AtomicBool>,
     log: Vec<(Line, String)>,
@@ -409,6 +433,9 @@ impl Default for AssistantPanel {
             model: Provider::Ollama.default_model().into(),
             prompt: String::new(),
             cue: String::new(),
+            cue_waiting: None,
+            cues: CueQueue::default(),
+            cue_notes: Vec::new(),
             job: None,
             stop: Arc::default(),
             log: Vec::new(),
@@ -632,7 +659,22 @@ impl AssistantPanel {
     }
 
     /// The app's per-frame work: progress, intents from the tab, Accept.
-    pub fn frame(&mut self, ctx: &egui::Context, engine: Option<&mut Engine>, dir: Option<&Path>) {
+    /// Whether [`Self::frame`] needs the show's beat this frame (a cue is
+    /// being planned or moves are queued); reading it costs a Stage read.
+    pub fn wants_beat(&self) -> bool {
+        self.cue_waiting.is_some()
+            || !self.cues.is_empty()
+            || matches!(self.intent, Some(Intent::Cue))
+    }
+
+    /// `beat` is the show's beat position (see [`Self::wants_beat`]).
+    pub fn frame(
+        &mut self,
+        ctx: &egui::Context,
+        engine: Option<&mut Engine>,
+        dir: Option<&Path>,
+        beat: Option<f64>,
+    ) {
         if self.poll() {
             ctx.request_repaint();
         }
@@ -654,10 +696,61 @@ impl AssistantPanel {
                 self.start_explain(make, engine.network(), engine.registry(), node);
             }
             Some(Intent::Accept) => self.request_accept(dir),
+            Some(Intent::Cue) => {
+                // Planned against the lock as it is on disk now.
+                self.cue_waiting = Some(std::mem::take(&mut self.cue));
+                self.refresh_lock(dir);
+            }
             None => {}
         }
         if self.poll_accept(engine) {
             ctx.request_repaint();
+        }
+        if let Some(beat) = beat {
+            self.cue_frame(&mut LiveShow(engine), beat);
+            if !self.cues.is_empty() {
+                ctx.request_repaint_after(std::time::Duration::from_millis(16));
+            }
+        }
+    }
+
+    /// Plans a waiting cue once the lock read is in, and applies the moves
+    /// whose beat has come, each one undo step, checked again as they fire.
+    pub fn cue_frame(&mut self, show: &mut dyn Workspace, beat: f64) {
+        if self.lock_job.is_none()
+            && let Some(text) = self.cue_waiting.take()
+        {
+            let lock = self.lock.clone().unwrap_or_default();
+            let plan =
+                CueContext::capture(show.network(), show.registry(), &lock).plan(&text, beat, None);
+            self.cue_notes = plan.notes.clone();
+            self.status = Some(if plan.moves.is_empty() {
+                (format!("Cue \"{text}\" moves nothing."), true)
+            } else {
+                (
+                    format!(
+                        "Cue \"{text}\": {} move(s) at beat {:.0} (now {beat:.1}).",
+                        plan.moves.len(),
+                        plan.fire_at_beat
+                    ),
+                    false,
+                )
+            });
+            self.cues.push(plan.moves);
+        }
+        if self.cues.is_empty() {
+            return;
+        }
+        let due = self.cues.due(beat);
+        if due.is_empty() {
+            return;
+        }
+        let lock = self.lock.clone().unwrap_or_default();
+        for m in &due {
+            match apply_move(show, &lock, m) {
+                Ok(v) => self.note(Line::Note, format!("Cue: {}.{} = {v:.3}", m.node, m.param)),
+                Err(e) => self.note(Line::Error, format!("Cue refused: {e}")),
+            }
         }
     }
 
@@ -819,13 +912,34 @@ impl AssistantPanel {
     /// `atd_agent::cues` lands (another slice). The field is disabled and
     /// does nothing yet; `self.cue` is the text it will hand over.
     fn cue_ui(&mut self, ui: &mut Ui) {
-        ui.collapsing("In-show cues (not yet available)", |ui| {
-            ui.add_enabled(
-                false,
+        ui.collapsing("In-show cues", |ui| {
+            let edit = ui.add(
                 egui::TextEdit::singleline(&mut self.cue)
-                    .hint_text("e.g. \"next cue: slow the noise, warmer colours\""),
+                    .hint_text("e.g. \"darker, slower on the next drop\""),
             );
-            ui.weak("Cues spoken or typed during a show will go here.");
+            let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            ui.horizontal(|ui| {
+                let ready = !self.cue.trim().is_empty() && self.cue_waiting.is_none();
+                if (ui.add_enabled(ready, egui::Button::new("Cue")).clicked() || enter) && ready {
+                    self.intent = Some(Intent::Cue);
+                }
+                if !self.cues.is_empty() && ui.button("Cancel queued").clicked() {
+                    self.cues.clear();
+                }
+            });
+            ui.weak(
+                "Moves only parameters whitelisted in agent.toml, within their ranges, on the \
+                 next bar (\"now\": next beat; \"on the drop\": next 16 beats).",
+            );
+            for m in self.cues.pending() {
+                ui.label(format!(
+                    "• {}.{} → {:.3} at beat {:.0}",
+                    m.node, m.param, m.target, m.fire_at_beat
+                ));
+            }
+            for n in &self.cue_notes {
+                ui.weak(n.as_str());
+            }
         });
     }
 }
@@ -1045,6 +1159,47 @@ inputs.in = { node = 0, output = "out" }
         wait_accept(&mut panel, &mut live);
         assert!(panel.review.is_none(), "{:?}", panel.status);
         assert_eq!(live.net.len(), 3);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_typed_cue_moves_a_whitelisted_parameter_on_the_next_bar() {
+        let mut live = fake();
+        let dir = temp("cue");
+        std::fs::write(
+            dir.join("agent.toml"),
+            "[show_lock]\nengaged = true\n\n[[show_lock.allow]]\nnode = \"level1\"\nparam = \"brightness\"\nmin = 0.2\nmax = 1.0\n",
+        )
+        .unwrap();
+        let mut ws = NetworkWorkspace::new(registry());
+        ws.network = live.net.clone();
+        let before = ws.network.clone();
+        let mut panel = AssistantPanel {
+            cue_waiting: Some("darker, and delete noise1".into()),
+            ..AssistantPanel::default()
+        };
+        panel.refresh_lock(Some(&dir));
+        wait_accept(&mut panel, &mut live);
+        assert!(panel.wants_beat());
+        panel.cue_frame(&mut ws, 5.3);
+        let pending = panel.cues.pending().to_vec();
+        assert_eq!(pending.len(), 1, "{:?}", panel.status);
+        assert_eq!(
+            (pending[0].node.as_str(), pending[0].param.as_str()),
+            ("level1", "brightness")
+        );
+        assert_eq!(pending[0].fire_at_beat, 8.0);
+        panel.cue_frame(&mut ws, 7.9);
+        assert_eq!(ws.network, before, "nothing moves before the bar");
+        panel.cue_frame(&mut ws, 8.0);
+        assert!(panel.cues.is_empty() && !panel.wants_beat());
+        let v = ws.network.node_by_name("level1").unwrap().params["brightness"]
+            .value
+            .as_f64()
+            .unwrap();
+        assert!((0.2..1.0).contains(&v), "darker and within range: {v}");
+        assert_eq!(ws.history.len(), 1, "one undo step");
+        assert_eq!(ws.network.len(), before.len(), "no graph edit");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

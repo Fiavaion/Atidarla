@@ -42,6 +42,15 @@ fn free_slot(deck: &Deck) -> Option<(NodeId, usize)> {
         .map(|s| (layer.node, s))
 }
 
+/// The first deck's beat position (for cues), as [`now`] reads it; seconds
+/// at 120 BPM without a deck.
+pub fn show_beat(engine: &Engine, time: f64) -> f64 {
+    match Stage::read(engine.network(), engine.registry()).deck() {
+        Some(deck) => now(engine, deck, time),
+        None => atd_stage::beat_position(None, None, time),
+    }
+}
+
 /// The deck's beat position: its clock's `beat` + `beat_phase`, or
 /// seconds at 120 BPM without one.
 fn now(engine: &Engine, deck: &Deck, time: f64) -> f64 {
