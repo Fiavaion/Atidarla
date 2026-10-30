@@ -171,6 +171,7 @@ impl StagePanel {
         egui::Grid::new(("stage-grid", deck.mixer))
             .striped(true)
             .spacing([6.0, 6.0])
+            .min_col_width(96.0)
             .show(ui, |ui| {
                 ui.weak("Layer");
                 for col in 0..columns {
@@ -209,9 +210,9 @@ impl StagePanel {
                         let queued = status.is_some_and(|s| s.queued == Some(Some(col)));
                         // State in words as well as colour.
                         let mark = if playing {
-                            "▶ "
+                            "> "
                         } else if queued {
-                            "… "
+                            "... "
                         } else {
                             ""
                         };
