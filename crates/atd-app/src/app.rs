@@ -78,6 +78,8 @@ struct Panels {
     time: f64,
     textport: crate::textport::TextportPanel,
     stage: crate::stage::StagePanel,
+    /// MIDI/OSC mappings, learn and OSCQuery.
+    control: crate::mappings::Control,
 }
 
 impl AtidarlaApp {
@@ -85,6 +87,7 @@ impl AtidarlaApp {
         cc: &eframe::CreationContext<'_>,
         smoke: Option<SmokeArgs>,
         open: Option<std::path::PathBuf>,
+        oscquery: bool,
     ) -> Self {
         let rs = cc.wgpu_render_state.as_ref();
         let info = rs.map(|rs| rs.adapter.get_info());
@@ -184,6 +187,7 @@ impl AtidarlaApp {
                 time: 0.0,
                 textport: Default::default(),
                 stage: Default::default(),
+                control: crate::mappings::Control::new(oscquery),
             },
             smoke: smoke.map(Smoke::new),
             start: Instant::now(),
@@ -308,6 +312,9 @@ impl eframe::App for AtidarlaApp {
                         }
                     }
                     ui.separator();
+                    if ui.button("Mappings").clicked() {
+                        self.panels.control.open = true;
+                    }
                     if ui
                         .button(tab_title(Tab::Textport))
                         .on_hover_text("Python console over the open project")
@@ -361,6 +368,14 @@ impl eframe::App for AtidarlaApp {
             self.dock.close(|t| *t == Tab::Textport);
         }
         self.feed_input(ui.ctx());
+        let p = &mut self.panels;
+        if let Some(engine) = &mut p.engine {
+            let (meta, opened) = (&mut self.project.meta, self.project.opened);
+            p.control
+                .frame(ui.ctx(), engine, &mut meta.mappings, &meta.name, opened);
+        }
+        p.control
+            .window(ui.ctx(), p.engine.as_ref(), &mut self.project.meta.mappings);
         self.cook_and_present(ui.ctx(), frame);
         self.textport_frame(ui.ctx());
         if let Some(smoke) = &mut self.smoke {
@@ -775,7 +790,7 @@ impl TabViewer for Panels {
             Tab::Parameters => match (&mut self.engine, self.patch.selected) {
                 (Some(engine), Some(node)) => {
                     egui::ScrollArea::vertical().show(ui, |ui| {
-                        if let Some(e) = crate::params::ui(ui, engine, node) {
+                        if let Some(e) = crate::params::ui(ui, engine, node, &mut self.control) {
                             self.patch.status(e);
                         }
                     });

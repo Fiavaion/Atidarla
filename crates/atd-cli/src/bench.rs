@@ -873,6 +873,37 @@ fn pt7_launch_cut(gpu: &GpuContext) -> anyhow::Result<Case> {
     })
 }
 
+/// PT-8: OSC over loopback → mapped parameter → pixel, ≤ 2 frames at
+/// 60 fps (see `pt8.rs`). `ms` is the median send-to-readback latency.
+fn pt8(gpu: &GpuContext) -> Case {
+    match crate::pt8::run(gpu, 20) {
+        Ok(r) => Case {
+            id: "pt8.osc_to_pixel",
+            status: if r.max_frames <= crate::pt8::BUDGET_FRAMES {
+                Status::Ok
+            } else {
+                Status::Error
+            },
+            ms: Some(r.median_ms),
+            note: Some(format!(
+                "{} trials at 60 fps: max {} frames (budget {}), frames {:?}, latency median {:.2} ms, max {:.2} ms",
+                r.trials,
+                r.max_frames,
+                crate::pt8::BUDGET_FRAMES,
+                r.frames,
+                r.median_ms,
+                r.max_ms
+            )),
+        },
+        Err(err) => Case {
+            id: "pt8.osc_to_pixel",
+            status: Status::Error,
+            ms: None,
+            note: Some(format!("{err:#}")),
+        },
+    }
+}
+
 pub fn run(out: Option<&Path>, use_gpu: bool) -> anyhow::Result<()> {
     let mut platform = PlatformInfo::host();
     let mut adapter = None;
@@ -934,6 +965,7 @@ pub fn run(out: Option<&Path>, use_gpu: bool) -> anyhow::Result<()> {
                     ms: None,
                     note: Some(format!("{err:#}")),
                 }));
+                cases.push(pt8(&gpu));
             }
             Err(err) => cases.push(Case {
                 id: "startup.gpu_device",

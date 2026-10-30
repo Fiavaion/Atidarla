@@ -5,6 +5,7 @@
 //!   project.toml          name, description, output resolution
 //!   networks/main.toml    the patch: nodes, inputs, parameters
 //!   packs/<name>/         the project's copy of each Pack it uses (see [`pack`])
+//!   mappings.toml         MIDI/OSC mappings and OSC settings (see [`mappings`])
 //!   media/ shaders/ ...   files the patch refers to by relative path
 //!   .cache/               binaries, ignored by Git
 //! ```
@@ -19,6 +20,7 @@
 //! Path parameters (movies, audio, fonts) may be relative: they are
 //! relative to the project folder (`Params::resolve` in `atd-gpu`).
 
+pub mod mappings;
 mod network;
 pub mod pack;
 
@@ -29,6 +31,7 @@ use atd_core::graph::Network;
 use atd_core::pack::PackSet;
 use toml_edit::{Array, DocumentMut, Item, Value};
 
+pub use mappings::{Mappings, mappings_from_str, mappings_to_string};
 pub use network::{network_from_str, network_to_string};
 pub use pack::{Library, load_pack, pack_from_str, pack_to_string, save_pack};
 
@@ -80,6 +83,8 @@ pub struct Project {
     /// The project's Pack definitions (`packs/<name>/`). Check them with
     /// [`PackSet::register`] before use.
     pub packs: PackSet,
+    /// MIDI/OSC mappings (`mappings.toml`; none when the file is absent).
+    pub mappings: Mappings,
 }
 
 impl Project {
@@ -91,6 +96,7 @@ impl Project {
             resolution: [1280, 720],
             networks: BTreeMap::from([(MAIN.to_owned(), Network::default())]),
             packs: PackSet::default(),
+            mappings: Mappings::default(),
         }
     }
 
@@ -174,6 +180,7 @@ pub fn project_from_str(source: &str) -> Result<Project, FormatError> {
         resolution,
         networks: BTreeMap::new(),
         packs: PackSet::default(),
+        mappings: Mappings::default(),
     })
 }
 
@@ -220,6 +227,11 @@ pub fn load(dir: &Path) -> Result<Project, FormatError> {
             dir.display()
         )));
     }
+    let path = dir.join(mappings::FILE);
+    if path.exists() {
+        let text = std::fs::read_to_string(&path).map_err(io(&path))?;
+        project.mappings = mappings_from_str(&text).map_err(|e| e.in_file(mappings::FILE))?;
+    }
     // Folders without a pack.toml (left-overs, the user's own) are skipped.
     for path in pack::subdirs(&dir.join("packs"))? {
         if !path.join("pack.toml").exists() {
@@ -261,6 +273,12 @@ pub fn save(dir: &Path, project: &Project) -> Result<(), FormatError> {
         let text = network_to_string(net).map_err(|e| e.in_file(&format!("networks/{id}.toml")))?;
         files.push((Path::new("networks").join(format!("{id}.toml")), text));
     }
+    let mappings_path = dir.join(mappings::FILE);
+    let write_mappings = !project.mappings.is_empty();
+    if write_mappings {
+        let text = mappings_to_string(&project.mappings).map_err(|e| e.in_file(mappings::FILE))?;
+        files.push((PathBuf::from(mappings::FILE), text));
+    }
     let networks = dir.join("networks");
     std::fs::create_dir_all(&networks).map_err(io(&networks))?;
     let ignore = dir.join(".gitignore");
@@ -280,6 +298,10 @@ pub fn save(dir: &Path, project: &Project) -> Result<(), FormatError> {
         if stale {
             std::fs::remove_file(&path).map_err(io(&path))?;
         }
+    }
+    // No mappings left: the file goes, so the folder matches the project.
+    if !write_mappings && mappings_path.exists() {
+        std::fs::remove_file(&mappings_path).map_err(io(&mappings_path))?;
     }
     let packs = dir.join("packs");
     for def in project.packs.iter() {
@@ -312,3 +334,6 @@ mod tests;
 
 #[cfg(test)]
 mod pack_tests;
+
+#[cfg(test)]
+mod mappings_tests;
