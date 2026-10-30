@@ -22,12 +22,14 @@
 //! | `pnt.merge`, `copy`, `sort` | every attribute | every attribute (`copynum`) |
 //! | `pnt.attribute`, `attribute_math`, `randomize`, `colour` | any attribute | any attribute (`Cd`) |
 //! | `pnt.normals`, `smooth`, `connect` (grid hash) | `P` (any) | `N`; the attribute; lines, `near`, `neardist` |
+//! | `pnt.kernel` | the attributes its code reads (Kernel DSL) | the attributes its code writes |
 //! | `pnt.solver`, `pnt.piece` | `init`, `prev`; an attribute or `P` | the state; `piece` |
 //! | `img.render_points` (IMG) | `P`, `Cd`, polylines | an image |
 
 mod attr;
 mod emitter;
 mod field;
+mod kernel;
 mod kit;
 mod neighbours;
 mod noise;
@@ -103,6 +105,7 @@ const OPS: &[(Schema, Factory)] = &[
     (neighbours::connect_schema, neighbours::create_connect),
     (solver::solver_schema, solver::create_solver),
     (solver::piece_schema, solver::create_piece),
+    (kernel::schema, kernel::create),
 ];
 
 /// Every schema this crate registers (PNT operators and Render Points).

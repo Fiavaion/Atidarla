@@ -36,6 +36,7 @@ All platforms.
 
 ## Examples
 
+- [Kernel Particles](../../../examples/kernel-particles.atidarla/) — `colour`
 - [PNT Constellation](../../../examples/pnt-constellation.atidarla/) — `shade`
 - [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `height`
 - [PNT Fountain](../../../examples/pnt-fountain.atidarla/) — `by_speed`

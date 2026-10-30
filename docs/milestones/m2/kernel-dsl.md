@@ -1,13 +1,8 @@
 # M2 pre-work: Kernel DSL compiler (`atd-kernel`)
 
-> **ISOLATED AND REMOVABLE. Decision A12 (Kernel DSL) is still PROPOSED in PRD §0.**
-> Mark authorised running ahead of the milestone order, not ratifying A12. Everything in this
-> area is therefore confined to the self-contained crate `crates/atd-kernel` (plus its tests),
-> the reference page `docs/kernel-dsl.md`, this note, and one opt-in CLI subcommand
-> (`atidarla kernel`, `crates/atd-cli/src/kernel.rs`). Nothing in the engine, the registry,
-> the app or the file format uses it; no operator is registered. Deleting the crate, the CLI
-> subcommand and the two docs removes the feature completely. The A12-specific design choices
-> below are proposals for Mark to accept, change or reject.
+> **A12 ratified 2026-10-30.** The compiler is wired into the engine as `pnt.kernel`
+> (2026-10-30, see the M2 pre-work log and decision A53). The questions below were answered
+> "as proposed"; A53 lists the few points decided differently while integrating.
 
 Status: compile side of FR-K1..K3 done and tested, 2026-10-18. Engine integration (the
 `pnt.kernel` / `img.kernel` operators, FR-K4 hot reload) is planned below, not built.

@@ -1,0 +1,48 @@
+# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 5
+
+[[node]]
+id = 0
+name = "seed"
+type = "pnt.scatter"
+pos = [0.0, 0.0]
+params.count = 60000
+params.radius = 1.5
+
+[[node]]
+id = 1
+name = "sim"
+type = "pnt.solver"
+pos = [220.0, 0.0]
+inputs.init = { node = 0, output = "out" }
+inputs.prev = { node = 2, output = "out" }
+
+[[node]]
+id = 2
+name = "swarm"
+type = "pnt.kernel"
+pos = [440.0, 0.0]
+inputs.in = { node = 1, output = "out" }
+params.file = "kernels/curl.atk"
+
+[[node]]
+id = 3
+name = "colour"
+type = "pnt.colour"
+pos = [660.0, 0.0]
+inputs.in = { node = 2, output = "out" }
+params.attribute = "v"
+params.high = 3.0
+params.low = 0.0
+params.measure = "length"
+params.ramp = "heat"
+
+[[node]]
+id = 4
+name = "draw"
+type = "img.render_points"
+pos = [880.0, 0.0]
+inputs.geo = { node = 3, output = "out" }
+params.height = 4.0
+params.intensity = 0.4

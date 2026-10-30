@@ -1,10 +1,10 @@
 # Kernel DSL reference
 
-> **Status: experimental, decision A12 is still Proposed (PRD §0).** The compiler lives in
-> the self-contained crate `crates/atd-kernel`. No operator uses it yet and nothing is
-> registered; removing the crate removes the feature. See
-> [`docs/milestones/m2/kernel-dsl.md`](milestones/m2/kernel-dsl.md) for the open questions
-> and the integration plan.
+> **Status:** decision A12 ratified 2026-10-30. The compiler lives in `crates/atd-kernel`;
+> the operator **Kernel** (`pnt.kernel`) runs Points kernels in the engine: inline code or a
+> `.atk` file (by convention in the project's `kernels/` folder) that reloads when saved, with
+> the simulation's state kept (see "In the engine" below). Example:
+> `examples/kernel-particles.atidarla`. Pixels kernels compile but have no operator yet.
 
 A kernel is a short program that runs once per element: once per point (target **Points**)
 or once per pixel (target **Pixels**). It reads and writes the element's attributes with
@@ -36,8 +36,8 @@ float amp    = ch("amp", 2.0, 0.0, 10.0);
 float pull   = ch("attract", 0.3, 0.0, 5.0);
 vec3  target = chv("target", {0, 0, 0});
 float dt     = @TimeInc;
-v@v += curlnoise(v@P * freq + set(0, 0, @Time * 0.1)) * amp * dt;
-v@v += (target - v@P) * pull * dt;
+v@v += curlnoise(v@P * freq) * (amp * dt);
+v@v += (target - v@P) * (pull * dt);
 v@P += v@v * dt;
 f@age += dt;
 ```
@@ -210,8 +210,11 @@ engine supplies one; the standard names below; otherwise `float` (as in VEX).
 
 Note: VEX's `Cd` and `uv` are 3-vectors. Atidarla's attribute model uses `vec4` colour and
 `vec2` UVs (`docs/design/geometry-attributes.md`). A sigil wins over this table, so with no
-schema `v@Cd` makes a 3-component `Cd`; when the engine supplies the input's schema, a sigil
-that disagrees with the input's type is an error (no silent conversion).
+schema `v@Cd` makes a 3-component `Cd`. When the engine supplies the input's schema, a sigil
+that disagrees with the input's type is an error where the kernel only reads the attribute
+(no silent conversion); where the kernel writes it, the sigil redefines it: the attribute
+is replaced by a new one of the sigil's type, starting at zero. That is how an edit to a
+running simulation changes a type.
 
 Writing an attribute that the input does not have creates it (zero-filled before the
 kernel runs). Every element writes only its own attributes, so kernels need no atomics and
@@ -237,7 +240,8 @@ output pixel.
 ## Parameters: `ch()`
 
 `ch("name", default, min, max)` reads a parameter and makes the operator show a control
-for it. `default`, `min` and `max` are optional and must be constants (literals, `-`,
+for it (in `pnt.kernel` today every `ch()` takes its default; controls come with project
+kernel operators). `default`, `min` and `max` are optional and must be constants (literals, `-`,
 constructors and `{}`). Using one name twice is fine if both uses agree.
 
 | Call | Result | Control |
@@ -281,7 +285,7 @@ compares them on a grid):
 | `perlin(p)` | `vec2` or `vec3` | `float` | about −1..1 (gradient noise, quintic fade) |
 | `simplex(p)` | `vec2` or `vec3` | `float` | about −1..1 (Gustavson, kernel radius 0.5, so continuous across simplex edges) |
 | `worley(p)` | `vec2` or `vec3` | `float` | distance to the nearest feature point (F1), 0..~1.5 |
-| `curlnoise(p)` | `vec3` | `vec3` | curl of a Perlin vector potential (divergence-free) |
+| `curlnoise(p)` | `vec3` | `vec3` | curl noise (divergence-free): the engine's `atd_curl` with seed 0, the same function the Noise operator runs |
 | `rand(x)` | `int`, `float`, `vec2`, `vec3` | `float` | 0 ≤ r < 1, a hash of the bits of `x` |
 
 The hash is PCG3D (Jarzynski and Olano, 2020) on integer cell coordinates, so lattice
@@ -356,3 +360,31 @@ Integer arithmetic wraps, in constant expressions too: `2147483647 + 1` is `-214
 - `Cd` is a `vec4`, `uv` a `vec2`, `id` an `int` stored as `u32`.
 - Only input 0 for geometry lookups; no `detail()`, `prim()`, `setpointattrib()`,
   `addpoint()` or `removepoint()` (geometry creation is up to operators).
+
+## In the engine: the Kernel operator
+
+`pnt.kernel` (Kernel) takes a GEO input and runs its Points kernel over every point, writing
+in place when the engine hands it the geometry and copying on write otherwise, like the other
+PNT operators. It dispatches from the geometry's GPU header, so the point count never comes
+back to the CPU.
+
+- **Code or file.** `code` holds the kernel; when `file` is set, that file is read instead
+  (relative to the project folder) and read again whenever it is saved. Offline renders read
+  the file once.
+- **Compiling never blocks the frame.** The compiler and the pipeline build run on a worker
+  thread. The last kernel that compiled keeps running while a new one compiles and when it
+  fails; the node shows the error with its line and column. Offline renders wait for the
+  compile.
+- **Hot reload keeps state.** Simulation state lives on the GEO wire (a Solver loop), not in
+  the operator, so a new kernel continues from the current points: an attribute it binds
+  with the same type keeps its values; one it redefines with a new type starts at zero; one
+  it no longer mentions passes through unchanged.
+- **The input decides untyped attributes.** The kernel compiles against the input's
+  attribute names and types, and again when they change.
+- **Same arithmetic as the nodes.** `curlnoise`, attraction as `(target - P) * (k * dt)` and
+  integration as `P += v * dt` compute exactly what Noise (velocity), Attract (spring) and
+  Integrate do, bit for bit, line by line (`crates/atd-ops-pnt/tests/kernel.rs`). The
+  ten-line kernel above and the four-node chain agree bit for bit on DX12 and Vulkan; on
+  Metal, whose compiler optimises one shader with fast math, they agree to about 1e-5 after
+  120 frames.
+- **Not yet:** image inputs (`texture()`), `ch()` controls, prims and voxels.

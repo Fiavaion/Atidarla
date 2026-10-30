@@ -35,6 +35,7 @@ All platforms.
 
 ## Examples
 
+- [Kernel Particles](../../../examples/kernel-particles.atidarla/) — `seed`
 - [PNT Constellation](../../../examples/pnt-constellation.atidarla/) — `sphere`, `field`
 - [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `column`, `ring`
 - [PNT Fountain](../../../examples/pnt-fountain.atidarla/) — `ring`

@@ -32,4 +32,5 @@ All platforms.
 
 ## Examples
 
+- [Kernel Particles](../../../examples/kernel-particles.atidarla/) — `sim`
 - [PNT Solver](../../../examples/pnt-solver.atidarla/) — `sim`

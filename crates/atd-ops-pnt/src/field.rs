@@ -112,9 +112,12 @@ const SPECS: &[Spec] = &[
     let d = params.a.xyz - P[i].xyz;
     let r = length(d);
     var f = 0.0;
-    if (r > 1e-6) {
-        var m = r;
-        if (params.mode == 1u) { m = 1.0; }
+    if (params.mode == 0u) {
+        // Spring: strength × d, with no division (exact, and the same
+        // arithmetic as `v += (point - P) * (strength * dt)` in a kernel).
+        f = params.a.w * atd_falloff(r, params.b.x);
+    } else if (r > 1e-6) {
+        var m = 1.0;
         if (params.mode == 2u) { m = 1.0 / max(r * r, params.b.y); }
         f = params.a.w * m * atd_falloff(r, params.b.x) / r;
     }

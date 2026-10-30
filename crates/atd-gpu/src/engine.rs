@@ -719,6 +719,14 @@ pub trait GeoOp: Send {
     fn status(&self) -> Option<&str> {
         None
     }
+
+    /// Whether the output stays valid when [`Self::cook`] returns an error
+    /// (the error is reported, the result kept): an operator that keeps
+    /// running its last good version while an edit fails, so a simulation
+    /// fed by it does not restart. Otherwise an error clears the output.
+    fn keeps_output_on_error(&self) -> bool {
+        false
+    }
 }
 
 /// Creates a GEO operator instance.
@@ -1482,7 +1490,9 @@ impl Engine {
                     Ok(()) => settle(errors, exprs, id),
                     Err(e) => {
                         errors.insert(id, e);
-                        out.clear();
+                        if !op.keeps_output_on_error() {
+                            out.clear();
+                        }
                     }
                 }
                 geo.insert(id, out);

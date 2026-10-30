@@ -36,6 +36,7 @@ All platforms.
 
 ## Examples
 
+- [Kernel Particles](../../../examples/kernel-particles.atidarla/) — `draw`
 - [Mesh Files](../../../examples/mesh-files.atidarla/) — `draw`
 - [Mesh Modelling](../../../examples/mesh-modelling.atidarla/) — `draw`
 - [Mesh Primitives](../../../examples/mesh-primitives.atidarla/) — `draw`

@@ -473,6 +473,8 @@ pub fn classify(type_id: &str) -> Option<Class> {
             Pure
         }
         "img.movie_in" | "img.text" | "img.wgsl" | "sig.audio_file_in" => Waits,
+        // Waits for its compile (and its file); its state lives on the wire.
+        "pnt.kernel" => Waits,
         // Compile; persistent `state` images and buffers also make it stateful.
         "img.compute" => Waits,
         "img.analyze" => OneFrameLate,

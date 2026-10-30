@@ -12,6 +12,7 @@ publish.workspace = true
 [dependencies]
 atd-core.workspace = true
 atd-gpu.workspace = true
+atd-kernel.workspace = true
 wgpu.workspace = true
 
 [dev-dependencies]

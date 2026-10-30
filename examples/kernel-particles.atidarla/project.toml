@@ -1,0 +1,17 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "Kernel Particles"
+description = '''
+A particle simulation written as a ten-line kernel (M2, Kernel DSL): kernels/curl.atk adds curl
+noise and a spring toward the centre to the velocity, moves the points and ages them. Scatter
+seeds 60,000 points in a ball; Solver feeds each frame's result back into the kernel, so the
+state lives on the wire. Render Points draws them, coloured by speed.
+
+Edit kernels/curl.atk while it runs and save: the kernel reloads and the particles carry on
+from where they were. A mistake shows its line and column on the node, and the last kernel
+that compiled keeps running.
+
+Try: change `pull` to 1.5; replace curlnoise(...) with set(0, -1, 0) for rain; add
+`v@Cd = set(fit01(f@age, 1, 0), 0.4, 1);`.
+'''
+resolution = [1280, 720]
