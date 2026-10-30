@@ -37,12 +37,14 @@ fn now(engine: &Engine, deck: &Deck, time: f64) -> f64 {
 
 impl StagePanel {
     /// Cooks one frame like [`Engine::cook_frame`] (the viewed node and
-    /// every sink), plus the Stage deck, so the show keeps playing whatever
-    /// is viewed; first runs one-shot returns and the autopilot.
+    /// every sink), plus the Stage deck and `outputs` (the open output
+    /// windows), so the show keeps playing whatever is viewed; first runs
+    /// one-shot returns and the autopilot.
     pub fn cook_frame(
         &mut self,
         engine: &mut Engine,
         viewed: Option<NodeId>,
+        outputs: &[NodeId],
         time: f64,
     ) -> Result<usize, EngineError> {
         let stage = Stage::read(engine.network(), engine.registry());
@@ -60,6 +62,11 @@ impl StagePanel {
         requested.clear();
         requested.extend(viewed);
         requested.extend(deck.map(|d| d.mixer).filter(|m| Some(*m) != viewed));
+        for &o in outputs {
+            if !requested.contains(&o) {
+                requested.push(o);
+            }
+        }
         let registry = engine.registry();
         for node in engine.network().nodes() {
             if registry.get(&node.type_id).is_some_and(|s| s.sink) && Some(node.id) != viewed {

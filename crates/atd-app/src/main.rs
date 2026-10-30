@@ -4,6 +4,7 @@ mod app;
 mod canvas;
 mod channels;
 mod dock;
+mod outputs;
 mod params;
 mod patch;
 mod project;

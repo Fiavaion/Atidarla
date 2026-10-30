@@ -506,7 +506,7 @@ impl OutputMap {
             }
             if s.warp == Warp::Bezier && ((cols - 1) % 3 != 0 || (rows - 1) % 3 != 0) {
                 return Err(format!(
-                    "slice `{}`: a Bezier warp takes 4, 7, 10 or 13 points per axis",
+                    "slice `{}`: a Bezier warp takes 4, 7, 10, 13 or 16 points per axis",
                     s.name
                 ));
             }

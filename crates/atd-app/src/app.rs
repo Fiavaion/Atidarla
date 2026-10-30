@@ -36,6 +36,8 @@ const SAMPLE_FLAGS: [&str; 7] = [
 pub enum Tab {
     Patch,
     Stage,
+    /// Output windows: slices, warps, masks, soft edges (FR-S6).
+    Outputs,
     Timeline,
     Parameters,
     Viewer,
@@ -78,6 +80,7 @@ struct Panels {
     time: f64,
     textport: crate::textport::TextportPanel,
     stage: crate::stage::StagePanel,
+    outputs: crate::outputs::OutputsPanel,
 }
 
 impl AtidarlaApp {
@@ -123,6 +126,7 @@ impl AtidarlaApp {
             atd_ops_pnt::library(&mut library);
             atd_ops_mat::library(&mut library);
             atd_ops_msh::library(&mut library);
+            atd_ops_cmp::library(&mut library);
             let mut registry = builtin_registry();
             load_isf(&mut registry, &mut library);
             let mut engine = Engine::new(
@@ -165,7 +169,7 @@ impl AtidarlaApp {
             vec![Tab::Operators, Tab::Platform],
             vec![Tab::Viewer, Tab::Parameters],
             vec![Tab::Timeline],
-            vec![Tab::Patch, Tab::Stage],
+            vec![Tab::Patch, Tab::Stage, Tab::Outputs],
         );
         Self {
             dock,
@@ -184,6 +188,7 @@ impl AtidarlaApp {
                 time: 0.0,
                 textport: Default::default(),
                 stage: Default::default(),
+                outputs: Default::default(),
             },
             smoke: smoke.map(Smoke::new),
             start: Instant::now(),
@@ -299,6 +304,7 @@ impl eframe::App for AtidarlaApp {
                     for tab in [
                         Tab::Patch,
                         Tab::Stage,
+                        Tab::Outputs,
                         Tab::Timeline,
                         Tab::Viewer,
                         Tab::Platform,
@@ -693,13 +699,18 @@ impl AtidarlaApp {
         }
         let viewed = p.viewed;
         p.time = self.start.elapsed().as_secs_f64();
-        let cooked = match p.stage.cook_frame(engine, viewed, p.time) {
+        let outputs = p.outputs.prepare(engine);
+        let cooked = match p.stage.cook_frame(engine, viewed, outputs, p.time) {
             Ok(n) => n,
             Err(e) => {
                 p.patch.status(e.to_string());
                 0
             }
         };
+        if let Some(rs) = frame.wgpu_render_state() {
+            p.outputs.present(engine, rs, cooked);
+        }
+        p.outputs.show_windows(ctx, engine, cooked);
         let Some(viewed) = viewed else {
             if cooked > 0 {
                 ctx.request_repaint();
@@ -730,6 +741,7 @@ fn tab_title(tab: Tab) -> &'static str {
     match tab {
         Tab::Patch => "Patch",
         Tab::Stage => "Stage",
+        Tab::Outputs => "Outputs",
         Tab::Timeline => "Timeline",
         Tab::Parameters => "Parameters",
         Tab::Viewer => "Viewer",
@@ -769,6 +781,10 @@ impl TabViewer for Panels {
             },
             Tab::Stage => match &mut self.engine {
                 Some(engine) => self.stage.ui(ui, engine, self.time),
+                None => placeholder(ui, "No GPU device: the engine is unavailable."),
+            },
+            Tab::Outputs => match &mut self.engine {
+                Some(engine) => self.outputs.ui(ui, engine),
                 None => placeholder(ui, "No GPU device: the engine is unavailable."),
             },
             Tab::Timeline => placeholder(ui, "Keyframes, cues and timecode arrive in M3."),
