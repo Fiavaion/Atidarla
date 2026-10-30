@@ -142,7 +142,8 @@ pub struct Job<T> {
 }
 
 impl<T: Send + 'static> Job<T> {
-    pub(crate) fn spawn(name: &str, work: impl FnOnce(&Progress) -> T + Send + 'static) -> Self {
+    /// Runs `work` on a new named thread.
+    pub fn spawn(name: &str, work: impl FnOnce(&Progress) -> T + Send + 'static) -> Self {
         let progress = Arc::new(Progress::default());
         let p = progress.clone();
         let handle = std::thread::Builder::new()

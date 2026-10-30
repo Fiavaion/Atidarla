@@ -5,6 +5,7 @@ mod canvas;
 mod channels;
 mod dock;
 mod mappings;
+mod models_panel;
 mod outputs;
 mod params;
 mod patch;
