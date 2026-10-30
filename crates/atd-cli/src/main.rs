@@ -1,5 +1,6 @@
 //! `atidarla` — headless entry points (PRD §7.10).
 
+mod bake;
 mod bench;
 mod cloud;
 mod docs;
@@ -11,6 +12,7 @@ mod project;
 mod pt8;
 mod render;
 mod serve;
+mod supervise;
 
 /// The mock ComfyUI server of `atd-ops-ai`'s tests, for the render test.
 #[cfg(test)]
@@ -121,10 +123,60 @@ enum Command {
         #[arg(long)]
         gpu: bool,
     },
-    /// Run a project headless, optionally as a kiosk with watchdog (FR-H2, M3).
-    Run { project: PathBuf },
-    /// Bake a network to disk (M2).
-    Bake { project: PathBuf },
+    /// Run a project under a supervisor (FR-H2): launches the app (`atidarla-app`
+    /// beside this executable, or $ATD_APP), restarts it when it exits abnormally or
+    /// stops heartbeating (with back-off, logged to <PROJECT>/.cache/restarts.log) and
+    /// stops it on Ctrl-C. An app that exits normally (the operator quit) is not
+    /// restarted. See docs/run.md.
+    Run {
+        /// Project folder (`*.atidarla`).
+        project: PathBuf,
+        /// Full-screen show mode: only the viewer, no editor, no cursor.
+        #[arg(long)]
+        kiosk: bool,
+        /// Restarts in a row before giving up (a run of a minute resets the count).
+        #[arg(long, default_value_t = 10)]
+        max_restarts: u32,
+        /// Seconds before the first restart; doubles for each one in a row (up to 60).
+        #[arg(long, default_value_t = 1.0)]
+        restart_delay: f64,
+        /// Seconds without a heartbeat before the app is killed and restarted
+        /// (0: do not watch).
+        #[arg(long, default_value_t = 15.0)]
+        heartbeat_timeout: f64,
+        /// Seconds the app gets from launch to its first heartbeat.
+        #[arg(long, default_value_t = 90.0)]
+        startup_grace: f64,
+    },
+    /// Bake one node's output to disk with the offline render engine: a GEO/MSH node
+    /// to mesh files (mesh.ply once if every frame is the same, else
+    /// mesh_000000.ply, ...), an IMG node to a PNG sequence. See docs/render.md.
+    Bake {
+        /// Project folder (`*.atidarla`).
+        project: PathBuf,
+        /// The node to bake, by name; default: the last GEO node nothing reads
+        /// from, else the last IMG node.
+        #[arg(long)]
+        node: Option<String>,
+        /// Folder to write into (created if missing).
+        #[arg(long, default_value = "bake")]
+        out: PathBuf,
+        /// Frames START-END (end exclusive).
+        #[arg(long, default_value = "0-1", value_parser = render::parse_range)]
+        range: std::ops::Range<u64>,
+        /// Frames per second: frame i is at i/fps seconds.
+        #[arg(long, default_value_t = render::DEFAULT_FPS, value_parser = render::parse_fps)]
+        fps: f64,
+        /// Mesh format: obj, ply, gltf or glb.
+        #[arg(long, default_value = "ply", value_parser = parse_mesh_format)]
+        format: atd_ops_msh::io::Format,
+        /// Write one file per frame even when every frame is the same.
+        #[arg(long)]
+        sequence: bool,
+        /// Run the project's Python operators (ops/*.py); see docs/python-ops.md.
+        #[arg(long)]
+        allow_python_ops: bool,
+    },
     /// Expose MCP + OSC/REST without UI (FR-H3, M5).
     Serve(serve::ServeArgs),
     /// Check project folders: they load, validate against the operator
@@ -359,8 +411,44 @@ fn main() -> ExitCode {
         Command::VerifyShow { bundle, gpu } => export::verify(&bundle, gpu),
         Command::Models { action } => models::run(action),
         Command::Cloud { action } => cloud::run(action),
-        Command::Run { .. } => return not_yet("run", "M3 (FR-H2)"),
-        Command::Bake { .. } => return not_yet("bake", "M2"),
+        Command::Run {
+            project,
+            kiosk,
+            max_restarts,
+            restart_delay,
+            heartbeat_timeout,
+            startup_grace,
+        } => supervise::run(
+            &project,
+            &supervise::RunOptions {
+                kiosk,
+                max_restarts,
+                restart_delay,
+                heartbeat_timeout,
+                startup_grace,
+            },
+        ),
+        Command::Bake {
+            project,
+            node,
+            out,
+            range,
+            fps,
+            format,
+            sequence,
+            allow_python_ops,
+        } => bake::run(
+            &project,
+            &out,
+            &bake::BakeOptions {
+                range,
+                fps,
+                node,
+                format,
+                sequence,
+                allow_python_ops,
+            },
+        ),
         Command::Serve(args) => serve::run(args),
     };
     match result {
@@ -372,9 +460,8 @@ fn main() -> ExitCode {
     }
 }
 
-fn not_yet(command: &str, milestone: &str) -> ExitCode {
-    eprintln!("`atidarla {command}` is not implemented yet; it is scheduled for {milestone}.");
-    ExitCode::from(2)
+fn parse_mesh_format(s: &str) -> Result<atd_ops_msh::io::Format, String> {
+    atd_ops_msh::io::Format::from_name(s).ok_or_else(|| "use obj, ply, gltf or glb".to_owned())
 }
 
 /// The registry with every built-in operator family registered.

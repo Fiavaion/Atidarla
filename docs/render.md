@@ -91,6 +91,36 @@ Warnings (stderr) name every live input and every sink in the project (see below
 this platform does not run (capability flags, A19), which renders as empty. Any other node error
 stops the render with the frame number and the message.
 
+## Baking a network (`atidarla bake`)
+
+`bake` runs the same offline engine (same fixed step, same determinism) but writes one node's
+output by its type, so geometry can leave the engine as files:
+
+```sh
+atidarla bake examples/mesh-primitives.atidarla --node scene --out baked --range 0-120 --format glb
+atidarla bake examples/mesh-primitives.atidarla --node ball --out baked    # static: baked/mesh.ply
+```
+
+| Option | Meaning |
+|---|---|
+| `--node <name>` | Any GEO (MSH) or IMG node. Default: the last GEO node nothing reads from, else the last IMG node. |
+| `--out <dir>` | Folder, created if missing (default `bake`). |
+| `--range A-B` | Frames `A` to `B`, end exclusive (default `0-1`, one frame). |
+| `--fps N` | As in `render`. |
+| `--format` | `obj`, `ply` (default, keeps every attribute), `gltf`, `glb`: the Mesh File Out writers. |
+| `--sequence` | Write `mesh_000000.ply`, ... even when every frame is identical. |
+
+| | `render` | `bake` |
+|---|---|---|
+| Output | IMG node only: PNG frames or a movie | IMG node: the same PNG frames. GEO/MSH node: mesh files |
+| Meshes | not available | per frame as `mesh_000012.ply` (frame number); if every frame in the range is byte-identical (a static network) one `mesh.ply` |
+| Movies | `.mov` / `.mp4` | no |
+
+Mesh baking needs the node's attributes on the CPU, which MSH operators always have; a GEO
+node from the point (PNT) family has them only on the GPU and fails with an error that says so.
+Files written by `msh.file_out` nodes inside the project still write to their own paths while
+baking, as in a render. Files read back with Mesh File In / `atd-ops-msh`'s reader give the baked mesh.
+
 ## What is deterministic
 
 Two renders of the same project and range on **the same machine, GPU adapter, graphics backend,

@@ -47,7 +47,17 @@ pub enum Tab {
     Textport,
 }
 
+/// How the shell was launched (`atidarla run`, `docs/run.md`).
+#[derive(Debug, Default)]
+pub struct Shell {
+    /// Show mode: only the viewer, full screen, no cursor.
+    pub kiosk: bool,
+    /// Beats for the supervisor while the UI draws frames.
+    pub heartbeat: Option<crate::heartbeat::Heartbeat>,
+}
+
 pub struct AtidarlaApp {
+    shell: Shell,
     dock: DockState<Tab>,
     panels: Panels,
     smoke: Option<Smoke>,
@@ -100,6 +110,7 @@ impl AtidarlaApp {
         smoke: Option<SmokeArgs>,
         open: Option<std::path::PathBuf>,
         oscquery: bool,
+        shell: Shell,
     ) -> Self {
         let rs = cc.wgpu_render_state.as_ref();
         let info = rs.map(|rs| rs.adapter.get_info());
@@ -185,6 +196,7 @@ impl AtidarlaApp {
             vec![Tab::Patch, Tab::Stage, Tab::Outputs],
         );
         Self {
+            shell,
             dock,
             gpu_error,
             panels: Panels {
@@ -299,121 +311,136 @@ impl eframe::App for AtidarlaApp {
     }
 
     fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
+        if let Some(hb) = &self.shell.heartbeat {
+            hb.tick();
+            // An idle show still draws, so it keeps beating.
+            ui.ctx()
+                .request_repaint_after(crate::heartbeat::Heartbeat::IDLE_WAKE);
+        }
+        if self.shell.kiosk {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::None);
+        }
         self.shortcuts(ui);
         self.project_frame(ui.ctx());
         let (ai, opened) = (&self.project.meta.ai, self.project.opened);
         self.panels.ai_hosts.frame(ai, opened);
         self.python_frame(ui.ctx());
         self.kernels_frame();
-        egui::Panel::top("menu_bar").show(ui, |ui| {
-            egui::MenuBar::new().ui(ui, |ui| {
-                ui.menu_button("File", |ui| self.file_menu(ui));
-                ui.menu_button("Edit", |ui| {
-                    let (undo, redo) = self.panels.engine.as_ref().map_or((None, None), |e| {
-                        (
-                            e.history().undo_label().map(str::to_owned),
-                            e.history().redo_label().map(str::to_owned),
-                        )
-                    });
-                    let u = ui.add_enabled(
-                        undo.is_some(),
-                        egui::Button::new(format!("Undo {}", undo.unwrap_or_default())),
-                    );
-                    let r = ui.add_enabled(
-                        redo.is_some(),
-                        egui::Button::new(format!("Redo {}", redo.unwrap_or_default())),
-                    );
-                    if let Some(e) = &mut self.panels.engine {
-                        if u.clicked() {
-                            let _ = e.undo();
-                        }
-                        if r.clicked() {
-                            let _ = e.redo();
-                        }
-                    }
-                });
-                ui.menu_button("View", |ui| {
-                    for tab in [
-                        Tab::Patch,
-                        Tab::Stage,
-                        Tab::Outputs,
-                        Tab::Timeline,
-                        Tab::Viewer,
-                        Tab::Platform,
-                    ] {
-                        if ui.button(tab_title(tab)).clicked() {
-                            self.dock.focus(|t| *t == tab);
-                        }
-                    }
-                    ui.separator();
-                    if ui.button("Mappings").clicked() {
-                        self.panels.control.open = true;
-                    }
-                    if ui
-                        .button("Models")
-                        .on_hover_text("AI models: licences, downloads and checks")
-                        .clicked()
-                    {
-                        self.panels.models.open = true;
-                    }
-                    if ui
-                        .button("AI Hosts")
-                        .on_hover_text("Where AI nodes run, Sovereign mode and cloud spending")
-                        .clicked()
-                    {
-                        self.panels.ai_hosts.open = true;
-                    }
-                    if ui
-                        .button(tab_title(Tab::Textport))
-                        .on_hover_text("Python console over the open project")
-                        .clicked()
-                    {
-                        self.dock.open(Area::Bottom, Tab::Textport);
-                    }
-                });
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.weak(format!("Atidarla {}", atd_core::VERSION));
-                    let ai = &mut self.project.meta.ai;
-                    self.panels.ai_hosts.badge(ui, ai);
-                    if let Some((msg, error)) = self.project.message.clone() {
-                        let short: String = msg.chars().take(80).collect();
-                        ui.separator();
-                        let label = if error {
-                            ui.colored_label(egui::Color32::from_rgb(230, 80, 80), short)
-                        } else {
-                            ui.weak(short)
-                        };
-                        if label
-                            .on_hover_text(format!("{msg}\n\nClick to dismiss."))
-                            .clicked()
-                        {
-                            self.project.message = None;
-                        }
-                    }
-                    let last = self.gpu_error.lock().ok().and_then(|g| g.clone());
-                    if let Some(e) = last {
-                        let short: String =
-                            e.lines().next().unwrap_or("").chars().take(60).collect();
-                        ui.separator();
-                        if ui
-                            .colored_label(
-                                egui::Color32::from_rgb(230, 80, 80),
-                                format!("GPU error: {short}"),
+        if !self.shell.kiosk {
+            egui::Panel::top("menu_bar").show(ui, |ui| {
+                egui::MenuBar::new().ui(ui, |ui| {
+                    ui.menu_button("File", |ui| self.file_menu(ui));
+                    ui.menu_button("Edit", |ui| {
+                        let (undo, redo) = self.panels.engine.as_ref().map_or((None, None), |e| {
+                            (
+                                e.history().undo_label().map(str::to_owned),
+                                e.history().redo_label().map(str::to_owned),
                             )
-                            .on_hover_text(format!("{e}\n\nClick to dismiss."))
-                            .clicked()
-                            && let Ok(mut g) = self.gpu_error.lock()
-                        {
-                            *g = None;
+                        });
+                        let u = ui.add_enabled(
+                            undo.is_some(),
+                            egui::Button::new(format!("Undo {}", undo.unwrap_or_default())),
+                        );
+                        let r = ui.add_enabled(
+                            redo.is_some(),
+                            egui::Button::new(format!("Redo {}", redo.unwrap_or_default())),
+                        );
+                        if let Some(e) = &mut self.panels.engine {
+                            if u.clicked() {
+                                let _ = e.undo();
+                            }
+                            if r.clicked() {
+                                let _ = e.redo();
+                            }
                         }
-                    }
-                    ui.separator();
-                    ui.weak(platform_summary(&self.panels.platform));
+                    });
+                    ui.menu_button("View", |ui| {
+                        for tab in [
+                            Tab::Patch,
+                            Tab::Stage,
+                            Tab::Outputs,
+                            Tab::Timeline,
+                            Tab::Viewer,
+                            Tab::Platform,
+                        ] {
+                            if ui.button(tab_title(tab)).clicked() {
+                                self.dock.focus(|t| *t == tab);
+                            }
+                        }
+                        ui.separator();
+                        if ui.button("Mappings").clicked() {
+                            self.panels.control.open = true;
+                        }
+                        if ui
+                            .button("Models")
+                            .on_hover_text("AI models: licences, downloads and checks")
+                            .clicked()
+                        {
+                            self.panels.models.open = true;
+                        }
+                        if ui
+                            .button("AI Hosts")
+                            .on_hover_text("Where AI nodes run, Sovereign mode and cloud spending")
+                            .clicked()
+                        {
+                            self.panels.ai_hosts.open = true;
+                        }
+                        if ui
+                            .button(tab_title(Tab::Textport))
+                            .on_hover_text("Python console over the open project")
+                            .clicked()
+                        {
+                            self.dock.open(Area::Bottom, Tab::Textport);
+                        }
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.weak(format!("Atidarla {}", atd_core::VERSION));
+                        let ai = &mut self.project.meta.ai;
+                        self.panels.ai_hosts.badge(ui, ai);
+                        if let Some((msg, error)) = self.project.message.clone() {
+                            let short: String = msg.chars().take(80).collect();
+                            ui.separator();
+                            let label = if error {
+                                ui.colored_label(egui::Color32::from_rgb(230, 80, 80), short)
+                            } else {
+                                ui.weak(short)
+                            };
+                            if label
+                                .on_hover_text(format!("{msg}\n\nClick to dismiss."))
+                                .clicked()
+                            {
+                                self.project.message = None;
+                            }
+                        }
+                        let last = self.gpu_error.lock().ok().and_then(|g| g.clone());
+                        if let Some(e) = last {
+                            let short: String =
+                                e.lines().next().unwrap_or("").chars().take(60).collect();
+                            ui.separator();
+                            if ui
+                                .colored_label(
+                                    egui::Color32::from_rgb(230, 80, 80),
+                                    format!("GPU error: {short}"),
+                                )
+                                .on_hover_text(format!("{e}\n\nClick to dismiss."))
+                                .clicked()
+                                && let Ok(mut g) = self.gpu_error.lock()
+                            {
+                                *g = None;
+                            }
+                        }
+                        ui.separator();
+                        ui.weak(platform_summary(&self.panels.platform));
+                    });
                 });
             });
-        });
+        }
         self.panels.image_rect = None;
-        self.dock.show(ui, &mut self.panels);
+        if self.shell.kiosk {
+            egui::CentralPanel::default().show(ui, |ui| self.panels.viewer_ui(ui));
+        } else {
+            self.dock.show(ui, &mut self.panels);
+        }
         if std::mem::take(&mut self.panels.textport.close) {
             self.dock.close(|t| *t == Tab::Textport);
         }

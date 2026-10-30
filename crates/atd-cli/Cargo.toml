@@ -46,6 +46,8 @@ png.workspace = true
 sha2.workspace = true
 zip.workspace = true
 toml_edit.workspace = true
+# `run` supervisor: stop the child on Ctrl-C / SIGTERM.
+ctrlc.workspace = true
 
 [dev-dependencies]
 # The mock ComfyUI server shared with atd-ops-ai's tests (render test).

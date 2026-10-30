@@ -6,6 +6,7 @@ mod app;
 mod canvas;
 mod channels;
 mod dock;
+mod heartbeat;
 mod mappings;
 mod models_panel;
 mod outputs;
@@ -33,11 +34,27 @@ fn main() -> ExitCode {
         .position(|a| a == "--oscquery")
         .map(|i| args.remove(i))
         .is_some();
+    let kiosk = args
+        .iter()
+        .position(|a| a == "--kiosk")
+        .map(|i| args.remove(i))
+        .is_some();
+    let heartbeat = match args.iter().position(|a| a == "--heartbeat") {
+        Some(i) if i + 1 < args.len() => {
+            args.remove(i);
+            Some(std::path::PathBuf::from(args.remove(i)))
+        }
+        Some(_) => {
+            eprintln!("error: --heartbeat needs a file path");
+            return ExitCode::from(2);
+        }
+        None => None,
+    };
     let smoke = match smoke::SmokeArgs::parse(args) {
         Ok(smoke) => smoke,
         Err(e) => {
             eprintln!(
-                "error: {e}\nusage: atidarla-app [project.atidarla] [--oscquery] [--smoke [frames]] [--screenshot out.png]"
+                "error: {e}\nusage: atidarla-app [project.atidarla] [--oscquery] [--kiosk] [--heartbeat file] [--smoke [frames]] [--screenshot out.png]"
             );
             return ExitCode::from(2);
         }
@@ -63,13 +80,25 @@ fn main() -> ExitCode {
         viewport: egui::ViewportBuilder::default()
             .with_title("Atidarla")
             .with_inner_size([1440.0, 900.0])
-            .with_min_inner_size([800.0, 500.0]),
+            .with_min_inner_size([800.0, 500.0])
+            .with_fullscreen(kiosk)
+            .with_decorations(!kiosk),
         ..Default::default()
     };
+    let heartbeat = heartbeat.and_then(|path| {
+        heartbeat::Heartbeat::start(path)
+            .inspect_err(|e| eprintln!("warning: heartbeat: {e}"))
+            .ok()
+    });
+    let shell = app::Shell { kiosk, heartbeat };
     let result = eframe::run_native(
         "Atidarla",
         options,
-        Box::new(|cc| Ok(Box::new(app::AtidarlaApp::new(cc, smoke, open, oscquery)))),
+        Box::new(|cc| {
+            Ok(Box::new(app::AtidarlaApp::new(
+                cc, smoke, open, oscquery, shell,
+            )))
+        }),
     );
     match result {
         Ok(()) => ExitCode::SUCCESS,
