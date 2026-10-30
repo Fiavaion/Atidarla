@@ -90,6 +90,8 @@ struct Panels {
     outputs: crate::outputs::OutputsPanel,
     /// The model manager window (FR-A12).
     models: crate::models_panel::ModelsPanel,
+    /// Sovereign mode, spend cap and AI Hosts (FR-A2, FR-A7, FR-A8).
+    ai_hosts: crate::ai_hosts::AiHostsPanel,
 }
 
 impl AtidarlaApp {
@@ -205,6 +207,7 @@ impl AtidarlaApp {
                 record: Default::default(),
                 outputs: Default::default(),
                 models: Default::default(),
+                ai_hosts: Default::default(),
             },
             smoke: smoke.map(Smoke::new),
             start: Instant::now(),
@@ -288,6 +291,8 @@ impl eframe::App for AtidarlaApp {
     fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
         self.shortcuts(ui);
         self.project_frame(ui.ctx());
+        let (ai, opened) = (&self.project.meta.ai, self.project.opened);
+        self.panels.ai_hosts.frame(ai, opened);
         self.python_frame(ui.ctx());
         self.kernels_frame();
         egui::Panel::top("menu_bar").show(ui, |ui| {
@@ -342,6 +347,13 @@ impl eframe::App for AtidarlaApp {
                         self.panels.models.open = true;
                     }
                     if ui
+                        .button("AI Hosts")
+                        .on_hover_text("Where AI nodes run, Sovereign mode and cloud spending")
+                        .clicked()
+                    {
+                        self.panels.ai_hosts.open = true;
+                    }
+                    if ui
                         .button(tab_title(Tab::Textport))
                         .on_hover_text("Python console over the open project")
                         .clicked()
@@ -351,6 +363,8 @@ impl eframe::App for AtidarlaApp {
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.weak(format!("Atidarla {}", atd_core::VERSION));
+                    let ai = &mut self.project.meta.ai;
+                    self.panels.ai_hosts.badge(ui, ai);
                     if let Some((msg, error)) = self.project.message.clone() {
                         let short: String = msg.chars().take(80).collect();
                         ui.separator();
@@ -404,6 +418,8 @@ impl eframe::App for AtidarlaApp {
             .window(ui.ctx(), p.engine.as_ref(), &mut self.project.meta.mappings);
         let meta = &mut self.project.meta;
         p.models.window(ui.ctx(), &mut meta.ai, &meta.models);
+        p.ai_hosts.window(ui.ctx(), &mut meta.ai);
+        p.ai_hosts.confirm(ui.ctx(), &mut meta.ai);
         self.cook_and_present(ui.ctx(), frame);
         self.textport_frame(ui.ctx());
         if let Some(smoke) = &mut self.smoke {
@@ -850,7 +866,7 @@ impl TabViewer for Panels {
             Tab::Patch => match &mut self.engine {
                 Some(engine) => {
                     self.canvas_rect = ui.available_rect_before_wrap();
-                    self.patch.ui(ui, engine);
+                    self.patch.ui(ui, engine, &self.platform);
                 }
                 None => placeholder(ui, "No GPU device: the engine is unavailable."),
             },

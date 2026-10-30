@@ -20,6 +20,7 @@
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
+use atd_core::PlatformInfo;
 use atd_core::fragment::Fragment;
 use atd_core::graph::{Comment, CommentId, Edit, Endpoint, Node, NodeId, Wire};
 use atd_core::registry::{OpFamily, OperatorSchema, Registry, WireType};
@@ -181,6 +182,8 @@ pub struct PatchEditor {
     editing: Option<CommentEdit>,
     /// Frame the whole patch on the next draw (after opening a project).
     fit: bool,
+    /// Badge text, reused between nodes and frames (`crate::ai_badges`).
+    badge: String,
 }
 
 impl PatchEditor {
@@ -280,7 +283,9 @@ impl PatchEditor {
         self.view.to_canvas(rect.min, rect.center())
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, engine: &mut Engine) {
+    /// Draws and edits the patch. `platform` decides which capability
+    /// badges show (PRD A19).
+    pub fn ui(&mut self, ui: &mut Ui, engine: &mut Engine, platform: &PlatformInfo) {
         let (rect, bg) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
         let origin = rect.min;
         let frame_key = bg.hovered()
@@ -694,6 +699,32 @@ impl PatchEditor {
                 && resp.hovered()
             {
                 resp.on_hover_text(e);
+            }
+            if let Some(cap) = crate::ai_badges::capability_badge(schema, platform) {
+                let id = node.id.0;
+                crate::ai_badges::paint_capability(
+                    ui,
+                    &painter,
+                    screen,
+                    id,
+                    cap,
+                    zoom,
+                    &mut self.badge,
+                );
+            }
+            if schema.family == OpFamily::Ai
+                && let Some(status) = engine.status(node.id)
+            {
+                let id = node.id.0;
+                crate::ai_badges::paint_route(
+                    ui,
+                    &painter,
+                    screen,
+                    id,
+                    status,
+                    zoom,
+                    &mut self.badge,
+                );
             }
 
             for (i, s) in schema.inputs.iter().enumerate() {
@@ -1354,6 +1385,7 @@ mod tests {
         assert_eq!(engine.network().len(), 2000);
 
         let mut editor = PatchEditor::default();
+        let platform = PlatformInfo::host();
         let ctx = egui::Context::default();
         let input = || egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1600.0, 1000.0))),
@@ -1362,7 +1394,7 @@ mod tests {
         for (label, zoom) in [("100%", 1.0), ("10%", 0.1)] {
             editor.view.zoom = zoom;
             let mut frame = || {
-                let mut out = ctx.run_ui(input(), |ui| editor.ui(ui, &mut engine));
+                let mut out = ctx.run_ui(input(), |ui| editor.ui(ui, &mut engine, &platform));
                 out.textures_delta.clear();
                 ctx.tessellate(out.shapes, out.pixels_per_point).len()
             };

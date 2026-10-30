@@ -1,5 +1,7 @@
 //! Atidarla application shell (PRD §5.2 `atd-app`).
 
+mod ai_badges;
+mod ai_hosts;
 mod app;
 mod canvas;
 mod channels;

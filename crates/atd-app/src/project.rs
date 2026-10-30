@@ -92,15 +92,20 @@ impl ProjectState {
             || self.meta.models != self.saved_ai.1
     }
 
-    /// The window title: project name, and a dot when there are unsaved
-    /// changes.
+    /// The window title: project name, a dot when there are unsaved
+    /// changes, and "Sovereign" while Sovereign mode is on (FR-A8).
     pub fn title(&self, engine: Option<&Engine>) -> String {
         let dot = if engine.is_some_and(|e| self.dirty(e)) {
             " •"
         } else {
             ""
         };
-        format!("{}{dot} — Atidarla", self.meta.name)
+        let sovereign = if self.meta.ai.sovereign {
+            " · Sovereign"
+        } else {
+            ""
+        };
+        format!("{}{dot}{sovereign} — Atidarla", self.meta.name)
     }
 
     /// Runs `action`, or asks first when it would discard unsaved changes.
