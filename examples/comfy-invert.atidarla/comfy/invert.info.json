@@ -1,0 +1,105 @@
+{
+  "ImageInvert": {
+    "category": "image",
+    "description": "",
+    "display_name": "Invert Image",
+    "input": {
+      "required": {
+        "image": [
+          "IMAGE"
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "image"
+      ]
+    },
+    "name": "ImageInvert",
+    "output": [
+      "IMAGE"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "IMAGE"
+    ],
+    "output_node": false
+  },
+  "LoadImage": {
+    "category": "image",
+    "description": "",
+    "display_name": "Load Image",
+    "input": {
+      "required": {
+        "image": [
+          [],
+          {
+            "image_upload": true
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "image"
+      ]
+    },
+    "name": "LoadImage",
+    "output": [
+      "IMAGE",
+      "MASK"
+    ],
+    "output_is_list": [
+      false,
+      false
+    ],
+    "output_name": [
+      "IMAGE",
+      "MASK"
+    ],
+    "output_node": false
+  },
+  "SaveImage": {
+    "category": "image",
+    "description": "Saves the input images to your ComfyUI output directory.",
+    "display_name": "Save Image",
+    "input": {
+      "hidden": {
+        "extra_pnginfo": "EXTRA_PNGINFO",
+        "prompt": "PROMPT"
+      },
+      "required": {
+        "filename_prefix": [
+          "STRING",
+          {
+            "default": "ComfyUI",
+            "tooltip": "The prefix for the file to save."
+          }
+        ],
+        "images": [
+          "IMAGE",
+          {
+            "tooltip": "The images to save."
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "hidden": [
+        "prompt",
+        "extra_pnginfo"
+      ],
+      "required": [
+        "images",
+        "filename_prefix"
+      ]
+    },
+    "name": "SaveImage",
+    "output": [],
+    "output_is_list": [],
+    "output_name": [],
+    "output_node": true
+  }
+}
