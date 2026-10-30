@@ -186,6 +186,13 @@ fn geo_chains_steady_state_allocations() {
         let cooked = e.cook(&out, t).unwrap();
         assert_eq!(cooked, 7, "everything but the static source cooks");
         t += 1.0 / 60.0;
+        // Pooled buffers come back when the GPU has finished with them; on
+        // a GPU shared with other work more stay in flight and the pool
+        // grows. Waiting for the GPU (outside the allocation count) keeps
+        // this test about the engine, not about what else uses the GPU.
+        COUNTING.with(|c| c.set(false));
+        let _ = e.device().poll(wgpu::PollType::wait_indefinitely());
+        COUNTING.with(|c| c.set(true));
     }
     let total = allocs() - before;
     COUNTING.with(|c| c.set(false));
