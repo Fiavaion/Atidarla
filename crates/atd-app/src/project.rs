@@ -52,6 +52,9 @@ pub struct ProjectState {
     pub python: Option<atd_py::ops::PythonOps>,
     /// Ask whether to run them (they are not allowed yet).
     pub python_ask: bool,
+    /// The open project's kernel operators (`kernels/*.atk`,
+    /// docs/kernel-dsl.md).
+    pub kernels: Option<atd_ops_pnt::project::ProjectKernels>,
     /// Counts projects opened or started; the textport starts afresh when
     /// it changes.
     pub opened: u64,
@@ -71,6 +74,7 @@ impl ProjectState {
             message: None,
             python: None,
             python_ask: false,
+            kernels: None,
             opened: 0,
         }
     }
@@ -112,7 +116,10 @@ impl ProjectState {
                     self.message = Some((e.to_string(), true));
                     return None;
                 }
-                engine.extend(|r, _| atd_py::ops::clear_custom(r));
+                engine.extend(|r, _| {
+                    atd_py::ops::clear_custom(r);
+                    atd_ops_pnt::project::clear_custom(r);
+                });
                 let opened = self.opened + 1;
                 *self = Self::untitled(engine.network());
                 self.opened = opened;
@@ -128,9 +135,17 @@ impl ProjectState {
                 None
             }
             Action::OpenDir(dir) => match open(engine, &dir) {
-                Ok((meta, view, python)) => {
+                Ok(Opened {
+                    project: meta,
+                    view,
+                    python,
+                    kernels,
+                }) => {
                     self.saved = engine.network().clone();
                     self.message = Some((format!("Opened {}", dir.display()), false));
+                    if let Some(e) = kernels.errors().first() {
+                        self.message = Some((e.to_string(), true));
+                    }
                     if let Some(e) = python.errors().first() {
                         self.message = Some((e.to_string(), true));
                     }
@@ -138,6 +153,7 @@ impl ProjectState {
                     self.python = (!python.is_empty()).then_some(python);
                     self.saved_mappings = meta.mappings.clone();
                     self.saved_timeline = meta.timeline.clone();
+                    self.kernels = (!kernels.is_empty()).then_some(kernels);
                     self.meta = meta;
                     self.dir = Some(dir);
                     self.opened += 1;
@@ -287,14 +303,24 @@ pub const PACKS_READ_ONLY: &str = "This project uses Packs. The app plays it wit
      expanded (its nodes are named instance__node) but cannot save it yet: saving would replace \
      the Packs with their insides. Edit the project files, then check them with `atidarla check`.";
 
-/// Loads the project at `dir` into `engine`. Returns its settings, the node
-/// to show first and its Python operators: registered, watched for hot
-/// reload, and allowed to run only if the user allowed exactly these files
-/// before (docs/python-ops.md); nothing in `ops/` runs here otherwise.
-pub fn open(
-    engine: &mut Engine,
-    dir: &Path,
-) -> Result<(Project, Option<NodeId>, atd_py::ops::PythonOps), String> {
+/// A project [`open`] loaded.
+#[derive(Debug)]
+pub struct Opened {
+    /// Its settings (networks live in the engine).
+    pub project: Project,
+    /// The node to show first.
+    pub view: Option<NodeId>,
+    /// Its Python operators: registered, watched for hot reload, and
+    /// allowed to run only if the user allowed exactly these files before
+    /// (docs/python-ops.md); nothing in `ops/` runs here otherwise.
+    pub python: atd_py::ops::PythonOps,
+    /// Its kernel operators (`kernels/*.atk`): registered and watched for
+    /// hot reload.
+    pub kernels: atd_ops_pnt::project::ProjectKernels,
+}
+
+/// Loads the project at `dir` into `engine`.
+pub fn open(engine: &mut Engine, dir: &Path) -> Result<Opened, String> {
     let mut project = atd_format::load(dir).map_err(|e| e.to_string())?;
     let mut net = project
         .networks
@@ -308,12 +334,22 @@ pub fn open(
     for e in python.errors() {
         log::warn!("{}: {e}", dir.display());
     }
+    // Kernel files are read and compiled here, as the project's other files
+    // are; saves are compiled on the watcher thread.
+    let mut kernels = atd_ops_pnt::project::ProjectKernels::open(dir);
+    for e in kernels.errors() {
+        log::warn!("{}: {e}", dir.display());
+    }
     // Validate against the new project's operators before replacing the
     // old project's, so a project that does not open leaves the patch as it was.
     let mut registry = engine.registry().clone();
     atd_py::ops::clear_custom(&mut registry);
+    atd_ops_pnt::project::clear_custom(&mut registry);
     for op in python.ops() {
         let _ = registry.replace_custom(op.schema.clone(), atd_core::registry::PYTHON_CUSTOM);
+    }
+    for schema in kernels.schemas() {
+        let _ = registry.replace_custom(schema.clone(), atd_core::registry::KERNEL_CUSTOM);
     }
     // Pack instances are operators of the project's own Packs.
     let registry = project
@@ -322,7 +358,9 @@ pub fn open(
         .map_err(|e| format!("{}: {e}", dir.display()))?;
     if let Err(e) = net.clone().validated(&registry) {
         let why = match &e {
-            atd_core::graph::GraphError::UnknownType(t) => python.explain(t),
+            atd_core::graph::GraphError::UnknownType(t) => {
+                python.explain(t).or_else(|| kernels.explain(t))
+            }
             _ => None,
         };
         return Err(match why {
@@ -341,6 +379,13 @@ pub fn open(
     {
         log::warn!(
             "{}: Python operators will not hot-reload: {e}",
+            dir.display()
+        );
+    }
+    engine.extend(|r, l| kernels.register(r, l));
+    if let Err(e) = kernels.watch() {
+        log::warn!(
+            "{}: kernel operators will not hot-reload: {e}",
             dir.display()
         );
     }
@@ -364,7 +409,12 @@ pub fn open(
     }
     engine.set_resolution(project.resolution[0], project.resolution[1]);
     let view = view.or_else(|| output_node(engine));
-    Ok((project, view, python))
+    Ok(Opened {
+        project,
+        view,
+        python,
+        kernels,
+    })
 }
 
 /// Saves `engine`'s network as the project at `dir`. Paths to files inside
@@ -550,8 +600,13 @@ mod tests {
         assert_eq!(project.resolution, [320, 180]);
 
         // Open: the relative path stays relative and resolves in the folder.
-        let (meta, view, python) = open(&mut e, &first).unwrap();
-        assert!(python.is_empty());
+        let Opened {
+            project: meta,
+            view,
+            python,
+            kernels,
+        } = open(&mut e, &first).unwrap();
+        assert!(python.is_empty() && kernels.is_empty());
         assert_eq!(meta.name, "First");
         assert_eq!(e.config().width, 320);
         assert_eq!(file_param(&e, "inside"), "media/clip.mov");
@@ -606,6 +661,31 @@ mod tests {
             "still registered"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Opening a project with kernel files registers each as an operator
+    /// whose `ch()` parameters are its controls; another project clears
+    /// them.
+    #[test]
+    fn opening_kernel_files_registers_their_operators() {
+        let Some(mut e) = engine() else { return };
+        let example =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/kernel-pixels.atidarla");
+        let mut state = ProjectState::untitled(&Network::default());
+        let view = state.run(&mut e, Action::OpenDir(example));
+        let msg = state.message.clone().unwrap();
+        assert!(view.is_some() && !msg.1, "{}", msg.0);
+        assert!(state.kernels.is_some());
+        let grade = e.registry().get("kernel.grade").expect("kernel.grade");
+        assert_eq!(
+            e.registry().provenance("kernel.grade"),
+            Some(atd_core::registry::KERNEL_CUSTOM)
+        );
+        assert!(grade.params.iter().any(|p| p.name == "vignette"));
+        e.cook_frame(view, 0.0).unwrap();
+        state.run(&mut e, Action::New);
+        assert!(e.registry().get("kernel.grade").is_none());
+        assert!(state.kernels.is_none());
     }
 
     #[test]

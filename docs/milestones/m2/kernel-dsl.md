@@ -1,11 +1,28 @@
 # M2 pre-work: Kernel DSL compiler (`atd-kernel`)
 
 > **A12 ratified 2026-10-30.** The compiler is wired into the engine as `pnt.kernel`
-> (2026-10-30, see the M2 pre-work log and decision A53). The questions below were answered
-> "as proposed"; A53 lists the few points decided differently while integrating.
+> (2026-10-30, see the M2 pre-work log and decision A53), and then as `img.kernel` and
+> project kernel operators (`kernels/<name>.atk` → `kernel.<name>`, `ch()` parameters as
+> controls; 2026-10-30, "Engine integration, second slice" below). The questions below were
+> answered "as proposed"; A53 lists the few points decided differently while integrating.
 
-Status: compile side of FR-K1..K3 done and tested, 2026-10-18. Engine integration (the
-`pnt.kernel` / `img.kernel` operators, FR-K4 hot reload) is planned below, not built.
+Status: compile side of FR-K1..K3 done and tested, 2026-10-18. Engine integration: built,
+2026-10-30 (`pnt.kernel`, `img.kernel`, project kernel operators, FR-K4 hot reload); the
+plan below is kept as written, with what was built noted under each part. Still not built:
+image inputs in Points kernels, prims and voxels, a spatial grid for `nearpoint(s)`.
+
+## Engine integration, second slice (2026-10-30): `ch()` controls and Pixels
+
+| Requirement | Built | Tests (all passing) |
+|---|---|---|
+| FR-K1 `ch()` hooks as controls | `crates/atd-ops-pnt/src/project.rs` `ProjectKernels`: each `kernels/<name>.atk` / `<name>.pixels.atk` registers `kernel.<name>` (`KERNEL_CUSTOM` provenance; `Registry::replace_custom` accepts `kernel.<name>`); parameters from `Compiled::params` (`ch`/`chf` float, `chi` int, `chu`/`chv`/`chp` vectors; defaults, min, max; help from a `//` comment on the line); compiled at project open and on the watcher thread on save; `stale_edits` (now `atd_core::graph::stale_edits`, by provenance) keeps values whose name and kind fit | `tests/project_kernels.rs`: `kernel_files_register_operators` (schema shape, kinds, defaults, help, bad names, duplicates, line of a compile error, `explain`), `saving_the_file_updates_the_schema_and_keeps_matching_values`, `kernel_nodes_round_trip_in_project_files`; unit tests in `project.rs` |
+| Values reach the GPU | One runner per target (`PointsRunner` in `atd-ops-pnt/src/kernel.rs`, `PixelsRunner` in `atd-ops-img/src/kernel.rs`) taking a source and a value provider (`ChValues::Defaults` for the inline operators, `ChValues::Params` for project operators: `Params` with bindings, expressions, live values); `write_uniforms` by `ParamDecl::slot` into buffers allocated at compile | `editing_a_ch_value_changes_the_gpu_result` (constants, an expression, Points and Pixels); `tests/alloc_kernel.rs` (no buffers, bind groups or textures after warm-up; 57.5 allocations per node-cook on Metal, bound 90) |
+| FR-K4 for project operators | A node reads its file's latest text through a `SharedSource` and compiles on its own worker; the last kernel that compiled keeps running | `saving_a_running_kernel_keeps_its_state` (Solver loop; y kept, x continues at the kept `speed`) |
+| `img.kernel` (Pixels) | Full-screen draw from the compiled module through the new `FullscreenPass::try_from_module` (`atd-gpu`: group 0 uniforms + sampler, group 1 inputs) and `draw_bytes`; inputs `in0`…`in3`, unconnected ones black; `res` = output size | `atd-ops-img/tests/kernel.rs`: pixels against the CPU (uv, indices, resolution, time, an input and an unconnected one), a bad edit names `kernel:2:` and the last kernel keeps drawing |
+| Examples | `kernel-particles` uses `kernel.curl` (its `ch()`s as controls) and an inline `pnt.kernel`; new `kernel-pixels` (inline `img.kernel` generator → `kernel.grade` from `kernels/grade.pixels.atk`) | `atd-cli` `kernel_operators_render_deterministically`; `atidarla render … --range 0-60` twice: 60/60 identical for both |
+
+Not decided here: `ch()` has no colour or toggle form (the docs say to use `chp` and
+`chi(name, 0, 0, 1)`); adding `chc`/`cht` would be a language change for A12/A53.
 
 ## Plan and evidence: FR-K1..K3 (compile side) → tasks → tests
 
@@ -111,8 +128,8 @@ Attribute buffers use the attribute's storage type at its stride (16 bytes for `
 A full-screen draw: the module has `vs` and `fs`; group 0 holds the uniforms (with `res` =
 output size) and a linear clamp-to-edge sampler, group 1 the input images by index (input 0
 always; unconnected inputs bind the engine's black texture, as `img.wgsl` does). The cleanest
-route is a `FullscreenPass` constructor that takes a complete module and a layout (an
-`atd-gpu` change, not made here).
+route is a `FullscreenPass` constructor that takes a complete module and a layout. *Built
+2026-10-30 as planned: `FullscreenPass::try_from_module` with `ModuleLayout`.*
 
 ### State-preserving hot reload (FR-K4, AC3)
 
@@ -136,7 +153,10 @@ route is a `FullscreenPass` constructor that takes a complete module and a layou
 2. **Parameters created by code**: `ch()` makes parameters at compile time, but
    `OperatorSchema` parameters are static today. Needs a node-level list of extra parameters
    (saved in the project file with stable names, rule 8) or a parameter kind for "kernel
-   parameters". This is an engine/format decision (question 8).
+   parameters". This is an engine/format decision (question 8). *Built 2026-10-30 another
+   way: a project's kernel file is an operator type of its own (`kernel.<name>`, like a
+   Python operator), so its `ch()` parameters are ordinary schema parameters, saved by name;
+   the inline operators keep defaults.*
 3. Requesting more than 8 storage buffers where the adapter offers them (design §7), passed
    as `CompileOptions::max_storage_buffers`.
 4. A home for the shared WGSL library: for AC2 the node-built Curl Noise must call the same

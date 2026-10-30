@@ -378,13 +378,17 @@ pub enum RegistryError {
     #[error("operator `{type_id}` declares parameter `{param}` twice")]
     DuplicateParam { type_id: String, param: String },
     #[error(
-        "custom operator type ID `{0}` must be `py.<file>.<name>` in lower-case ASCII, digits or `_`"
+        "custom operator type ID `{0}` must be `py.<file>.<name>` or `kernel.<name>` in lower-case ASCII, digits or `_`"
     )]
     InvalidCustomId(String),
 }
 
 /// Provenance of operators a project defines in Python (`docs/python-ops.md`).
 pub const PYTHON_CUSTOM: &str = "python.custom";
+
+/// Provenance of operators a project defines as Kernel DSL files
+/// (`kernels/<name>.atk`, `docs/kernel-dsl.md`).
+pub const KERNEL_CUSTOM: &str = "kernel.custom";
 
 /// All registered operator types, ordered by type ID.
 #[derive(Debug, Default, Clone)]
@@ -422,18 +426,21 @@ impl Registry {
 
     /// Registers or replaces an operator a project defines (custom code),
     /// recording where it comes from (e.g. [`PYTHON_CUSTOM`]). Its type ID is
-    /// `py.<file>.<name>` whatever its family. Built-in operators cannot be
-    /// replaced this way.
+    /// `py.<file>.<name>` or `kernel.<name>` whatever its family. Built-in
+    /// operators cannot be replaced this way.
     pub fn replace_custom(
         &mut self,
         schema: OperatorSchema,
         provenance: &str,
     ) -> Result<(), RegistryError> {
         let id = schema.type_id.clone();
-        let valid = id
-            .strip_prefix("py.")
-            .and_then(|rest| rest.split_once('.'))
-            .is_some_and(|(file, name)| valid_id_part(file) && valid_id_part(name));
+        let valid = match (id.strip_prefix("py."), id.strip_prefix("kernel.")) {
+            (Some(rest), _) => rest
+                .split_once('.')
+                .is_some_and(|(file, name)| valid_id_part(file) && valid_id_part(name)),
+            (_, Some(name)) => valid_id_part(name),
+            _ => false,
+        };
         if !valid {
             return Err(RegistryError::InvalidCustomId(id));
         }
@@ -801,6 +808,19 @@ mod tests {
                 "{bad}"
             );
         }
+        // A project kernel is `kernel.<name>` in any family.
+        builtin.type_id = "kernel.curl".into();
+        builtin.family = OpFamily::Pnt;
+        reg.replace_custom(builtin.clone(), KERNEL_CUSTOM).unwrap();
+        assert_eq!(reg.provenance("kernel.curl"), Some(KERNEL_CUSTOM));
+        for bad in ["kernel.a.b", "kernel.", "kernel.Curl"] {
+            builtin.type_id = bad.into();
+            assert!(
+                reg.replace_custom(builtin.clone(), KERNEL_CUSTOM).is_err(),
+                "{bad}"
+            );
+        }
+        assert!(reg.remove_custom("kernel.curl").is_some());
         assert_eq!(reg.remove_custom("ai.diffusion"), None, "built-in stays");
         assert!(reg.remove_custom("py.motion.counter").is_some());
         assert_eq!(reg.len(), 1);

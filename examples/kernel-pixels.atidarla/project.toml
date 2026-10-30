@@ -1,0 +1,18 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "Kernel Pixels"
+description = '''
+Pixel kernels in the Kernel DSL. Pattern is a Kernel node (img.kernel) with its code inline:
+drifting rings over noise, made from nothing. Grade is the project's own operator kernel.grade,
+made from kernels/grade.pixels.atk: every ch() in the file is one of its controls (lift, gain,
+gamma, vignette), with the comment on its line as help.
+
+Edit kernels/grade.pixels.atk while it runs and save: the operator reloads, keeps the values
+of the controls you set, and gains or loses controls as you add or remove ch() lines. A
+mistake shows its line and column on the node while the last kernel that compiled keeps
+running.
+
+Try: add `float sat = ch("saturation", 1.0, 0, 2); // Colour amount.` and
+`c = lerp(set(dot(c, {0.2126, 0.7152, 0.0722})), c, sat);` before the vignette line.
+'''
+resolution = [1280, 720]

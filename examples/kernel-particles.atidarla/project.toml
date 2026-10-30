@@ -3,15 +3,19 @@ format = 1
 name = "Kernel Particles"
 description = '''
 A particle simulation written as a ten-line kernel (M2, Kernel DSL): kernels/curl.atk adds curl
-noise and a spring toward the centre to the velocity, moves the points and ages them. Scatter
+noise and a spring toward the centre to the velocity, moves the points and ages them. Because
+the file is in the project's kernels/ folder it is an operator of its own, kernel.curl: Swarm is
+one, and each ch() in the file is one of its controls (freq, amp, attract, target). Scatter
 seeds 60,000 points in a ball; Solver feeds each frame's result back into the kernel, so the
-state lives on the wire. Render Points draws them, coloured by speed.
+state lives on the wire. Ripple is a Kernel node (pnt.kernel) with its code inline, waving the
+points as they are drawn. Render Points draws them, coloured by speed.
 
 Edit kernels/curl.atk while it runs and save: the kernel reloads and the particles carry on
-from where they were. A mistake shows its line and column on the node, and the last kernel
-that compiled keeps running.
+from where they were; a new ch() becomes a new control and the values you set are kept. A
+mistake shows its line and column on the node, and the last kernel that compiled keeps
+running.
 
-Try: change `pull` to 1.5; replace curlnoise(...) with set(0, -1, 0) for rain; add
+Try: drag Attract up to 1.5; replace curlnoise(...) with set(0, -1, 0) for rain; add
 `v@Cd = set(fit01(f@age, 1, 0), 0.4, 1);`.
 '''
 resolution = [1280, 720]

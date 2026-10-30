@@ -45,6 +45,8 @@ every IMG and SIG operator (CLAUDE.md rule 7); each operator's page in
 | [pnt-constellation](pnt-constellation.atidarla/) | Smooth, Normals, Sort and Connect on the GPU grid hash; lines in Render Points (M2) |
 | [pnt-solver](pnt-solver.atidarla/) | A Solver loop (Attract, Turbulence, Drag, Integrate, Age) over pieces coloured per piece (M2) |
 | [pnt-foreach](pnt-foreach.atidarla/) | For-Each blocks: six counted copies of a column, and a strip coloured band by band (pieces) (M2) |
+| [kernel-particles](kernel-particles.atidarla/) | A ten-line Kernel DSL particle simulation: `kernels/curl.atk` as the project's own operator, its `ch()` parameters as controls, plus an inline Kernel ([`docs/kernel-dsl.md`](../docs/kernel-dsl.md)) (M2) |
+| [kernel-pixels](kernel-pixels.atidarla/) | Pixel kernels: an inline generator and a colour grade from `kernels/grade.pixels.atk` with its `ch()` controls (M2) |
 
 One example per shipped Pack ([`packs/`](../packs/README.md), `docs/packs.md`). Each project
 carries its own copy of the Pack in `packs/<name>/` (a test keeps it equal to the library's):
