@@ -178,7 +178,10 @@ fn build(device: &wgpu::Device, source: Arc<str>, schema: Vec<AttrSchema>, key: 
     if !in_order {
         return Err("internal: unexpected kernel binding layout".into());
     }
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+    // An error scope, not a panic: the app logs uncaptured errors instead
+    // of panicking, so a pipeline the driver rejects must be caught here.
+    let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let program = {
         let b = &compiled.bindings;
         let g0 = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("pnt.kernel g0"),
@@ -244,8 +247,11 @@ fn build(device: &wgpu::Device, source: Arc<str>, schema: Vec<AttrSchema>, key: 
             key,
             compiled,
         }
-    }))
-    .map_err(|_| "kernel pipeline creation panicked".to_owned())
+    };
+    match pollster::block_on(scope.pop()) {
+        Some(e) => Err(format!("the GPU rejected the kernel: {e}")),
+        None => Ok(program),
+    }
 }
 
 /// Reads a kernel file whenever it changes.
@@ -418,12 +424,21 @@ impl GeoOp for Kernel {
             ctx.output.clear();
             return Ok(());
         };
+        // A file that cannot be read (an editor's save in progress, say)
+        // leaves the last kernel running.
+        let mut file_error = None;
         let source = match self.source(ctx) {
             Ok(s) => s,
-            Err(e) => {
-                *ctx.output = g;
-                return Err(e);
-            }
+            Err(e) => match &self.program {
+                Some(p) => {
+                    file_error = Some(e);
+                    p.source.clone()
+                }
+                None => {
+                    *ctx.output = g;
+                    return Err(e);
+                }
+            },
         };
         // Compile when the source changed, or when the input's attributes no
         // longer suit the kernel (their types decide how `@name` reads); each
@@ -434,8 +449,10 @@ impl GeoOp for Kernel {
             .as_ref()
             .is_none_or(|p| p.source != source || !fits(p, &g, key));
         if !wanted && self.building.is_none() {
-            // Back to the kernel that runs (after a failed edit).
+            // Back to the kernel that runs (after a failed edit): forget the
+            // failed compile, so the same edit again compiles and fails again.
             self.error = None;
+            self.requested = None;
         }
         if wanted && self.requested != Some(key) {
             let schema: Vec<AttrSchema> = g
@@ -448,14 +465,16 @@ impl GeoOp for Kernel {
                 .collect();
             let (tx, rx) = channel();
             let device = self.device.clone();
-            std::thread::Builder::new()
+            let spawned = std::thread::Builder::new()
                 .name("atd-kernel-compile".into())
                 .spawn(move || {
                     let _ = tx.send(build(&device, source, schema, key));
-                })
-                .map_err(|e| format!("cannot start the kernel compiler: {e}"))?;
+                });
             self.requested = Some(key);
-            self.building = Some(rx);
+            match spawned {
+                Ok(_) => self.building = Some(rx),
+                Err(e) => self.error = Some(format!("cannot start the kernel compiler: {e}")),
+            }
         }
         if let Some(rx) = &self.building {
             match ctx.params.mode().receive(rx) {
@@ -475,11 +494,14 @@ impl GeoOp for Kernel {
                 }
             }
         }
-        if g.points() > 0 && self.program.as_ref().is_some_and(|p| fits(p, &g, key)) {
-            self.run(ctx, &mut g)?;
-        }
+        let ran = if g.points() > 0 && self.program.as_ref().is_some_and(|p| fits(p, &g, key)) {
+            self.run(ctx, &mut g)
+        } else {
+            Ok(())
+        };
         *ctx.output = g;
-        match &self.error {
+        ran?;
+        match file_error.as_ref().or(self.error.as_ref()) {
             Some(e) => Err(e.clone()),
             None => Ok(()),
         }

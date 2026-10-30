@@ -420,8 +420,16 @@ impl<'a> Params<'a> {
     /// The live value if one is set, else the stored value (or schema
     /// default), ignoring bindings.
     pub fn value(&self, name: &str) -> Option<&'a Value> {
-        self.live(name)
-            .or_else(|| self.net.param_value(self.registry, self.node, name))
+        let stored = self.net.param_value(self.registry, self.node, name);
+        match (self.live(name), stored) {
+            // A live value of another JSON kind than the parameter's (a
+            // number for a vector, say) is ignored, not read as empty.
+            (Some(live), Some(s)) if std::mem::discriminant(live) != std::mem::discriminant(s) => {
+                stored
+            }
+            (Some(live), _) => Some(live),
+            (None, _) => stored,
+        }
     }
 
     /// The bound channel's current value, if the parameter is bound and the
@@ -1439,6 +1447,7 @@ impl Engine {
                     registry,
                     sig,
                     table: exprs,
+                    live,
                     time,
                     frame: *frame as f64,
                 }
@@ -1864,6 +1873,7 @@ impl Engine {
                 registry,
                 sig,
                 table: exprs,
+                live,
                 time,
                 frame: *frame as f64,
             }
@@ -1911,6 +1921,7 @@ impl Engine {
         self.geo.clear();
         self.errors.clear();
         self.again.clear();
+        self.live = LiveValues::default();
         self.last_time = None;
         count_consumers(&self.net, &mut self.consumers);
         // Textures may still be read by a submitted frame: release them

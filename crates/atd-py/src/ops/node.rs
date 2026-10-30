@@ -189,12 +189,13 @@ impl Core {
     }
 }
 
-/// A number parameter: its bound channel, else its expression, else its
-/// value (as `Params::f32`, without rounding to `f32`).
+/// A number parameter: its live value, else its bound channel, else its
+/// expression, else its value (as `Params::f32`, without rounding to `f32`).
 fn number(params: &Params<'_>, name: &str) -> f64 {
     params
-        .bound(name)
-        .map(f64::from)
+        .live(name)
+        .and_then(Json::as_f64)
+        .or_else(|| params.bound(name).map(f64::from))
         .or_else(|| params.expr(name))
         .unwrap_or_else(|| params.value(name).and_then(Json::as_f64).unwrap_or(0.0))
 }

@@ -70,12 +70,14 @@ fn pixels(e: &Engine, node: NodeId) -> Vec<u8> {
     read_rgba8(e.device(), e.queue(), e.result(node).unwrap()).unwrap()
 }
 
-/// Cooks until the WAV has decoded (Audio File In names its channels),
-/// then starts playback.
-fn ready(e: &mut Engine, audio: NodeId, out: NodeId) {
+/// Cooks the audio node until the WAV has decoded (Audio File In names its
+/// channels), then starts playback. Only the audio node: cooking the output
+/// would run the feedback loop a number of times that depends on how long
+/// decoding takes, and two engines would start frame 1 in different states.
+fn ready(e: &mut Engine, audio: NodeId) {
     let start = std::time::Instant::now();
     while e.channels(audio).is_none_or(|c| c.is_empty()) {
-        e.cook(&[out], 0.0).unwrap();
+        e.cook(&[audio], 0.0).unwrap();
         assert!(start.elapsed().as_secs() < 10, "audio decoded");
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
@@ -150,8 +152,8 @@ fn audio_reactive_feedback_patch_round_trips_and_reacts() {
         .unwrap();
     }
 
-    ready(&mut a, audio, out);
-    ready(&mut b, audio, out);
+    ready(&mut a, audio);
+    ready(&mut b, audio);
     // Two seconds at 60 fps, in lock step.
     let mut brightness_on = Vec::new();
     let mut brightness_off = Vec::new();
@@ -160,20 +162,7 @@ fn audio_reactive_feedback_patch_round_trips_and_reacts() {
         a.cook(&[out], t).unwrap();
         b.cook(&[out], t).unwrap();
         let (pa, pb) = (pixels(&a, out), pixels(&b, out));
-        // Two engines in one process occasionally differ by a few 8-bit levels at frame 1 (seen
-        // on a Mac, about 1 run in 3: 21 of 4096 bytes, off by up to 3; cause not pinned down,
-        // probably audio analysis timing). The example used to clip to white, which hid it. The
-        // patches themselves are compared exactly above.
-        let worst = pa
-            .iter()
-            .zip(&pb)
-            .map(|(x, y)| x.abs_diff(*y))
-            .max()
-            .unwrap();
-        assert!(
-            worst <= 8,
-            "frame {f}: the reloaded patch renders the same (largest difference {worst} of 255)"
-        );
+        assert_eq!(pa, pb, "frame {f}: the reloaded patch renders identically");
         // Mean of RGB (alpha stays 255).
         let rgb: Vec<f64> = pa
             .chunks_exact(4)

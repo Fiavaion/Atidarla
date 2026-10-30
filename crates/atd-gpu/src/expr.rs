@@ -266,6 +266,8 @@ pub(crate) struct Ctx<'a> {
     pub registry: &'a Registry,
     pub sig: &'a HashMap<NodeId, Channels>,
     pub table: &'a ExprTable,
+    /// Live values win over everything else, as in `Params`.
+    pub live: &'a crate::engine::LiveValues,
     pub time: f64,
     pub frame: f64,
 }
@@ -326,9 +328,9 @@ impl Ctx<'_> {
         })
     }
 
-    /// A parameter's number: its binding, expression or stored value. An
-    /// expression that fails falls back to the stored value, as on its own
-    /// node; a reference loop is an error.
+    /// A parameter's number: its live value, binding, expression or stored
+    /// value. An expression that fails falls back to the stored value, as on
+    /// its own node; a reference loop is an error.
     fn number(
         &self,
         node: NodeId,
@@ -337,7 +339,8 @@ impl Ctx<'_> {
         depth: u8,
     ) -> Result<f64, NumError> {
         let n = self.net.node(node).ok_or(NumError::Missing)?;
-        if index.is_none() {
+        let live = self.live.get(node, param);
+        if index.is_none() && live.is_none() {
             if let Some(bind) = n.params.get(param).and_then(|p| p.bind.as_ref())
                 && let Some(v) = self
                     .sig
@@ -366,9 +369,8 @@ impl Ctx<'_> {
                 }
             }
         }
-        let value = self
-            .net
-            .param_value(self.registry, node, param)
+        let value = live
+            .or_else(|| self.net.param_value(self.registry, node, param))
             .ok_or(NumError::Missing)?;
         let scalar = |v: &Value| {
             v.as_f64()
@@ -413,7 +415,11 @@ impl Ctx<'_> {
                     }
                     for (name, values) in &mut r.params {
                         values.clear();
-                        match self.net.param_value(self.registry, node.id, name) {
+                        let value = self
+                            .live
+                            .get(node.id, name)
+                            .or_else(|| self.net.param_value(self.registry, node.id, name));
+                        match value {
                             Some(Value::Array(a)) => {
                                 values.extend(a.iter().map(|v| v.as_f64().unwrap_or(0.0)));
                             }

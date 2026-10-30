@@ -165,7 +165,12 @@ fn scatter(b: &mut Build<'_>, count: i64) -> NodeId {
 }
 
 /// AC2: the ten-line kernel and Noise → Attract → Integrate → Age, each in a
-/// Solver loop over the same points, agree bit for bit for 120 frames.
+/// Solver loop over the same points, for 120 frames. Bit for bit, except on
+/// Metal: its shader compiler optimises with fast math, so the four lines
+/// with `ch()` uniforms in one shader may round differently from four shaders
+/// (each line alone is exact there too, see
+/// `each_kernel_line_matches_its_operator`). Measured on an Apple M5 Pro:
+/// 3.7e-9 after one frame, 1.2e-5 after 120.
 #[test]
 fn ten_line_kernel_matches_the_node_chain() {
     let _s = serial();
@@ -369,6 +374,14 @@ fn a_bad_edit_keeps_the_last_kernel_running() {
     set_code(&mut e, kernel, "f@n += 1.0;");
     cook(&mut e, &[kernel], 6);
     assert_eq!(floats(&e, kernel, "n")[0], 7.0);
+    // The same bad edit again (undo/redo, saving the same file) fails again.
+    set_code(&mut e, kernel, "f@n += 1.0;\nf@n += nope;");
+    e.set_frame(7);
+    e.cook(&[kernel], 7.0 / 60.0).unwrap();
+    assert!(
+        e.error(kernel).is_some(),
+        "the repeated bad edit reports its error"
+    );
 }
 
 /// A kernel in a file runs, and offline renders read the file once.
@@ -392,64 +405,4 @@ fn a_kernel_file_runs() {
     let p = floats(&e, kernel, "P");
     assert!(p.chunks(4).all(|c| c[1] == 7.0), "{p:?}");
     let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn zz_bisect() {
-    let _s = serial();
-    let Some(mut e) = engine() else { return };
-    let mut b = Build::new(&mut e);
-    let seed = scatter(&mut b, 20_000);
-    let n1 = b.after(
-        seed,
-        "pnt.noise",
-        &[
-            ("mode", json!("velocity")),
-            ("amplitude", json!(2.0)),
-            ("frequency", json!(0.5)),
-        ],
-    );
-    let k1 = b.after(
-        seed,
-        "pnt.kernel",
-        &[(
-            "code",
-            json!("v@v += curlnoise(v@P * 0.5) * (2.0 * @TimeInc);"),
-        )],
-    );
-    let n2 = b.after(n1, "pnt.attract", &[("strength", json!(0.3))]);
-    let k2 = b.after(
-        n1,
-        "pnt.kernel",
-        &[(
-            "code",
-            json!("v@v += (set(0,0,0) - v@P) * (0.3 * @TimeInc);"),
-        )],
-    );
-    let n3 = b.after(n1, "pnt.integrate", &[]);
-    let k3 = b.after(
-        n1,
-        "pnt.kernel",
-        &[("code", json!("v@P += v@v * @TimeInc;"))],
-    );
-    b.done();
-    cook(&mut e, &[n1, k1, n2, k2, n3, k3], 1);
-    for (name, n, k, a) in [
-        ("noise", n1, k1, "v"),
-        ("attract", n2, k2, "v"),
-        ("integrate", n3, k3, "P"),
-    ] {
-        let (x, y) = (floats(&e, n, a), floats(&e, k, a));
-        let same = x
-            .iter()
-            .zip(&y)
-            .filter(|(p, q)| p.to_bits() == q.to_bits())
-            .count();
-        let d = x
-            .iter()
-            .zip(&y)
-            .map(|(p, q)| (p - q).abs())
-            .fold(0.0f32, f32::max);
-        eprintln!("{name}: {same}/{} identical, max {d:e}", x.len());
-    }
 }

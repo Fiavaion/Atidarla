@@ -103,6 +103,15 @@ fn geo_chains_steady_state_allocations() {
     let pts = node(&mut e, "pnt.points", &[("count", json!(4096))]);
     let n1 = node(&mut e, "pnt.noise", &[]);
     let n2 = node(&mut e, "pnt.noise", &[]);
+    // A Kernel DSL operator in the chain (compiled once, then steady).
+    let k = node(
+        &mut e,
+        "pnt.kernel",
+        &[(
+            "code",
+            json!("@P.y += sin(@P.x * 3.0 + @Time) * 0.01;\nf@age += @TimeInc;"),
+        )],
+    );
     let r1 = node(&mut e, "img.render_points", &[]);
     let ps = node(
         &mut e,
@@ -117,7 +126,8 @@ fn geo_chains_steady_state_allocations() {
     edits.extend([
         wire(pts, n1, "in"),
         wire(n1, n2, "in"),
-        wire(n2, r1, "geo"),
+        wire(n2, k, "in"),
+        wire(k, r1, "geo"),
         wire(ps, force, "in"),
         wire(force, ps, "prev"),
         wire(force, r2, "geo"),
@@ -153,12 +163,12 @@ fn geo_chains_steady_state_allocations() {
     let before = allocs();
     for _ in 0..frames {
         let cooked = e.cook(&out, t).unwrap();
-        assert_eq!(cooked, 6, "everything but the static source cooks");
+        assert_eq!(cooked, 7, "everything but the static source cooks");
         t += 1.0 / 60.0;
     }
     let total = allocs() - before;
     COUNTING.with(|c| c.set(false));
-    let per_node = total as f64 / (frames * 6) as f64;
+    let per_node = total as f64 / (frames * 7) as f64;
     eprintln!(
         "GEO steady state: {total} allocations over {frames} frames, {per_node:.1} per node-cook"
     );

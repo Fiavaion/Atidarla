@@ -604,15 +604,20 @@ def cook(key, type_id, time, dt, frame, width, height, params, inputs):
 # classes under the earlier host's project files and `params=` would be
 # rejected. `load` therefore runs project code with this copy as `atidarla`,
 # under a lock, because `sys.modules` is shared by every host in the process.
+# The lock is the process's, kept on the embedded module: one lock per host
+# would let two hosts swap `sys.modules["atidarla"]` under each other.
 _api = None
-_import_lock = threading.RLock()
+_import_lock = None
 
 
 def install(module):
     """Builds this host's `atidarla` module from the embedded one, with the declaration API."""
-    global _api
+    global _api, _import_lock
+    # `setdefault` is atomic under the GIL: every host gets the same lock.
+    _import_lock = vars(module).setdefault("_atd_import_lock", threading.RLock())
     api = types.ModuleType("atidarla")
-    api.__dict__.update({k: v for k, v in vars(module).items() if not k.startswith("__")})
+    api.__dict__.update({k: v for k, v in vars(module).items()
+                         if not k.startswith("__") and k != "_atd_import_lock"})
     for name, value in CONSTRUCTORS.items():
         setattr(api, name, value)
     api.op = op

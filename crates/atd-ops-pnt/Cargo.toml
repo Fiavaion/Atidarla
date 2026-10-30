@@ -13,12 +13,12 @@ publish.workspace = true
 atd-core.workspace = true
 atd-gpu.workspace = true
 atd-kernel.workspace = true
+pollster.workspace = true
 wgpu.workspace = true
 
 [dev-dependencies]
 atd-interop.workspace = true
 naga.workspace = true
-pollster.workspace = true
 serde_json.workspace = true
 
 [lints]
