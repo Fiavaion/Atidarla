@@ -60,9 +60,9 @@ host (A60).
    register `cloud:studio` with the supervisor, with the spend meter's rate
    set from the pod's `costPerHr`.
 
-3. **Model weights** are not in the image (rule 4, A61). Mount a Runpod
-   network volume at `/models` holding the model cache, or download into the
-   pod with `atd-ai-host` tooling; licences are accepted per user as locally.
+3. **Model weights** are not in the image (rule 4, A61). Attach a Runpod
+   network volume at `/models` and copy the model folders from your local
+   cache into it; licences are accepted per user, as locally.
 
 4. **Stop it.** A running pod bills by the hour whether or not frames flow.
 
