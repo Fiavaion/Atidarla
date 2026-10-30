@@ -1,13 +1,13 @@
 //! Share Out and Share In (PRD §6 "Share In/Out (Spout/Syphon)"): GPU
 //! texture sharing with other applications on the same computer.
 //!
-//! On Windows they speak Spout 2 through [`atd_interop::spout`]; every
-//! Spout call (shared-memory mutexes, D3D11 device creation, copies) runs
+//! On Windows they speak Spout 2 through [`atd_interop::spout`], on macOS
+//! Syphon through [`atd_interop::syphon`]. Every Spout or Syphon call runs
 //! on a worker thread per node, and the cook only records GPU work and
-//! hands textures over (see [`spout`], CLAUDE.md rules 1 and 2). Syphon
-//! on macOS is not wired yet: there, and on Linux, the nodes still load
-//! (projects stay portable, rule 8) and report that sharing is not
-//! available, as their capability flag declares (PRD A19).
+//! hands textures over (see `spout.rs` and `syphon.rs`, CLAUDE.md rules 1
+//! and 2). On Linux the nodes still load (projects stay portable, rule 8)
+//! and report that sharing is not available, as their capability flag
+//! declares (PRD A19).
 
 use atd_core::capability::{CapabilityRequirement, Fallback};
 use atd_core::registry::{OpFamily, OperatorSchema, ParamSchema, SocketSchema, WireType};
@@ -16,15 +16,18 @@ use atd_gpu::engine::GpuOp;
 #[cfg(windows)]
 mod spout;
 
+#[cfg(target_os = "macos")]
+mod syphon;
+
 /// Shown where the operators are not available (A19 fallback, node error).
-const UNAVAILABLE: &str = "Texture sharing uses Spout and runs on Windows only for now: Syphon on macOS is not wired yet, and Linux has no sharing backend. The node loads and outputs nothing.";
+const UNAVAILABLE: &str = "Texture sharing uses Spout on Windows and Syphon on macOS; Linux has no sharing backend. The node loads and outputs nothing.";
 
 /// The suggestion list of sender names (see [`senders`]).
 pub const SENDERS_KEY: &str = "share.senders";
 
 fn capabilities() -> Vec<CapabilityRequirement> {
     vec![CapabilityRequirement {
-        flag: "win".parse().expect("valid capability flag"),
+        flag: "win|mac".parse().expect("valid capability flag"),
         fallback: Fallback::Hide {
             explanation: UNAVAILABLE.into(),
         },
@@ -45,11 +48,11 @@ pub fn out_schema() -> OperatorSchema {
         type_id: "img.share_out".into(),
         family: OpFamily::Img,
         label: "Share Out".into(),
-        summary: "Publishes its input to other applications on this computer (a Spout sender on Windows) and passes it through. Receivers get 8-bit BGRA at the input's size. If the name is taken, the sender becomes `name_1`, `name_2`, ...; the published name shows in the parameter panel. A Share In in the same project can receive it (a loopback): give the Share Out a name of its own and type it into the Share In. Spout needs the DX12 graphics backend (elsewhere the node reports an error); Syphon on macOS is not wired yet.".into(),
+        summary: "Publishes its input to other applications on this computer (a Spout sender on Windows, a Syphon server on macOS) and passes it through. Receivers get 8-bit BGRA at the input's size. Spout: if the name is taken, the sender becomes `name_1`, `name_2`, ...; Syphon allows shared names. The published name shows in the parameter panel. A Share In in the same project can receive it (a loopback): give the Share Out a name of its own and type it into the Share In. Spout needs the DX12 graphics backend and Syphon the Metal one (the defaults; elsewhere the node reports an error).".into(),
         version: 1,
         params: vec![
             ParamSchema::string("name", "Name", "Atidarla")
-                .help("Sender name other applications see: 1-255 bytes, no backslash."),
+                .help("Sender name other applications see: up to 255 bytes; on Windows at least 1 byte and no backslash."),
             ParamSchema::toggle("enabled", "Enabled", true)
                 .help("Publish the input; off removes the sender."),
         ],
@@ -67,11 +70,11 @@ pub fn in_schema() -> OperatorSchema {
         type_id: "img.share_in".into(),
         family: OpFamily::Img,
         label: "Share In".into(),
-        summary: "Receives an image another application publishes on this computer (a Spout sender on Windows), or a Share Out's. The output takes the sender's size and follows it when it changes; while there is no sender it is black. Spout needs the DX12 graphics backend (elsewhere the node reports an error); Syphon on macOS is not wired yet.".into(),
+        summary: "Receives an image another application publishes on this computer (a Spout sender on Windows, a Syphon server on macOS), or a Share Out's. The output takes the sender's size and follows it when it changes; while there is no sender it is black. Spout needs the DX12 graphics backend and Syphon the Metal one (the defaults; elsewhere the node reports an error).".into(),
         version: 1,
         params: vec![
             ParamSchema::string("name", "Sender", "")
-                .help("Sender to receive from; empty follows the active sender (the newest one, unless the user chose another in a Spout tool).")
+                .help("Sender to receive from; empty follows the active sender (Spout: the newest one, unless the user chose another in a Spout tool; Syphon: the newest server). A Syphon server matches by its name, by \"App - Name\" as Syphon apps list it, or by its app's name when it has no name of its own.")
                 .suggest(SENDERS_KEY),
         ],
         inputs: vec![],
@@ -84,14 +87,27 @@ pub fn in_schema() -> OperatorSchema {
 }
 
 /// Names of the senders currently published on this computer, sorted,
-/// for the Share In name list. May wait up to 67 ms for a Spout mutex, so
-/// call it off the render thread.
+/// for the Share In name list. May wait up to 67 ms for a Spout mutex, or
+/// take Syphon's directory lock, so call it off the render thread. Syphon
+/// lists other processes' servers only while the main thread runs its run
+/// loop (the app does; see [`atd_interop::syphon`]).
 pub fn senders() -> Vec<String> {
     #[cfg(windows)]
     {
         atd_interop::spout::SpoutReceiver::list_senders()
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        let mut names: Vec<String> = atd_interop::syphon::list_servers()
+            .unwrap_or_default()
+            .iter()
+            .map(|s| s.label().to_owned())
+            .collect();
+        names.sort();
+        names.dedup();
+        names
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         Vec::new()
     }
@@ -102,7 +118,11 @@ pub fn create_out(device: &wgpu::Device, format: wgpu::TextureFormat) -> Box<dyn
     {
         spout::create_out(device, format)
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        syphon::create_out(device, format)
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = (device, format);
         Box::new(Unavailable)
@@ -114,7 +134,11 @@ pub fn create_in(device: &wgpu::Device, format: wgpu::TextureFormat) -> Box<dyn 
     {
         spout::create_in(device, format)
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        syphon::create_in(device, format)
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = (device, format);
         Box::new(Unavailable)
@@ -123,11 +147,11 @@ pub fn create_in(device: &wgpu::Device, format: wgpu::TextureFormat) -> Box<dyn 
 
 /// Both operators where no sharing backend exists: a node error, and no
 /// output, so whatever reads it sees black.
-#[cfg(any(not(windows), test))]
+#[cfg(any(not(any(windows, target_os = "macos")), test))]
 #[derive(Debug)]
 struct Unavailable;
 
-#[cfg(any(not(windows), test))]
+#[cfg(any(not(any(windows, target_os = "macos")), test))]
 impl GpuOp for Unavailable {
     fn cook(&mut self, _ctx: &mut atd_gpu::engine::CookCtx<'_>) -> Result<(), String> {
         Err(UNAVAILABLE.to_owned())
@@ -143,30 +167,31 @@ mod tests {
     use atd_gpu::engine::{Engine, EngineConfig, OpLibrary};
 
     #[test]
-    fn schemas_declare_windows_with_a_fallback() {
+    fn schemas_declare_windows_and_macos_with_a_fallback() {
+        let on = |os| PlatformInfo {
+            os,
+            ..PlatformInfo::host()
+        };
         for schema in [out_schema(), in_schema()] {
-            let mac = PlatformInfo {
-                os: Os::MacOs,
-                ..PlatformInfo::host()
-            };
-            match Registry::availability(&schema, &mac) {
+            match Registry::availability(&schema, &on(Os::Linux)) {
                 Availability::Fallback { flag, fallback } => {
-                    assert_eq!(flag.to_string(), "win");
+                    assert_eq!(flag.to_string(), "win|mac");
                     assert!(matches!(fallback, Fallback::Hide { .. }));
-                    assert!(fallback.explanation().contains("Syphon"));
+                    assert!(fallback.explanation().contains("Linux"));
                 }
                 other => panic!("{}: {other:?}", schema.type_id),
             }
-            let win = PlatformInfo {
-                os: Os::Windows,
-                ..PlatformInfo::host()
-            };
-            assert_eq!(Registry::availability(&schema, &win), Availability::Native);
+            for os in [Os::Windows, Os::MacOs] {
+                assert_eq!(
+                    Registry::availability(&schema, &on(os)),
+                    Availability::Native
+                );
+            }
         }
     }
 
-    /// What macOS and Linux run, on any OS: the nodes load and cook to a
-    /// node error with no output, every frame, without panicking.
+    /// What Linux runs, on any OS: the nodes load and cook to a node error
+    /// with no output, every frame, without panicking.
     #[test]
     fn unavailable_platforms_load_and_report_an_error() {
         let instance = atd_gpu::primary_instance();

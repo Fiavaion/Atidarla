@@ -1,20 +1,23 @@
-//! Share Out and Share In over Spout (Windows; rule 7): pixels survive a
-//! loopback in one engine and between two engines, the sender goes when
-//! the node does or is disabled, Share In follows a resize, and bad names
-//! are node errors. The other OSes' behaviour is a unit test in
-//! `src/share/mod.rs`.
+//! Share Out and Share In over Spout (Windows) and Syphon (macOS; rule 7):
+//! pixels survive a loopback in one engine and between two engines, the
+//! sender goes when the node does or is disabled, Share In follows a
+//! resize, and bad names are node errors. Linux's behaviour is a unit test
+//! in `src/share/mod.rs`.
 //!
 //! Spout orders nothing between two D3D11 devices beyond `Flush`: hardware
 //! drivers sync legacy shared textures implicitly, WARP (CI) does not. So
 //! these tests wait for Share Out's copy to finish on the GPU before a
 //! Share In reads, as `atd-interop`'s `spout_loopback` tests do; in real
-//! use a receiver in another process reads a frame later.
+//! use a receiver in another process reads a frame later. Syphon announces
+//! a frame only once its copy has run, so the wait changes nothing there.
 //!
 //! The tests run one at a time ([`SERIAL`]): on WARP, four or more devices
 //! rendering in parallel while D3D11 devices are created for them crash
 //! inside WARP's own threads (M1 log, 2026-10-17); one or two do not, and
-//! hardware drivers do not. The app has one device.
-#![cfg(windows)]
+//! hardware drivers do not. The app has one device. On macOS a Share In
+//! with an empty name follows the newest server of any test, which is one
+//! more reason.
+#![cfg(any(windows, target_os = "macos"))]
 
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -23,7 +26,6 @@ use atd_core::graph::{Edit, Endpoint, Node, NodeId, Param, Wire};
 use atd_core::registry::Registry;
 use atd_gpu::engine::{Engine, EngineConfig, OpLibrary};
 use atd_interop::readback::read_rgba8;
-use atd_interop::spout::SpoutReceiver;
 use serde_json::{Value, json};
 
 /// Long enough for WARP, which draws slowly.
@@ -35,10 +37,17 @@ fn no_gpu(what: &str) {
     eprintln!("skipping: no {what}");
 }
 
-/// A DX12 device (Spout needs D3D12), from the tests' usual instance.
-fn dx12_device() -> Option<(wgpu::Device, wgpu::Queue)> {
+/// The backend sharing needs: DX12 for Spout, Metal for Syphon.
+const BACKEND: wgpu::Backends = if cfg!(windows) {
+    wgpu::Backends::DX12
+} else {
+    wgpu::Backends::METAL
+};
+
+/// A device on [`BACKEND`], from the tests' usual instance.
+fn share_device() -> Option<(wgpu::Device, wgpu::Queue)> {
     let instance = atd_gpu::primary_instance();
-    let adapters = pollster::block_on(instance.enumerate_adapters(wgpu::Backends::DX12));
+    let adapters = pollster::block_on(instance.enumerate_adapters(BACKEND));
     // Prefer a hardware adapter; CI has only WARP.
     let adapter = adapters
         .into_iter()
@@ -78,17 +87,17 @@ fn serial() -> MutexGuard<'static, ()> {
 
 macro_rules! device_or_skip {
     () => {
-        match dx12_device() {
+        match share_device() {
             Some(d) => d,
             None => {
-                no_gpu("DX12 adapter");
+                no_gpu("DX12 or Metal adapter");
                 return;
             }
         }
     };
 }
 
-/// A sender name no other test, process or Spout app uses.
+/// A sender name no other test, process or Spout/Syphon app uses.
 fn unique(tag: &str) -> String {
     format!("atd-test-{}-{tag}", std::process::id())
 }
@@ -145,7 +154,7 @@ fn cook_until(e: &mut Engine, nodes: &[NodeId], what: &str, mut done: impl FnMut
 }
 
 /// Waits until everything submitted has run on the GPU, which includes
-/// Share Out's D3D11 copy (the queue waits on its fence).
+/// Share Out's D3D11 copy on Windows (the queue waits on its fence).
 fn idle(e: &Engine) {
     e.device()
         .poll(wgpu::PollType::wait_indefinitely())
@@ -206,7 +215,7 @@ fn loopback_in_one_engine_matches_pixels() {
     let noise = add(&mut e, "img.noise", &[("scale", json!(9.0))]);
     let name = unique("pixels");
     publish(&mut e, noise, &name);
-    assert!(SpoutReceiver::list_senders().contains(&name));
+    assert!(atd_ops_img::share_senders().contains(&name));
 
     let inp = add(&mut e, "img.share_in", &[("name", json!(name))]);
     cook_until(&mut e, &[inp], "the first frame", |e| receiving(e, inp));
@@ -257,7 +266,7 @@ fn sender_goes_when_disabled_or_removed() {
     let noise = add(&mut e, "img.noise", &[]);
     let name = unique("remove");
     let out = publish(&mut e, noise, &name);
-    let listed = |name: &str| SpoutReceiver::list_senders().iter().any(|n| n == name);
+    let listed = |name: &str| atd_ops_img::share_senders().iter().any(|n| n == name);
     assert!(listed(&name));
 
     set(&mut e, out, "enabled", json!(false));
@@ -335,7 +344,20 @@ fn bad_names_are_node_errors() {
     let (device, queue) = device_or_skip!();
     let mut e = engine_on(&device, &queue, 16, 16, wgpu::TextureFormat::Rgba8Unorm);
     let noise = add(&mut e, "img.noise", &[]);
-    for bad in [String::new(), "a\\b".to_owned(), "x".repeat(300)] {
+    // Spout names are 1-255 bytes without a backslash; Syphon's at most
+    // 255 bytes without NUL (empty is allowed).
+    let (bads, message) = if cfg!(windows) {
+        (
+            vec![String::new(), "a\\b".to_owned(), "x".repeat(300)],
+            "invalid Spout sender name",
+        )
+    } else {
+        (
+            vec!["a\0b".to_owned(), "x".repeat(300)],
+            "a Syphon server name is at most 255 bytes",
+        )
+    };
+    for bad in bads {
         let out = add(&mut e, "img.share_out", &[("name", json!(bad))]);
         connect(&mut e, noise, out);
         let inp = add(&mut e, "img.share_in", &[("name", json!(bad))]);
@@ -343,7 +365,7 @@ fn bad_names_are_node_errors() {
             e.error(out).is_some() && (bad.is_empty() || e.error(inp).is_some())
         });
         assert!(
-            e.error(out).unwrap().contains("invalid Spout sender name"),
+            e.error(out).unwrap().contains(message),
             "{:?}",
             e.error(out)
         );

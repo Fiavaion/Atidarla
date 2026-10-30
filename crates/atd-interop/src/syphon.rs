@@ -263,16 +263,21 @@ impl ServerInfo {
     }
 }
 
-/// An immutable server description; `NSDictionary` is thread-safe.
-struct SharedDescription(Description);
-// SAFETY: immutable NSDictionary of immutable values, documented as safe
-// to use from any thread.
-unsafe impl Send for SharedDescription {}
+/// A server created in this process.
+struct Local {
+    info: ServerInfo,
+    description: Description,
+    /// Frames whose copy into the server's surface has completed on the GPU.
+    done: Arc<AtomicU64>,
+}
+// SAFETY: the description is an immutable NSDictionary of immutable
+// values, documented as safe to use from any thread.
+unsafe impl Send for Local {}
 
 /// Servers created in this process, oldest first.
-static LOCAL: Mutex<Vec<(ServerInfo, SharedDescription)>> = Mutex::new(Vec::new());
+static LOCAL: Mutex<Vec<Local>> = Mutex::new(Vec::new());
 
-fn local() -> std::sync::MutexGuard<'static, Vec<(ServerInfo, SharedDescription)>> {
+fn local() -> std::sync::MutexGuard<'static, Vec<Local>> {
     LOCAL
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -299,9 +304,9 @@ pub fn list_servers() -> Result<Vec<ServerInfo>, InteropError> {
         .iter()
         .map(|d| ServerInfo::from_description(d))
         .collect();
-    for (info, _) in local().iter() {
-        if !out.iter().any(|o| o.uuid == info.uuid) {
-            out.push(info.clone());
+    for l in local().iter() {
+        if !out.iter().any(|o| o.uuid == l.info.uuid) {
+            out.push(l.info.clone());
         }
     }
     Ok(out)
@@ -316,15 +321,31 @@ pub fn directory_servers() -> Result<Vec<ServerInfo>, InteropError> {
         .collect())
 }
 
+/// A server found by [`find`].
+struct Found {
+    info: ServerInfo,
+    description: Description,
+    /// Its completed-frame count, for a server in this process.
+    done: Option<Arc<AtomicU64>>,
+}
+
 /// The newest server matching `wanted` (any server for `None`).
-fn find(wanted: Option<&str>) -> Result<Option<(ServerInfo, Description)>, InteropError> {
+fn find(wanted: Option<&str>) -> Result<Option<Found>, InteropError> {
     let matches = |info: &ServerInfo| wanted.is_none_or(|w| info.matches(w));
-    if let Some((info, desc)) = local().iter().rev().find(|(info, _)| matches(info)) {
-        return Ok(Some((info.clone(), desc.0.clone())));
+    if let Some(l) = local().iter().rev().find(|l| matches(&l.info)) {
+        return Ok(Some(Found {
+            info: l.info.clone(),
+            description: l.description.clone(),
+            done: Some(Arc::clone(&l.done)),
+        }));
     }
     Ok(directory()?.into_iter().rev().find_map(|d| {
         let info = ServerInfo::from_description(&d);
-        matches(&info).then_some((info, d))
+        matches(&info).then_some(Found {
+            info,
+            description: d,
+            done: None,
+        })
     }))
 }
 
@@ -345,6 +366,8 @@ pub struct SyphonServer {
     queue: MtlQueue,
     info: ServerInfo,
     source: RawCache,
+    /// Frames whose copy has completed (shared with [`LOCAL`]).
+    done: Arc<AtomicU64>,
 }
 
 // SAFETY: SyphonMetalServer "is safe to access across threads" (its
@@ -391,13 +414,19 @@ impl SyphonServer {
             Ok::<_, InteropError>((server, desc))
         })?;
         let info = ServerInfo::from_description(&desc);
-        local().push((info.clone(), SharedDescription(desc)));
+        let done = Arc::new(AtomicU64::new(0));
+        local().push(Local {
+            info: info.clone(),
+            description: desc,
+            done: Arc::clone(&done),
+        });
         Ok(Self {
             server,
             wgpu_queue,
             queue,
             info,
             source: RawCache::default(),
+            done,
         })
     }
 
@@ -441,6 +470,15 @@ impl SyphonServer {
                     flipped: Bool::NO
                 ];
             }
+            let done = Arc::clone(&self.done);
+            let handler = RcBlock::new(move |_cb: *mut AnyObject| {
+                done.fetch_add(1, Ordering::Release);
+            });
+            // SAFETY: takes a block called with the command buffer once it
+            // has completed; Metal copies the block.
+            unsafe {
+                let () = msg_send![&*cb, addCompletedHandler: &*handler];
+            }
             cb.commit();
             Ok(())
         })
@@ -461,7 +499,7 @@ impl Drop for SyphonServer {
     /// `hasClients` turns false only after the server has handled the
     /// client's last message.
     fn drop(&mut self) {
-        local().retain(|(info, _)| info.uuid != self.info.uuid);
+        local().retain(|l| l.info.uuid != self.info.uuid);
         let start = Instant::now();
         while self.has_clients() && start.elapsed() < LEAVE_WAIT {
             std::thread::sleep(Duration::from_millis(1));
@@ -501,9 +539,14 @@ struct Connection {
     /// `published` when we last copied.
     copied: u64,
     /// Copy on the next call even if no frame was announced since the last
-    /// copy: after attaching to a server that already had a frame, after a
-    /// resize, or for a new target.
+    /// copy: after attaching (the server may have published before), after
+    /// a resize, or for a new target.
     fresh: bool,
+    /// For a server in this process, its completed frames: until the first
+    /// has completed its surface may exist but hold nothing yet. Another
+    /// process's server is taken at its word (Syphon shows a server's
+    /// surface as soon as it exists).
+    done: Option<Arc<AtomicU64>>,
 }
 
 /// A Syphon client that copies a server's frames into wgpu textures.
@@ -567,7 +610,12 @@ impl SyphonReceiver {
             }
             self.conn = None;
         }
-        let Some((info, desc)) = find(self.wanted.as_deref())? else {
+        let Some(Found {
+            info,
+            description: desc,
+            done,
+        }) = find(self.wanted.as_deref())?
+        else {
             return Ok(false);
         };
         let classes = classes()?;
@@ -595,20 +643,13 @@ impl SyphonReceiver {
         let Some(client) = client else {
             return Ok(false);
         };
-        // A server that has published before we came shows its current
-        // frame at once; one that has not, from its first announced frame
-        // (its surface exists before that frame's copy has run).
-        let had_frame = autoreleasepool(|_| {
-            // SAFETY: returns a +1 MTLTexture or nil.
-            let frame: Option<MtlTexture> = unsafe { msg_send![&client, newFrameImage] };
-            frame.is_some()
-        });
         self.conn = Some(Connection {
             info,
             client,
             published,
             copied: 0,
-            fresh: had_frame,
+            fresh: true,
+            done,
         });
         Ok(true)
     }
@@ -624,7 +665,6 @@ impl SyphonReceiver {
         }
         if self.target.0.as_ref().is_none_or(|(t, _)| t != target)
             && let Some(conn) = &mut self.conn
-            && (conn.copied > 0 || conn.published.load(Ordering::Acquire) > 0)
         {
             conn.fresh = true;
         }
@@ -634,7 +674,11 @@ impl SyphonReceiver {
         };
         autoreleasepool(|_| {
             let published = conn.published.load(Ordering::Acquire);
-            if published == conn.copied && !conn.fresh {
+            let ready = conn
+                .done
+                .as_ref()
+                .is_none_or(|d| d.load(Ordering::Acquire) > 0);
+            if !ready || (published == conn.copied && !conn.fresh) {
                 return Ok(Received::NoNewFrame);
             }
             // SAFETY: returns the current frame as a +1 MTLTexture on our

@@ -32,7 +32,10 @@ mod macos {
     fn until(what: &str, mut ok: impl FnMut() -> bool) {
         let start = Instant::now();
         while !ok() {
-            assert!(start.elapsed() < Duration::from_secs(5), "timed out: {what}");
+            assert!(
+                start.elapsed() < Duration::from_secs(5),
+                "timed out: {what}"
+            );
             std::thread::sleep(Duration::from_millis(10));
         }
     }
@@ -46,13 +49,15 @@ mod macos {
         else {
             let required =
                 std::env::var("ATD_REQUIRE_GPU").is_ok_and(|v| !v.is_empty() && v != "0");
-            assert!(!required, "ATD_REQUIRE_GPU is set but there is no Metal adapter");
+            assert!(
+                !required,
+                "ATD_REQUIRE_GPU is set but there is no Metal adapter"
+            );
             eprintln!("skipping: no Metal adapter");
             return;
         };
         let (device, queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
-                .unwrap();
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
         let name = format!("atd-test-{}-directory", std::process::id());
         let src = atd_interop::metal::SharedSurface::create(
             &device,

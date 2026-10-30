@@ -285,7 +285,7 @@ fn every_img_operator_steady_state_allocations() {
         // Up to two passes (pass-through and the 8-bit copy, or keeping
         // and drawing a received frame); 1.1 measured on NVIDIA DX12, up to
         // 2.1 on WARP, depending on how often the worker is busy. See also
-        // the Spout test below.
+        // the Spout/Syphon test below.
         "img.share_out" | "img.share_in" => 3.0,
         // Several dispatches a frame, each recorded by wgpu with about 3.6
         // allocations on NVIDIA DX12 (compute 3.8x typical, neural CA 8x) and
@@ -443,15 +443,22 @@ fn compute_and_nca_steady_state_allocations() {
 }
 
 /// Share Out publishing a changing image to a Share In in the same engine
-/// over Spout (Windows, DX12): what the cook thread allocates per frame.
-/// The workers' Spout calls run on their own threads (not counted here;
-/// `atd-interop` keeps them allocation-free after warm-up).
-#[cfg(windows)]
+/// over Spout (Windows, DX12) or Syphon (macOS, Metal): what the cook
+/// thread allocates per frame. The workers' Spout or Syphon calls run on
+/// their own threads (not counted here; `atd-interop` keeps Spout's
+/// allocation-free after warm-up, while Syphon's Objective-C calls make
+/// command buffers and autoreleased objects on the worker).
+#[cfg(any(windows, target_os = "macos"))]
 #[test]
 fn share_out_and_in_steady_state_allocations() {
     let _sharing = SHARING.lock().unwrap_or_else(|e| e.into_inner());
     let instance = atd_gpu::primary_instance();
-    let adapters = pollster::block_on(instance.enumerate_adapters(wgpu::Backends::DX12));
+    let backend = if cfg!(windows) {
+        wgpu::Backends::DX12
+    } else {
+        wgpu::Backends::METAL
+    };
+    let adapters = pollster::block_on(instance.enumerate_adapters(backend));
     let Some(adapter) = adapters
         .into_iter()
         .min_by_key(|a| a.get_info().device_type == wgpu::DeviceType::Cpu)
@@ -459,7 +466,7 @@ fn share_out_and_in_steady_state_allocations() {
         let required = std::env::var("ATD_REQUIRE_GPU").is_ok_and(|v| !v.is_empty() && v != "0");
         assert!(
             !required,
-            "ATD_REQUIRE_GPU is set but there is no DX12 adapter"
+            "ATD_REQUIRE_GPU is set but there is no {backend:?} adapter"
         );
         return;
     };
