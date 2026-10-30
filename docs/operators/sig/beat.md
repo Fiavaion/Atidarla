@@ -31,6 +31,8 @@ Cooks every frame (time-dependent).
 | `nudge_amount` | Nudge Amount | float | `6.0` | 0 – 50 | Largest tempo change from Nudge, in percent. |
 | `resync` | Resync | pulse | `false` |  | Makes the frame it fires on beat 0 of a bar (bar 0): the next downbeat is here. |
 | `device` | Device | string | `""` |  | Source `midi`: part of the input port's name; empty for the first port; `virtual` for no device. |
+| `send_clock` | Send MIDI Clock | toggle | `false` |  | Sends MIDI clock (24 pulses per quarter note) with Start, Continue and Stop to Out Device, from a timing thread so pulses keep their spacing at any frame rate. Not with source `midi`, and silent in offline renders. |
+| `out_device` | Out Device | string | `""` |  | Part of the output port's name for the MIDI clock; empty for the first port; `virtual` for no device. |
 | `min_bpm` | Min BPM | float | `70.0` | 20 – 255 | Source `audio`: lowest tempo to report; intervals are folded into this range. |
 | `max_bpm` | Max BPM | float | `180.0` | 20 – 255 | Source `audio`: highest tempo to report. |
 | `smoothing` | Smoothing | float | `0.7` | 0 – 0.99 | Source `audio`: how slowly the tempo and phase follow new onsets (0 = at once). |

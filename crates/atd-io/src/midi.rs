@@ -300,6 +300,9 @@ fn run_in(device: &str, shared: &Arc<InShared>, stop: &Receiver<()>) -> Result<(
     Ok(())
 }
 
+/// Most messages a detached output keeps until they are read.
+const MAX_RECORDED: usize = 65_536;
+
 /// A short message on its way out: up to three bytes.
 #[derive(Debug, Clone, Copy)]
 struct Raw {
@@ -348,7 +351,11 @@ impl OutHandle {
                 let _ = tx.send(msg);
             }
             None => {
-                if let Ok(mut s) = self.shared.sent.lock() {
+                // A detached port is for tests and virtual routing; a clock
+                // left running into one must not grow without bound.
+                if let Ok(mut s) = self.shared.sent.lock()
+                    && s.len() < MAX_RECORDED
+                {
                     s.push((msg, Instant::now()));
                 }
             }

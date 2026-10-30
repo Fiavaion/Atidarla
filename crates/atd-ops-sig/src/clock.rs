@@ -9,8 +9,9 @@
 
 use atd_core::registry::ParamSchema;
 use atd_gpu::engine::{SigCtx, SigOp};
-use atd_io::midi::{Message, MidiIn};
+use atd_io::midi::{Message, MidiIn, MidiOut};
 use atd_io::midi_clock::ClockFollower;
+use atd_io::midi_clock_out::ClockOut;
 
 use crate::Def;
 use crate::ops::sig;
@@ -161,6 +162,20 @@ impl AudioFollower {
     }
 }
 
+/// MIDI clock out: the port and the thread that times the pulses on it.
+struct ClockLink {
+    // Dropped first: its Stop goes out before the port closes.
+    clock: ClockOut,
+    port: MidiOut,
+    device: String,
+    running: bool,
+    /// Stopped by Reset: the next start is from 0, not from where the
+    /// clock has got to by then.
+    rewind: bool,
+    /// Last tempo given to the thread (it is only told when it changes).
+    bpm: f64,
+}
+
 /// The `sig.beat` operator.
 pub(crate) struct Beat {
     /// Position in beats for the internal and audio sources.
@@ -183,6 +198,7 @@ pub(crate) struct Beat {
     seen_jumps: u32,
     /// Raw follower position at the last resync (the display's zero).
     midi_offset: f64,
+    out: Option<ClockLink>,
     #[cfg(test)]
     now_micros: Option<u64>,
 }
@@ -206,6 +222,7 @@ impl Default for Beat {
             follower: ClockFollower::new(),
             seen_jumps: 0,
             midi_offset: 0.0,
+            out: None,
             #[cfg(test)]
             now_micros: None,
         }
@@ -361,6 +378,56 @@ impl SigOp for Beat {
             }
         };
 
+        // MIDI clock out. Not while following a MIDI clock (that would echo
+        // it back) and not in an offline render (sinks do not emit).
+        if p.bool("send_clock") && source != "midi" && !p.mode().is_offline() {
+            let device = p.str("out_device");
+            if self.out.as_ref().is_none_or(|l| l.device != device) {
+                self.out = None; // stops and closes the old port first
+                let port = if device == VIRTUAL {
+                    MidiOut::detached()
+                } else {
+                    MidiOut::open(device)
+                };
+                self.out = Some(ClockLink {
+                    clock: ClockOut::new(port.handle()),
+                    port,
+                    device: device.to_owned(),
+                    running: false,
+                    rewind: false,
+                    bpm: -1.0,
+                });
+            }
+            let link = self.out.as_mut().expect("opened above");
+            if let Some(e) = link.port.error() {
+                ctx.output.set_single(&[], &[]);
+                return Err(e.to_owned());
+            }
+            if (bpm - link.bpm).abs() > 1e-6 {
+                link.clock.set_tempo(bpm);
+                link.bpm = bpm;
+            }
+            let running = !reset && bpm > 0.0;
+            if running && (resync_now || !link.running) {
+                // A resync is a new beginning at 0; otherwise the transport
+                // starts, or resumes, where the clock is.
+                let from = if resync_now || link.rewind {
+                    0.0
+                } else {
+                    beats
+                };
+                link.clock.begin(from);
+                link.running = true;
+                link.rewind = false;
+            } else if !running && link.running {
+                link.clock.stop();
+                link.running = false;
+                link.rewind = reset;
+            }
+        } else {
+            self.out = None;
+        }
+
         let per_bar_f = per_bar as f64;
         let beat = beats.floor();
         let bar = (beats / per_bar_f).floor();
@@ -426,6 +493,11 @@ pub static DEFS9: &[Def] = &[Def {
                 ParamSchema::string("device", "Device", "")
                     .help("Source `midi`: part of the input port's name; empty for the first port; `virtual` for no device.")
                     .suggest("midi.inputs"),
+                ParamSchema::toggle("send_clock", "Send MIDI Clock", false)
+                    .help("Sends MIDI clock (24 pulses per quarter note) with Start, Continue and Stop to Out Device, from a timing thread so pulses keep their spacing at any frame rate. Not with source `midi`, and silent in offline renders."),
+                ParamSchema::string("out_device", "Out Device", "")
+                    .help("Part of the output port's name for the MIDI clock; empty for the first port; `virtual` for no device.")
+                    .suggest("midi.outputs"),
                 ParamSchema::float("min_bpm", "Min BPM", 70.0, Some(20.0), Some(255.0))
                     .help("Source `audio`: lowest tempo to report; intervals are folded into this range."),
                 ParamSchema::float("max_bpm", "Max BPM", 180.0, Some(20.0), Some(255.0))
@@ -814,5 +886,79 @@ mod tests {
         );
         assert!((bpm - truth).abs() < 1.0, "{bpm}");
         assert!(worst < 0.1, "{worst}");
+    }
+
+    fn drain_out(op: &Beat) -> Vec<Vec<u8>> {
+        op.out
+            .as_ref()
+            .expect("clock out is open")
+            .port
+            .sent_raw()
+            .into_iter()
+            .map(|(m, _)| m)
+            .collect()
+    }
+
+    fn count(msgs: &[Vec<u8>], byte: u8) -> usize {
+        msgs.iter().filter(|m| m.as_slice() == [byte]).count()
+    }
+
+    #[test]
+    fn clock_out_pulses_come_from_the_timing_thread_not_the_frame() {
+        let mut rig = Rig::new(&[("send_clock", json!(true)), ("out_device", json!(VIRTUAL))]);
+        let mut op = Beat::default();
+        // Two cooks only; the pulses must keep coming in between.
+        rig.step(&mut op, 0.0, 0.0);
+        rig.step(&mut op, 0.016, 0.016);
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let sent = drain_out(&op);
+        assert_eq!(sent[0], [0xFA], "Start at beat 0");
+        let pulses = count(&sent, 0xF8);
+        assert!(
+            (22..=26).contains(&pulses),
+            "{pulses} pulses in 0.5 s at 120 BPM"
+        );
+
+        // A tempo change reaches the thread without another cook per pulse.
+        rig.set("bpm", json!(240.0));
+        rig.step(&mut op, 0.5, 0.016);
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        let pulses = count(&drain_out(&op), 0xF8);
+        assert!(
+            (20..=28).contains(&pulses),
+            "{pulses} pulses in 0.25 s at 240 BPM"
+        );
+
+        // Resync is a new Start; reset stops the transport, and the pulses.
+        rig.set("resync", json!(true));
+        rig.step(&mut op, 0.6, 0.016);
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        assert_eq!(count(&drain_out(&op), 0xFA), 1);
+        rig.set("resync", json!(false));
+        rig.set("reset", json!(true));
+        rig.step(&mut op, 0.7, 0.016);
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        let sent = drain_out(&op);
+        assert_eq!(count(&sent, 0xFC), 1);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert_eq!(count(&drain_out(&op), 0xF8), 0, "no pulses while stopped");
+        // Released, it continues from where the clock is (from 0).
+        rig.set("reset", json!(false));
+        rig.step(&mut op, 0.8, 0.016);
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        assert_eq!(count(&drain_out(&op), 0xFA), 1);
+    }
+
+    #[test]
+    fn clock_out_is_silent_offline_and_when_following_midi() {
+        let mut rig = Rig::new(&[("send_clock", json!(true)), ("out_device", json!(VIRTUAL))]);
+        let mut op = Beat::default();
+        rig.cook(&mut op, None, 0.0, 0.0, CookMode::Offline { fps: 60.0 });
+        assert!(op.out.is_none(), "sinks do not emit offline");
+        rig.step(&mut op, 0.0, 0.0);
+        assert!(op.out.is_some());
+        rig.set("source", json!("midi"));
+        rig.step(&mut op, 0.1, 0.1);
+        assert!(op.out.is_none(), "no echo of a followed clock");
     }
 }
