@@ -146,10 +146,31 @@ fn geo_chains_steady_state_allocations() {
     e.edit("chain", edits).unwrap();
     let out = [r1, r2];
     let mut t = 0.0;
-    for _ in 0..30 {
+    // Warm up until no GPU objects have been created for 30 frames: the
+    // kernel compiles on a worker thread, which takes longer on a busy
+    // machine, and its first cook after that creates its bind groups.
+    let counts = |e: &Engine| {
+        (
+            e.buffer_pool().created(),
+            bind_groups_created_total(),
+            e.pool().created(),
+        )
+    };
+    let (mut last, mut stable) = (counts(&e), 0);
+    for _ in 0..1200 {
         e.cook(&out, t).unwrap();
         t += 1.0 / 60.0;
+        let now = counts(&e);
+        stable = if now == last { stable + 1 } else { 0 };
+        last = now;
+        if stable >= 30 {
+            break;
+        }
     }
+    assert!(
+        stable >= 30,
+        "GPU objects still being created after warm-up"
+    );
     for n in [pts, n1, n2, r1, ps, force, r2] {
         assert_eq!(e.error(n), None);
     }
