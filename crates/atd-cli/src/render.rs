@@ -566,6 +566,15 @@ pub fn classify(type_id: &str) -> Option<Class> {
         // wire.
         return Some(Waits);
     }
+    if type_id == "ai.control_prep" {
+        return Some(Pure);
+    }
+    if type_id.starts_with("ai.") {
+        // AI operators (`docs/ai-host-protocol.md`): run on an AI Host;
+        // offline, frame i shows the result for frame i - 1's input, waited
+        // for (deterministic for a deterministic model).
+        return Some(Waits);
+    }
     if type_id.starts_with("py.") {
         // Python operators (`docs/python-ops.md`): cooked on the Python
         // operator worker; offline each frame waits for its own result.

@@ -113,6 +113,7 @@ pub(crate) fn library() -> (atd_core::Registry, OpLibrary) {
     atd_ops_mat::library(&mut library);
     atd_ops_msh::library(&mut library);
     atd_ops_cmp::library(&mut library);
+    atd_ops_ai::library(&mut library);
     (registry, library)
 }
 

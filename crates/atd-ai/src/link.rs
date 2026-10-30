@@ -272,9 +272,9 @@ impl Link {
     }
 
     /// Offers a frame without waiting: `fill` writes `width * height * 4`
-    /// bytes into a buffer that keeps its capacity. Returns false when the
-    /// worker holds the mailbox this instant (the frame is dropped; the next
-    /// one goes).
+    /// bytes into a buffer that keeps its capacity. Returns the frame's
+    /// sequence number, or `None` when the worker holds the mailbox this
+    /// instant (the frame is dropped; the next one goes).
     pub fn offer(
         &self,
         width: u32,
@@ -282,10 +282,33 @@ impl Link {
         timestamp_us: u64,
         params: &FrameParams,
         fill: impl FnOnce(&mut [u8]),
-    ) -> bool {
-        let Ok(mut slot) = self.shared.input.try_lock() else {
-            return false;
-        };
+    ) -> Option<u64> {
+        let slot = self.shared.input.try_lock().ok()?;
+        Some(self.fill(slot, width, height, timestamp_us, params, fill))
+    }
+
+    /// Like [`Link::offer`], waiting for the mailbox (offline render only).
+    pub fn offer_blocking(
+        &self,
+        width: u32,
+        height: u32,
+        timestamp_us: u64,
+        params: &FrameParams,
+        fill: impl FnOnce(&mut [u8]),
+    ) -> u64 {
+        let slot = self.shared.input.lock().expect("input");
+        self.fill(slot, width, height, timestamp_us, params, fill)
+    }
+
+    fn fill(
+        &self,
+        mut slot: std::sync::MutexGuard<'_, InSlot>,
+        width: u32,
+        height: u32,
+        timestamp_us: u64,
+        params: &FrameParams,
+        fill: impl FnOnce(&mut [u8]),
+    ) -> u64 {
         let len = width as usize * height as usize * 4;
         slot.pixels.resize(len, 0);
         fill(&mut slot.pixels);
@@ -294,9 +317,30 @@ impl Link {
         slot.timestamp_us = timestamp_us;
         slot.params.clone_from(params);
         slot.seq += 1;
+        let seq = slot.seq;
         drop(slot);
         self.shared.wake.notify_one();
-        true
+        seq
+    }
+
+    /// Waits until the result for input `seq` (or a later one) has arrived,
+    /// then calls `f` with it (offline render only). False on timeout or
+    /// when the newest result answers an older frame and nothing newer comes.
+    pub fn wait_result(&self, seq: u64, timeout: Duration, f: impl FnOnce(&OutSlot)) -> bool {
+        let deadline = Instant::now() + timeout;
+        loop {
+            {
+                let out = self.shared.output.lock().expect("output");
+                if out.seq >= seq {
+                    f(&out);
+                    return true;
+                }
+            }
+            if Instant::now() > deadline || self.shared.stop.load(Ordering::Acquire) {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
     }
 
     /// Sequence number of the newest result.
@@ -317,6 +361,11 @@ impl Link {
         f(&out);
         *seen = n;
         true
+    }
+
+    /// Calls `f` with the status without copying it (allocates nothing).
+    pub fn with_status<R>(&self, f: impl FnOnce(&LinkStatus) -> R) -> R {
+        f(&self.shared.status.lock().expect("status"))
     }
 
     /// Where and how the node runs (allocates: call it a few times a second).

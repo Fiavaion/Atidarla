@@ -11,6 +11,21 @@ publish.workspace = true
 
 [dependencies]
 atd-core.workspace = true
+atd-ai.workspace = true
+atd-gpu.workspace = true
+wgpu.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+pollster.workspace = true
+atd-ops-img.workspace = true
+atd-interop.workspace = true
 
 [lints]
 workspace = true
+
+# PT-9 / M4 AC3: runs its own reference host as a child process (the test
+# binary re-executes itself), so it needs its own `main`.
+[[test]]
+name = "pt9"
+harness = false

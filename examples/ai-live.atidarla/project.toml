@@ -1,0 +1,19 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "Live AI"
+description = '''
+Every AI operator (M4), wired to animated noise. AI nodes run on AI Hosts asynchronously: the
+Output Governor keeps the output at the project frame rate while results arrive at the AI's own
+rate, and the status line under each node says where it runs, its AI fps and latency.
+
+Invert runs the built-in reference model, so it works with the plain AI Host and no downloads.
+Diffusion needs SD-Turbo from the model manager (Models window; non-commercial licence) and the
+host's `diffusion` extra; its route `local → lan:studio` prefers a Windows/NVIDIA machine named
+`studio` for real time and falls back to this machine at interactive rates. Control Prep draws
+the edges that condition it. The vision nodes need their ONNX models; Video Model routes to a
+cloud provider, which Sovereign mode blocks until you turn it off and set a spend cap.
+
+Try: drag Diffusion's Weight 2 to morph from the first prompt to the second; switch the
+Governor between hold, blend and flow and watch the motion between AI frames.
+'''
+resolution = [1280, 720]

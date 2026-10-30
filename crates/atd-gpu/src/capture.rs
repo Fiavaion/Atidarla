@@ -160,6 +160,13 @@ impl Capture {
         }
     }
 
+    /// Whether a finished copy is waiting for [`Capture::poll`].
+    pub fn ready(&self) -> bool {
+        self.slots
+            .iter()
+            .any(|s| s.state.load(Ordering::Acquire) == READY)
+    }
+
     /// Whether copies are still in flight.
     pub fn busy(&self) -> bool {
         self.slots

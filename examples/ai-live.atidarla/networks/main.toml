@@ -1,0 +1,94 @@
+# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 12
+
+[[node]]
+id = 0
+name = "noise1"
+type = "img.noise"
+pos = [0.0, 0.0]
+
+[[node]]
+id = 1
+name = "edges"
+type = "ai.control_prep"
+pos = [220.0, 160.0]
+inputs.image = { node = 0, output = "out" }
+
+[[node]]
+id = 2
+name = "diffusion1"
+type = "ai.diffusion"
+pos = [440.0, 0.0]
+inputs.image = { node = 0, output = "out" }
+inputs.control = { node = 1, output = "out" }
+params.route = "local → lan:studio"
+params.prompt1 = "a watercolour painting of a stormy sea"
+params.prompt2 = "a neon city at night, rain"
+params.weight2 = 0.0
+params.strength = 0.6
+
+[[node]]
+id = 3
+name = "invert1"
+type = "ai.model"
+pos = [440.0, 160.0]
+inputs.image = { node = 0, output = "out" }
+params.model = "builtin.invert"
+params.policy = "hold"
+
+[[node]]
+id = 4
+name = "depth1"
+type = "ai.depth"
+pos = [440.0, 320.0]
+inputs.image = { node = 0, output = "out" }
+
+[[node]]
+id = 5
+name = "segment1"
+type = "ai.segment"
+pos = [660.0, 320.0]
+inputs.image = { node = 0, output = "out" }
+
+[[node]]
+id = 6
+name = "pose1"
+type = "ai.pose"
+pos = [880.0, 320.0]
+inputs.image = { node = 0, output = "out" }
+
+[[node]]
+id = 7
+name = "flow1"
+type = "ai.optical_flow"
+pos = [1100.0, 320.0]
+inputs.image = { node = 0, output = "out" }
+
+[[node]]
+id = 8
+name = "background1"
+type = "ai.background"
+pos = [440.0, 480.0]
+inputs.image = { node = 0, output = "out" }
+
+[[node]]
+id = 9
+name = "upscale1"
+type = "ai.upscale"
+pos = [660.0, 480.0]
+inputs.image = { node = 0, output = "out" }
+
+[[node]]
+id = 10
+name = "onnx1"
+type = "ai.onnx"
+pos = [880.0, 480.0]
+inputs.image = { node = 0, output = "out" }
+
+[[node]]
+id = 11
+name = "video1"
+type = "ai.video_model"
+pos = [1100.0, 480.0]
+inputs.image = { node = 0, output = "out" }

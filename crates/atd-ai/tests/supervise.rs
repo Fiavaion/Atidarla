@@ -49,9 +49,12 @@ fn drive(
         let mut frame = vec![0u8; 32 * 16 * 4];
         fill(&mut frame, seq);
         let c = Instant::now();
-        if link.offer(32, 16, seq * 16_667, &params, |px| {
-            px.copy_from_slice(&frame)
-        }) {
+        if link
+            .offer(32, 16, seq * 16_667, &params, |px| {
+                px.copy_from_slice(&frame)
+            })
+            .is_some()
+        {
             sent.push(frame);
         }
         link.take(&mut seen, |out| {
@@ -80,7 +83,9 @@ fn frames_flow_and_a_killed_host_is_back_within_five_seconds() {
     });
     let link = Link::new(sup, config("local", None));
     let mut sent = Vec::new();
-    drive(&link, &mut sent, Duration::from_secs(20), |l| l.status().frames >= 20);
+    drive(&link, &mut sent, Duration::from_secs(20), |l| {
+        l.status().frames >= 20
+    });
     assert_eq!(link.status().state, LinkState::Running);
 
     let pid = sup.host("local").unwrap().pid.expect("local host pid");
@@ -118,7 +123,9 @@ fn a_realtime_node_routes_to_the_nvidia_lan_host() {
     sup.want("lan:pc");
     let link = Link::new(sup, config("local → lan:pc", Some("nvidia")));
     let mut sent = Vec::new();
-    drive(&link, &mut sent, Duration::from_secs(20), |l| l.status().frames >= 10);
+    drive(&link, &mut sent, Duration::from_secs(20), |l| {
+        l.status().frames >= 10
+    });
     let s = link.status();
     assert_eq!(s.target, Some(Target::Lan("pc".into())));
     assert!(s.realtime);
