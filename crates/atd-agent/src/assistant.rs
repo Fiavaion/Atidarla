@@ -268,40 +268,68 @@ const CORE_OPS: &[&str] = &[
 /// sockets written compactly, so a small model needs no schema lookups.
 pub fn relevant_ops(ws: &dyn Workspace, request: &str) -> String {
     let asked = words(request);
-    let mut scored: Vec<(usize, &atd_core::registry::OperatorSchema)> = ws
+    let ops: Vec<&atd_core::registry::OperatorSchema> = ws
         .registry()
         .iter()
         .filter(|op| !op.type_id.starts_with(atd_core::pack::TYPE_PREFIX))
+        .collect();
+    // Same word, or one a prefix of the other (`displac` / `displace`).
+    let like = |a: &str, b: &str| {
+        a == b || a.len().min(b.len()) >= 4 && (a.starts_with(b) || b.starts_with(a))
+    };
+    let hit = |ws: &[String], w: &str| ws.iter().any(|x| like(x, w));
+    let docs: Vec<(Vec<String>, Vec<String>)> = ops
+        .iter()
         .map(|op| {
-            let name = words(&format!(
-                "{} {}",
-                op.type_id.replace(['.', '_'], " "),
-                op.label
-            ));
-            let summary = words(&op.summary);
-            // Same word, or one a prefix of the other (`displac` / `displace`).
-            let like = |a: &str, b: &str| {
-                a == b || a.len().min(b.len()) >= 4 && (a.starts_with(b) || b.starts_with(a))
-            };
-            let hit = |ws: &[String], w: &str| ws.iter().any(|x| like(x, w));
+            (
+                words(&format!(
+                    "{} {}",
+                    op.type_id.replace(['.', '_'], " "),
+                    op.label
+                )),
+                words(&op.summary),
+            )
+        })
+        .collect();
+    // A word most operators mention ("time", "colour") says little; a rare
+    // one ("kaleidoscope", "hue") a lot.
+    let n = ops.len() as f64;
+    let weight: Vec<f64> = asked
+        .iter()
+        .map(|w| {
+            let df = docs.iter().filter(|(a, b)| hit(a, w) || hit(b, w)).count() as f64;
+            ((n + 1.0) / (df + 1.0)).ln()
+        })
+        .collect();
+    let mut scored: Vec<(f64, &atd_core::registry::OperatorSchema)> = ops
+        .iter()
+        .zip(&docs)
+        .map(|(op, (name, summary))| {
             let score = asked
                 .iter()
-                .map(|w| 3 * usize::from(hit(&name, w)) + usize::from(hit(&summary, w)))
+                .zip(&weight)
+                .map(|(w, k)| {
+                    k * (3.0 * f64::from(u8::from(hit(name, w)))
+                        + f64::from(u8::from(hit(summary, w))))
+                })
                 .sum();
-            (score, op)
+            (score, *op)
         })
-        .filter(|(score, op)| *score > 0 || CORE_OPS.contains(&op.type_id.as_str()))
         .collect();
-    scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.type_id.cmp(&b.1.type_id)));
+    scored.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.type_id.cmp(&b.1.type_id)));
+    let best = scored.first().map_or(0.0, |s| s.0);
     let mut out = String::from(
-        "\nOperators for this request (type: inputs -> outputs; parameters as name kind=default):\n",
+        "\nOperators for this request (type: inputs -> outputs, `?` optional; parameters as name kind=default):\n",
     );
     let mut shown = 0;
     for (score, op) in scored {
-        if score == 0 && !CORE_OPS.contains(&op.type_id.as_str()) || shown >= 24 {
+        // The clear matches (a fifth of the best score or more), up to 16,
+        // and the core set.
+        let core = CORE_OPS.contains(&op.type_id.as_str());
+        if !core && (score < best * 0.2 || score <= 0.0 || shown >= 16) {
             continue;
         }
-        shown += 1;
+        shown += usize::from(!core);
         let sockets = |s: &[atd_core::registry::SocketSchema]| {
             s.iter()
                 .map(|s| {
@@ -376,7 +404,13 @@ pub fn build(
         .iter()
         .map(|t| json!({"type": "function", "function": {"name": t.name, "description": t.description, "parameters": t.schema}}))
         .collect();
+    // ATD_AGENT_TRACE=1 prints the operators offered, every tool call and
+    // the start of its result.
+    let trace = std::env::var("ATD_AGENT_TRACE").is_ok_and(|v| v == "1");
     let system = format!("{}{}", system_prompt(ws), relevant_ops(ws, request));
+    if trace {
+        eprintln!("{}", relevant_ops(ws, request));
+    }
     let mut messages = vec![
         json!({"role": "system", "content": system}),
         json!({"role": "user", "content": request}),
@@ -384,8 +418,6 @@ pub fn build(
     let mut run = Run::default();
     let mut nudged = false;
     let (mut last_failed, mut repeats, mut repairs) = (Vec::<String>::new(), 0, 0);
-    // ATD_AGENT_TRACE=1 prints every tool call and the start of its result.
-    let trace = std::env::var("ATD_AGENT_TRACE").is_ok_and(|v| v == "1");
     while run.steps < max_steps {
         run.steps += 1;
         let reply = match llm.chat(&messages, &tools) {
@@ -409,6 +441,13 @@ pub fn build(
             .map(|(i, mut c)| {
                 if c["id"].is_null() {
                     c["id"] = json!(format!("call_{}_{i}", run.steps));
+                }
+                // Ollama refuses a history whose arguments are not an object.
+                if let Some(text) = c["arguments"].as_str() {
+                    c["arguments"] = serde_json::from_str(text).unwrap_or(json!({}));
+                }
+                if !c["arguments"].is_object() {
+                    c["arguments"] = json!({});
                 }
                 c
             })
@@ -598,7 +637,11 @@ mod tests {
         assert!(errors.contains("did you mean `img.noise`"), "{errors}");
         let view = agent.view(&ws).clone();
         let noise = view.node_by_name("noise1").unwrap();
-        assert!(noise.params.contains_key("scale"), "{errors} {:?}", noise.params);
+        assert!(
+            noise.params.contains_key("scale"),
+            "{errors} {:?}",
+            noise.params
+        );
         assert_eq!(noise.params["scale"].expr.as_deref(), Some("2 + sin(time)"));
         assert_eq!(noise.params["octaves"].value, json!(5));
         // Again with the same names: updated, not duplicated.
