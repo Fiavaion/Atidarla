@@ -613,6 +613,11 @@ _import_lock = None
 def install(module):
     """Builds this host's `atidarla` module from the embedded one, with the declaration API."""
     global _api, _import_lock
+    # While another host runs a file, `sys.modules["atidarla"]` (what the
+    # caller imported) is that host's copy: go back to the embedded module,
+    # or this host would put its classes and its own lock on the other
+    # host's copy in the middle of that host's `load`.
+    module = getattr(module, "__atd_embedded__", module)
     # `setdefault` is atomic under the GIL: every host gets the same lock.
     _import_lock = vars(module).setdefault("_atd_import_lock", threading.RLock())
     api = types.ModuleType("atidarla")
@@ -621,6 +626,7 @@ def install(module):
     for name, value in CONSTRUCTORS.items():
         setattr(api, name, value)
     api.op = op
+    api.__atd_embedded__ = module
     _api = api
     # Also on the embedded module, for code that reads it directly.
     for name, value in CONSTRUCTORS.items():
