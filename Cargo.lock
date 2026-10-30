@@ -285,6 +285,7 @@ name = "atd-cli"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "atd-agent",
  "atd-ai",
  "atd-core",
  "atd-format",

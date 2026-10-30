@@ -10,6 +10,7 @@ mod models;
 mod project;
 mod pt8;
 mod render;
+mod serve;
 
 /// The mock ComfyUI server of `atd-ops-ai`'s tests, for the render test.
 #[cfg(test)]
@@ -125,7 +126,7 @@ enum Command {
     /// Bake a network to disk (M2).
     Bake { project: PathBuf },
     /// Expose MCP + OSC/REST without UI (FR-H3, M5).
-    Serve { project: Option<PathBuf> },
+    Serve(serve::ServeArgs),
     /// Check project folders: they load, validate against the operator
     /// registry and are in canonical form; with --gpu, every node cooks
     /// without errors.
@@ -360,7 +361,7 @@ fn main() -> ExitCode {
         Command::Cloud { action } => cloud::run(action),
         Command::Run { .. } => return not_yet("run", "M3 (FR-H2)"),
         Command::Bake { .. } => return not_yet("bake", "M2"),
-        Command::Serve { .. } => return not_yet("serve", "M5 (FR-H3)"),
+        Command::Serve(args) => serve::run(args),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
