@@ -1,0 +1,19 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "Speech and chat"
+description = '''
+Speech to Text and LLM Chat (FR-A13). Audio In feeds Speech to Text, which sends what is said to
+Whisper on the local AI Host once the speaker pauses and publishes each transcript as `speech`.
+LLM Chat follows `speech` (its Prompt From): every new transcript goes to Ollama on this machine
+with the instruction in its Prompt, and the reply is published as `reply`. The bars show Speech
+to Text's channels (active, busy, new_text, count, level, ready).
+
+Needs: `whisper-base` from the model manager (MIT) and the AI Host's `stt` extra
+(`uv sync --extra stt`); Ollama running with `ollama pull qwen2.5-coder:7b`. Both run on this
+machine, so Sovereign mode stays on. Switch LLM Chat's Provider to `anthropic` to see Sovereign
+mode refuse it.
+
+Try: pick your microphone in Audio In's Device menu (the test tone never pauses), watch `level`
+while you speak and set Speech to Text's Threshold between the room and your voice.
+'''
+resolution = [1280, 720]
