@@ -25,8 +25,9 @@ use serde_json::Value;
 
 use crate::egress;
 use crate::protocol::{
-    Capabilities, FrameCancel, FrameResult, FrameSubmit, Health, Incoming, ModelInfo, ModelLoad,
-    ModelRef, PROTOCOL_VERSION, Request, RpcError, SessionInfo, SessionOpen, Transport,
+    AudioTranscribe, Capabilities, FrameCancel, FrameResult, FrameSubmit, Health, Incoming,
+    ModelInfo, ModelLoad, ModelRef, PROTOCOL_VERSION, Request, RpcError, SessionInfo, SessionOpen,
+    Transport,
 };
 use crate::ring::{FrameRing, RingLayout, default_ring_path};
 
@@ -34,6 +35,8 @@ use crate::ring::{FrameRing, RingLayout, default_ring_path};
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(5);
 /// `model.load` may read gigabytes of weights.
 pub const LOAD_TIMEOUT: Duration = Duration::from_secs(120);
+/// An utterance of up to half a minute may take this long on a slow CPU.
+pub const TRANSCRIBE_TIMEOUT: Duration = Duration::from_secs(60);
 /// Notifications kept for the UI.
 const NOTES: usize = 32;
 
@@ -366,6 +369,16 @@ impl HostClient {
             )));
         }
         Ok((result, payload))
+    }
+
+    /// Sends an utterance for speech-to-text: `pcm` is mono little-endian
+    /// f32 samples at `request.sample_rate`.
+    pub fn transcribe(
+        &self,
+        request: &AudioTranscribe,
+        pcm: &[u8],
+    ) -> Result<Pending, ClientError> {
+        self.send("audio.transcribe", request, Some(pcm), TRANSCRIBE_TIMEOUT)
     }
 
     pub fn cancel(&self, seq: u64) -> Result<Pending, ClientError> {

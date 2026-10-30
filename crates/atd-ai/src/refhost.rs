@@ -19,6 +19,14 @@ use serde_json::{Value, json};
 use crate::protocol::{PROTOCOL_VERSION, codes};
 use crate::ring::FrameRing;
 
+/// The models this host runs. `builtin.stt_echo` answers `audio.transcribe`.
+const BUILTINS: [&str; 4] = [
+    "builtin.echo",
+    "builtin.invert",
+    "builtin.prompts",
+    "builtin.stt_echo",
+];
+
 /// Options of a reference host.
 #[derive(Debug, Clone, Default)]
 pub struct RefHostOptions {
@@ -179,7 +187,7 @@ fn session(conn: TcpStream, opts: &RefHostOptions, started: Instant, frames: &At
                     "runtimes": ["cpu-reference"],
                     "transports": ["shm", "inline"],
                     "adapters": ["builtin", "diffusion.sd"],
-                    "models": ["builtin.echo", "builtin.invert", "builtin.prompts"],
+                    "models": ["builtin.echo", "builtin.invert", "builtin.prompts", "builtin.stt_echo"],
                 }))
             }
             "host.health" => Ok(json!({
@@ -191,7 +199,7 @@ fn session(conn: TcpStream, opts: &RefHostOptions, started: Instant, frames: &At
             })),
             "model.load" => {
                 let m = p["model_id"].as_str().unwrap_or_default().to_owned();
-                if m == "builtin.invert" || m == "builtin.echo" || m == "builtin.prompts" {
+                if BUILTINS.contains(&m.as_str()) {
                     let mut models = models.lock().expect("models");
                     if !models.contains(&m) {
                         models.push(m.clone());
@@ -216,6 +224,23 @@ fn session(conn: TcpStream, opts: &RefHostOptions, started: Instant, frames: &At
                     pixels,
                 });
                 continue;
+            }
+            "audio.transcribe" => {
+                let m = p["model_id"].as_str().unwrap_or_default();
+                if m != "builtin.stt_echo" || !models.lock().expect("models").iter().any(|x| x == m)
+                {
+                    Err((codes::UNKNOWN_MODEL, format!("model {m:?} not loaded")))
+                } else {
+                    match &pixels {
+                        Some(pcm) if pcm.len() % 4 == 0 => Ok(json!({
+                            "seq": p["seq"],
+                            "text": describe_audio(pcm, p["sample_rate"].as_u64().unwrap_or(0)),
+                            "language": null,
+                            "host_ms": 0.0,
+                        })),
+                        _ => Err((-32602, "a payload of f32le samples is needed".into())),
+                    }
+                }
             }
             "frame.cancel" | "session.close" => Ok(Value::Null),
             other => Err((-32601, format!("unknown method {other:?}"))),
@@ -286,6 +311,16 @@ fn frame(job: &Job, ring: Option<&mut FrameRing>, models: &[String]) -> FrameOut
         }
         _ => Err((codes::BAD_SLOT, "frame size does not match".into())),
     }
+}
+
+/// What `builtin.stt_echo` "hears" (the Python host's text, to the digit):
+/// the sample count, rate and peak level.
+pub fn describe_audio(pcm: &[u8], rate: u64) -> String {
+    let peak = pcm
+        .chunks_exact(4)
+        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]).abs())
+        .fold(0.0f32, f32::max);
+    format!("{} samples at {rate} Hz, peak {peak:.3}", pcm.len() / 4)
 }
 
 /// The weighted mix of each prompt's colour (an FNV-1a hash of its text).

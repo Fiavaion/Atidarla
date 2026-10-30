@@ -785,7 +785,7 @@ fn charge(target: &Target, host: &str, interval: Option<f64>, cost_s: Option<f64
     }
 }
 
-fn describe(skipped: &[(Target, Skip)]) -> String {
+pub(crate) fn describe(skipped: &[(Target, Skip)]) -> String {
     if skipped.is_empty() {
         return "no route".into();
     }
