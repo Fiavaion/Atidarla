@@ -3,6 +3,7 @@
 mod ai_badges;
 mod ai_hosts;
 mod app;
+mod assistant;
 mod canvas;
 mod channels;
 mod diff_view;

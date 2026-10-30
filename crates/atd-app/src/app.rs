@@ -47,6 +47,8 @@ pub enum Tab {
     Textport,
     /// Interactive quests (docs/learn.md); closed by default.
     Learn,
+    /// Prompt to network and "explain" (FR-G4); closed by default.
+    Assistant,
 }
 
 /// How the shell was launched (`atidarla run`, `docs/run.md`).
@@ -110,6 +112,8 @@ struct Panels {
     diff: crate::diff_view::DiffView,
     /// Three-way merge and conflict resolution (FR-F3).
     merge: crate::merge::MergePanel,
+    /// The assistant: prompt to network, explain (FR-G4).
+    assistant: crate::assistant::AssistantPanel,
 }
 
 impl AtidarlaApp {
@@ -197,12 +201,17 @@ impl AtidarlaApp {
             }
         }
 
-        let dock = DockState::new(
+        let mut dock = DockState::new(
             vec![Tab::Operators, Tab::Platform],
             vec![Tab::Viewer, Tab::Parameters],
             vec![Tab::Timeline],
             vec![Tab::Patch, Tab::Stage, Tab::Outputs],
         );
+        if smoke.is_some() {
+            // Smoke runs draw the Assistant too (closed by default), so CI
+            // proves it renders over a live engine.
+            dock.open(Area::Left, Tab::Assistant);
+        }
         Self {
             shell,
             dock,
@@ -231,6 +240,7 @@ impl AtidarlaApp {
                 learn: Default::default(),
                 diff: Default::default(),
                 merge: Default::default(),
+                assistant: Default::default(),
             },
             smoke: smoke.map(Smoke::new),
             start: Instant::now(),
@@ -418,6 +428,13 @@ impl eframe::App for AtidarlaApp {
                             self.panels.merge.open = true;
                         }
                         if ui
+                            .button(tab_title(Tab::Assistant))
+                            .on_hover_text("Build or change the patch from a prompt, or explain it")
+                            .clicked()
+                        {
+                            self.dock.open(Area::Right, Tab::Assistant);
+                        }
+                        if ui
                             .button(tab_title(Tab::Textport))
                             .on_hover_text("Python console over the open project")
                             .clicked()
@@ -503,6 +520,9 @@ impl eframe::App for AtidarlaApp {
             );
         }
         self.learn_frame(ui.ctx());
+        let p = &mut self.panels;
+        p.assistant
+            .frame(ui.ctx(), p.engine.as_mut(), self.project.dir.as_deref());
         self.cook_and_present(ui.ctx(), frame);
         self.textport_frame(ui.ctx());
         if let Some(smoke) = &mut self.smoke {
@@ -951,6 +971,7 @@ fn tab_title(tab: Tab) -> &'static str {
         Tab::Platform => "Platform",
         Tab::Textport => "Textport",
         Tab::Learn => "Learn",
+        Tab::Assistant => "Assistant",
     }
 }
 
@@ -1008,11 +1029,30 @@ impl TabViewer for Panels {
             Tab::Platform => self.platform_ui(ui),
             Tab::Textport => self.textport.ui(ui, self.engine.as_ref()),
             Tab::Learn => self.learn.ui(ui),
+            Tab::Assistant => self.assistant_ui(ui),
         }
     }
 }
 
 impl Panels {
+    fn assistant_ui(&mut self, ui: &mut Ui) {
+        let Some(engine) = &self.engine else {
+            placeholder(ui, "No GPU device: the engine is unavailable.");
+            return;
+        };
+        let net = engine.network();
+        let selected = self
+            .patch
+            .selected
+            .and_then(|id| net.node(id))
+            .map(|n| (n.id, n.name.clone()));
+        let errors: Vec<String> = net
+            .nodes()
+            .filter_map(|n| Some(format!("{}: {}", n.name, engine.error(n.id)?)))
+            .collect();
+        self.assistant.ui(ui, selected, &errors);
+    }
+
     fn viewer_ui(&mut self, ui: &mut Ui) {
         if let (Some(engine), Some(viewed)) = (&self.engine, self.viewed)
             && let Some(ch) = engine.channels(viewed)

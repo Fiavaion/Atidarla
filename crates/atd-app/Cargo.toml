@@ -38,6 +38,7 @@ toml_edit.workspace = true
 png.workspace = true
 atd-format.workspace = true
 atd-ai.workspace = true
+atd-agent.workspace = true
 atd-timeline.workspace = true
 atd-py.workspace = true
 rfd.workspace = true
