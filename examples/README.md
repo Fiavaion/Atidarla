@@ -36,6 +36,7 @@ every IMG and SIG operator (CLAUDE.md rule 7); each operator's page in
 | [mesh-modelling](mesh-modelling.atidarla/) | Extrude, Subdivide, Boolean, Delete and PolyReduce (M2) |
 | [mesh-scatter-iso](mesh-scatter-iso.atidarla/) | Scatter → Iso Surface → curl-noise deform: the PNT↔MSH chain, and a Sweep (M2) |
 | [mesh-files](mesh-files.atidarla/) | Mesh File In/Out (OBJ in, PLY out), Normals, Skin and UV Project (M2) |
+| [mesh-boolean-gltf](mesh-boolean-gltf.atidarla/) | Boolean → Fuse → UV Project → Mesh File Out as a GLB that opens in Blender (M2) |
 | [pnt-fountain](pnt-fountain.atidarla/) | Emitter, Gravity, Vortex, Turbulence, Wind, Drag and Collide in a particle loop (M2) |
 | [pnt-deformers](pnt-deformers.atidarla/) | Twist, Taper, Bend and Wave on a column; Copy to Points with random sizes and colours (M2) |
 | [pnt-constellation](pnt-constellation.atidarla/) | Smooth, Normals, Sort and Connect on the GPU grid hash; lines in Render Points (M2) |

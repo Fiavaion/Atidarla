@@ -36,6 +36,7 @@ All platforms.
 
 ## Examples
 
+- [Mesh Boolean to glTF](../../../examples/mesh-boolean-gltf.atidarla/) — `draw`
 - [Mesh Files](../../../examples/mesh-files.atidarla/) — `draw`
 - [Mesh Modelling](../../../examples/mesh-modelling.atidarla/) — `draw`
 - [Mesh Primitives](../../../examples/mesh-primitives.atidarla/) — `draw`

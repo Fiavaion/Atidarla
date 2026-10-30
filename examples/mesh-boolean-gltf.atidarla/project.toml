@@ -1,0 +1,13 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "Mesh Boolean to glTF"
+description = '''
+A sphere with a box cut out of it (Boolean, subtract), welded (Fuse), given spherical texture
+coordinates (UV Project) and written as a binary glTF to .cache/boolean.glb by Mesh File Out.
+Drawn as points. The written file opens in Blender (File, Import, glTF) with one mesh and one
+UV map; `bench/check-gltf-blender.sh` checks that headlessly.
+
+Try: change Boolean's operation to union or intersect; write .cache/boolean.gltf instead;
+switch UV Project to box.
+'''
+resolution = [1280, 720]
