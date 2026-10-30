@@ -5,6 +5,7 @@ mod docs;
 mod export;
 mod isf_import;
 mod kernel;
+mod models;
 mod project;
 mod pt8;
 mod render;
@@ -195,6 +196,12 @@ enum Command {
         #[arg(long)]
         emit_wgsl: bool,
     },
+    /// The AI model manager: catalogue, licence acceptance, downloads and
+    /// checks (FR-A12, docs/models.md).
+    Models {
+        #[command(subcommand)]
+        action: models::ModelsCommand,
+    },
 }
 
 fn main() -> ExitCode {
@@ -284,6 +291,7 @@ fn main() -> ExitCode {
             no_gpu,
         } => export::run(&project, &out, export::ExportOptions { zip, gpu: !no_gpu }),
         Command::VerifyShow { bundle, gpu } => export::verify(&bundle, gpu),
+        Command::Models { action } => models::run(action),
         Command::Run { .. } => return not_yet("run", "M3 (FR-H2)"),
         Command::Bake { .. } => return not_yet("bake", "M2"),
         Command::Serve { .. } => return not_yet("serve", "M5 (FR-H3)"),
