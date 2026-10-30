@@ -25,6 +25,7 @@ atd-ops-mat.workspace = true
 atd-ops-dat.workspace = true
 atd-ops-cmp.workspace = true
 atd-ops-ai.workspace = true
+atd-stage.workspace = true
 egui.workspace = true
 eframe = { workspace = true, features = ["wgpu", "default_fonts", "x11", "wayland"] }
 wgpu.workspace = true

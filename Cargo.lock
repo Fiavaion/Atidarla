@@ -246,6 +246,7 @@ dependencies = [
  "atd-ops-pnt",
  "atd-ops-sig",
  "atd-py",
+ "atd-stage",
  "eframe",
  "egui",
  "env_logger",
