@@ -728,16 +728,15 @@ impl AtidarlaApp {
                 0
             }
         };
-        let Some(viewed) = viewed else {
-            if cooked > 0 {
-                ctx.request_repaint();
-            }
-            return;
-        };
-        if cooked > 0 || p.timeline.playing() {
-            // Something changed or is animating: keep frames coming.
+        // Something changed or is animating (a playing timeline, a Stage
+        // one-shot or flash waiting to return, the autopilot): keep frames
+        // coming, whether or not anything is viewed.
+        if cooked > 0 || p.timeline.playing() || p.stage.wants_frames() {
             ctx.request_repaint();
         }
+        let Some(viewed) = viewed else {
+            return;
+        };
         if let Some(ch) = engine.channels(viewed) {
             if cooked > 0 || p.history.is_empty() {
                 p.history.push(viewed, ch);

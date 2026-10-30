@@ -20,6 +20,9 @@ pub struct StagePanel {
     /// A flash clip held down: (layer, slot).
     held: Option<(NodeId, usize)>,
     message: Option<String>,
+    /// The Stage model and the engine revision it was read at: read again
+    /// only when the network changes, so a frame allocates nothing.
+    model: Option<(u64, Stage)>,
 }
 
 /// The deck's beat position: its clock's `beat` + `beat_phase`, or
@@ -34,14 +37,23 @@ fn now(engine: &Engine, deck: &Deck, time: f64) -> f64 {
 }
 
 impl StagePanel {
-    /// Cooks one frame like [`Engine::cook_frame`] (the viewed node and
-    /// every sink), plus the Stage deck, so the show keeps playing whatever
-    /// is viewed; first runs one-shot returns and the autopilot.
+    /// The Stage model, taken out of the cache (put it back after use);
+    /// read again only if the network changed since.
+    fn take_model(&mut self, engine: &Engine) -> (u64, Stage) {
+        let rev = engine.revision();
+        match self.model.take() {
+            Some(m) if m.0 == rev => m,
+            _ => (rev, Stage::read(engine.network(), engine.registry())),
+        }
+    }
+
     /// Advances the Stage one frame (autopilot, one-shot returns) and
-    /// returns the deck's mixer, which must cook whatever node is viewed.
+    /// returns the deck's mixer, which the frame cooks whatever node is
+    /// viewed (`Engine::cook_frame_with`). Allocates nothing while the
+    /// network does not change.
     pub fn frame(&mut self, engine: &mut Engine, time: f64) -> Option<NodeId> {
-        let stage = Stage::read(engine.network(), engine.registry());
-        let deck = stage.deck();
+        let model = self.take_model(engine);
+        let deck = model.1.deck();
         if self.deck != deck.map(|d| d.mixer) {
             self.launcher = Launcher::default();
             self.held = None;
@@ -51,7 +63,14 @@ impl StagePanel {
             let edits = self.launcher.tick(deck, now(engine, deck, time));
             self.apply(engine, "Stage autopilot", edits);
         }
+        self.model = Some(model);
         self.deck
+    }
+
+    /// Whether the Stage needs frames although nothing changes on screen:
+    /// a one-shot or flash waiting to return, or the autopilot on.
+    pub fn wants_frames(&self) -> bool {
+        self.launcher.busy()
     }
 
     fn apply(&mut self, engine: &mut Engine, label: &str, edits: Vec<Edit>) {
@@ -64,7 +83,12 @@ impl StagePanel {
     }
 
     pub fn ui(&mut self, ui: &mut Ui, engine: &mut Engine, time: f64) {
-        let stage = Stage::read(engine.network(), engine.registry());
+        let model = self.take_model(engine);
+        self.deck_ui(ui, engine, &model.1, time);
+        self.model = Some(model);
+    }
+
+    fn deck_ui(&mut self, ui: &mut Ui, engine: &mut Engine, stage: &Stage, time: f64) {
         let Some(deck) = stage.deck() else {
             ui.centered_and_justified(|ui| {
                 ui.weak(
@@ -75,7 +99,7 @@ impl StagePanel {
             return;
         };
         let beat = now(engine, deck, time);
-        self.toolbar(ui, engine, deck, &stage, beat);
+        self.toolbar(ui, engine, deck, stage, beat);
         if let Some(msg) = &self.message {
             ui.colored_label(ui.visuals().error_fg_color, msg);
         }
@@ -240,5 +264,138 @@ impl StagePanel {
             self.message = None;
             self.apply(engine, label, e);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! CLAUDE.md rule 2 for the Stage's per-frame work.
+
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::Cell;
+
+    use atd_core::graph::{Endpoint, Node, Wire};
+    use serde_json::Value;
+
+    use super::*;
+
+    /// Counts allocations on the thread that turned counting on, so other
+    /// tests running in parallel do not disturb the count.
+    struct Counting;
+    thread_local! {
+        static COUNTING: Cell<bool> = const { Cell::new(false) };
+        static ALLOCS: Cell<usize> = const { Cell::new(0) };
+    }
+    fn tally() {
+        if COUNTING.try_with(Cell::get).unwrap_or(false) {
+            let _ = ALLOCS.try_with(|n| n.set(n.get() + 1));
+        }
+    }
+    // SAFETY: forwards to the system allocator; only counts calls.
+    unsafe impl GlobalAlloc for Counting {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            tally();
+            unsafe { System.alloc(layout) }
+        }
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            unsafe { System.dealloc(ptr, layout) }
+        }
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            tally();
+            unsafe { System.realloc(ptr, layout, new_size) }
+        }
+    }
+    #[global_allocator]
+    static GLOBAL: Counting = Counting;
+
+    fn count(f: impl FnOnce()) -> usize {
+        ALLOCS.with(|n| n.set(0));
+        COUNTING.with(|c| c.set(true));
+        f();
+        COUNTING.with(|c| c.set(false));
+        ALLOCS.with(Cell::get)
+    }
+
+    fn node(e: &mut Engine, ty: &str, name: &str, params: &[(&str, Value)]) -> NodeId {
+        let id = e.alloc_id();
+        let mut edits = vec![Edit::AddNode {
+            node: Node::new(id, ty, name),
+        }];
+        for (p, v) in params {
+            edits.push(Edit::SetParam {
+                node: id,
+                param: (*p).into(),
+                value: Some(Param::constant(v.clone())),
+            });
+        }
+        e.edit("add", edits).unwrap();
+        id
+    }
+
+    fn wire(e: &mut Engine, from: NodeId, to: NodeId, input: &str) {
+        e.edit(
+            "wire",
+            [Edit::Connect {
+                wire: Wire::new(Endpoint::new(from, "out"), Endpoint::new(to, input)),
+            }],
+        )
+        .unwrap();
+    }
+
+    /// A deck with a clock, two clips and the autopilot on (waiting long
+    /// enough not to launch while measured): after warm-up, frames
+    /// allocate nothing, and an edit is still seen.
+    #[test]
+    fn steady_stage_frames_allocate_nothing() {
+        let Some(mut e) = crate::project::tests::engine() else {
+            return;
+        };
+        let clock = node(&mut e, "sig.beat", "clock", &[]);
+        let mixer = node(
+            &mut e,
+            "img.mixer",
+            "deck",
+            &[
+                ("autopilot", json!("next")),
+                ("autopilot_beats", json!(1000)),
+            ],
+        );
+        let layer = node(&mut e, "img.layer", "layer", &[("target", json!(0))]);
+        for s in 0..2 {
+            let c = node(&mut e, "img.constant", &format!("clip{s}"), &[]);
+            wire(&mut e, c, layer, &format!("clip{s}"));
+        }
+        wire(&mut e, clock, layer, "clock");
+        wire(&mut e, layer, mixer, "layer0");
+
+        let mut panel = StagePanel::default();
+        for f in 0..30 {
+            let t = f64::from(f) / 60.0;
+            let deck = panel.frame(&mut e, t);
+            assert_eq!(deck, Some(mixer));
+            e.cook_frame_with(None, &[mixer], t).unwrap();
+        }
+        assert!(panel.wants_frames(), "the autopilot runs");
+        let n = count(|| {
+            for f in 30..150 {
+                std::hint::black_box(panel.frame(&mut e, f64::from(f) / 60.0));
+            }
+        });
+        assert_eq!(n, 0, "allocations in 120 Stage frames");
+
+        // The cached model follows edits.
+        e.edit(
+            "target",
+            [Edit::SetParam {
+                node: layer,
+                param: "target".into(),
+                value: Some(Param::constant(json!(1))),
+            }],
+        )
+        .unwrap();
+        panel.frame(&mut e, 3.0);
+        let (rev, stage) = panel.model.as_ref().unwrap();
+        assert_eq!(*rev, e.revision());
+        assert_eq!(stage.deck().unwrap().layer(layer).unwrap().target, Some(1));
     }
 }
