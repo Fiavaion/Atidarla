@@ -160,3 +160,116 @@ fn the_manifest_survives_a_folder_save_and_load() {
     assert_eq!(std::fs::read(dir.join("project.toml")).unwrap(), first);
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+fn with_hosts() -> Project {
+    let mut p = Project::new("Remote show");
+    p.ai.sovereign = false;
+    p.ai.spend_cap_usd = 12.5;
+    p.ai.hosts
+        .insert("lan:studio".into(), "192.168.1.20:7420".into());
+    p.ai.hosts
+        .insert("cloud:runpod".into(), "pod.example.net:7420".into());
+    p
+}
+
+#[test]
+fn sovereign_spend_cap_and_hosts_round_trip_in_name_order() {
+    let p = with_hosts();
+    let text = project_to_string(&p);
+    let back = project_from_str(&text).unwrap();
+    assert_eq!(back.ai, p.ai);
+    assert_eq!(project_to_string(&back), text, "byte-stable");
+    assert!(
+        text.contains("[ai]\nsovereign = false\nspend_cap_usd = 12.5\n"),
+        "{text}"
+    );
+    let cloud = text.find("name = \"cloud:runpod\"").unwrap();
+    let lan = text.find("name = \"lan:studio\"").unwrap();
+    assert!(cloud < lan, "hosts in name order: {text}");
+    assert!(text.contains("[[ai.hosts]]"), "{text}");
+    assert!(!text.contains("token"), "{text}");
+}
+
+#[test]
+fn sovereign_is_on_by_default_and_written_only_when_off() {
+    assert!(Project::new("p").ai.sovereign);
+    // A project from before M4 has no key: Sovereign mode is on.
+    let old = project_from_str("format = 1\nname = \"p\"\n").unwrap();
+    assert!(old.ai.sovereign);
+    assert_eq!(old.ai.spend_cap_usd, 0.0);
+    let explicit = project_from_str("format = 1\nname = \"p\"\n[ai]\nsovereign = true\n").unwrap();
+    assert_eq!(explicit.ai, AiSettings::default());
+    assert!(!project_to_string(&explicit).contains("[ai]"));
+    // An integer cap is read as dollars.
+    let int = project_from_str("format = 1\nname = \"p\"\n[ai]\nspend_cap_usd = 3\n").unwrap();
+    assert_eq!(int.ai.spend_cap_usd, 3.0);
+}
+
+#[test]
+fn hosts_alone_write_no_empty_ai_header() {
+    let mut p = Project::new("p");
+    p.ai.hosts.insert("lan:a".into(), "10.0.0.2:7420".into());
+    let text = project_to_string(&p);
+    assert!(!text.contains("[ai]\n"), "{text}");
+    assert!(
+        text.contains("[[ai.hosts]]\nname = \"lan:a\"\naddr = \"10.0.0.2:7420\"\n"),
+        "{text}"
+    );
+    let back = project_from_str(&text).unwrap();
+    assert_eq!(back.ai, p.ai);
+    assert_eq!(project_to_string(&back), text);
+}
+
+#[test]
+fn every_ai_settings_combination_round_trips() {
+    for mask in 0u32..32 {
+        let mut p = Project::new("p");
+        p.ai.commercial_safe_only = mask & 1 != 0;
+        p.ai.sovereign = mask & 2 != 0;
+        p.ai.spend_cap_usd = if mask & 4 != 0 { 0.75 } else { 0.0 };
+        if mask & 8 != 0 {
+            p.ai.hosts.insert("lan:z".into(), "[fd00::2]:7420".into());
+        }
+        if mask & 16 != 0 {
+            p.ai.hosts
+                .insert("cloud:decart".into(), "api.example.com:443".into());
+        }
+        let text = project_to_string(&p);
+        let back = project_from_str(&text).unwrap();
+        assert_eq!(back.ai, p.ai, "{text}");
+        assert_eq!(project_to_string(&back), text);
+    }
+}
+
+#[test]
+fn ai_setting_errors_say_what_and_where() {
+    let err = |extra: &str| {
+        project_from_str(&format!("format = 1\nname = \"p\"\n{extra}"))
+            .unwrap_err()
+            .to_string()
+    };
+    let e = err("[ai]\nsovereign = \"yes\"\n");
+    assert!(e.contains("`sovereign` must be true or false"), "{e}");
+    let e = err("[ai]\nspend_cap_usd = -1.0\n");
+    assert!(e.contains("`spend_cap_usd` must be a number"), "{e}");
+    let host =
+        |name: &str, addr: &str| format!("[[ai.hosts]]\nname = \"{name}\"\naddr = \"{addr}\"\n");
+    let e = err(&host("studio", "10.0.0.2:7420"));
+    assert!(
+        e.contains("[ai] host 1: `name` `studio` must be lan:<name>"),
+        "{e}"
+    );
+    let e = err(&host("lan:Studio", "10.0.0.2:7420"));
+    assert!(e.contains("must be lan:<name>"), "{e}");
+    let e = err(&host("lan:studio", "10.0.0.2"));
+    assert!(e.contains("[ai] host 1 (lan:studio): `addr`"), "{e}");
+    let twice = format!(
+        "{}{}",
+        host("lan:a", "10.0.0.2:7420"),
+        host("lan:a", "10.0.0.3:7420")
+    );
+    assert!(err(&twice).contains("[ai] host 2: host `lan:a` is listed twice"));
+    // A token is refused: it belongs in the per-user store.
+    let e = err("[[ai.hosts]]\nname = \"lan:a\"\naddr = \"10.0.0.2:7420\"\ntoken = \"s3cret\"\n");
+    assert!(e.contains("[ai] host 1: unknown key `token`"), "{e}");
+}
