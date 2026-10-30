@@ -55,6 +55,9 @@ driver and build** give byte-identical frames. That is the promise; nothing more
   cues before it, so it matches the same frame of a whole render (tested). Cues with a condition
   read the previous frame's channels (the nodes they name cook with the output) and fire as
   crossed; a range started part-way arms them rather than firing them.
+- **The Stage** plays what the layers' `target` parameters (and the timeline's launch cues) say.
+  The autopilot, one-shot returns and flash releases are app behaviour and do not run in
+  `atidarla render`.
 - **Files** are read as they are when the render reaches them. A WGSL file is compiled once at the
   start; edits during a render are not picked up.
 

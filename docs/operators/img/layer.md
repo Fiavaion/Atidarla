@@ -2,7 +2,7 @@
 
 IMG · version 1 · cook budget 80 µs
 
-A Stage layer: plays the clip wired into slot `target` and switches to a new target with a cut, fade or wipe, at once or on the next beat or bar of its clock. Clips are any IMG nodes wired into `clip0`…`clip15`.
+A Stage layer: plays the clip wired into slot `target` and switches to a new target with a cut, fade or wipe, at once or on the next beat or bar of its clock. Clips are any IMG nodes wired into `clip0`…`clip15`. Clips not shown do not cook, so a stateful clip (feedback, a simulation, a movie) pauses while hidden.
 
 ## Inputs
 

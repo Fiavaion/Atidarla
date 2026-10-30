@@ -38,7 +38,7 @@ A Stage deck: composites up to 16 layers bottom (`layer0`) to top, each with an 
 | `stage` | Stage Deck | toggle | `false` |  | The deck the Stage tab shows (the first Mixer when none is marked). |
 | `crossfader` | Crossfader | float | `0.5` | 0 – 1 | 0 shows group A, 1 group B; both at full in the middle. Layers in no group ignore it. |
 | `master` | Master | float | `1.0` | 0 – 1 | Multiplies the composite's colour (fade to black). |
-| `autopilot` | Autopilot | menu | `"off"` | `off`, `next`, `random`, `column` | The Stage launches columns by itself: `next` in order, `random`, or always `column` Autopilot Column (FR-S8). |
+| `autopilot` | Autopilot | menu | `"off"` | `off`, `next`, `random`, `column` | The Stage launches columns by itself: `next` in order, `random`, or always `column` Autopilot Column (FR-S8). App behaviour, like one-shot returns and flash releases: none of them run in `atidarla render`. |
 | `autopilot_after` | Autopilot After | menu | `"beats"` | `beats`, `clip_end` | When the autopilot moves on: after Autopilot Beats, or when the longest clip of the column ends (its length in the layer's slots). |
 | `autopilot_beats` | Autopilot Beats | int | `16` | 1 – 1024 | Beats between autopilot launches. |
 | `autopilot_column` | Autopilot Column | int | `0` | 0 – 15 | The column a `column` autopilot launches. |

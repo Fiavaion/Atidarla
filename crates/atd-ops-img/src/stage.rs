@@ -38,7 +38,7 @@ pub fn layer_schema() -> OperatorSchema {
     let mut s = img(
         "layer",
         "Layer",
-        "A Stage layer: plays the clip wired into slot `target` and switches to a new target with a cut, fade or wipe, at once or on the next beat or bar of its clock. Clips are any IMG nodes wired into `clip0`…`clip15`.",
+        "A Stage layer: plays the clip wired into slot `target` and switches to a new target with a cut, fade or wipe, at once or on the next beat or bar of its clock. Clips are any IMG nodes wired into `clip0`…`clip15`. Clips not shown do not cook, so a stateful clip (feedback, a simulation, a movie) pauses while hidden.",
         &inputs,
         vec![
             ParamSchema::int("target", "Target", -1, Some(-1), Some(SLOTS as i64 - 1))
@@ -83,7 +83,7 @@ pub fn mixer_schema() -> OperatorSchema {
         ParamSchema::float("master", "Master", 1.0, Some(0.0), Some(1.0))
             .help("Multiplies the composite's colour (fade to black)."),
         ParamSchema::menu("autopilot", "Autopilot", AUTOPILOT, "off")
-            .help("The Stage launches columns by itself: `next` in order, `random`, or always `column` Autopilot Column (FR-S8)."),
+            .help("The Stage launches columns by itself: `next` in order, `random`, or always `column` Autopilot Column (FR-S8). App behaviour, like one-shot returns and flash releases: none of them run in `atidarla render`."),
         ParamSchema::menu("autopilot_after", "Autopilot After", AUTOPILOT_AFTER, "beats")
             .help("When the autopilot moves on: after Autopilot Beats, or when the longest clip of the column ends (its length in the layer's slots)."),
         ParamSchema::int("autopilot_beats", "Autopilot Beats", 16, Some(1), Some(1024))

@@ -1,7 +1,9 @@
 //! The Stage tab (M3, FR-S1, FR-S8): the clip grid of the Stage deck, a
 //! view and controller over the graph (decision A54). Launches are edits of
 //! the layers' `target` parameter made through [`atd_stage::Launcher`];
-//! the layers switch, quantise and fade inside their own cooks.
+//! the layers switch, quantise and fade inside their own cooks. The
+//! autopilot, one-shot returns and flash releases are app behaviour (not
+//! run by `atidarla render`).
 
 use atd_core::graph::{Edit, NodeId, Param};
 use atd_gpu::engine::Engine;

@@ -29,7 +29,7 @@
 ## Not done / follow-ups
 
 - **Thumbnails** (FR-S2 "live-updating"): the app's only texture helper (`viewer::TextureViewer`) is one display pass per instance and needs the eframe renderer, which the tab UI does not get. A thumbnail pool (one small display texture per visible clip, registered once) is a follow-up.
-- **All wired clips cook every frame.** The scheduler pulls every input; a layer with 16 slots cooks 16 clips. For AC1 (64 clips) the scheduler should let an operator name the inputs it needs this frame (playing, outgoing, preroll neighbours). That is an engine change, outside this slice.
+- ~~All wired clips cook every frame.~~ Done 2026-10-30: operators name the inputs they read (`GpuOp::needed_inputs`), and a layer cooks only the playing clip, the outgoing one in a transition and the target. Clips not shown do not cook, so a stateful clip (feedback, a simulation, a movie) pauses while hidden. A `target` bound to a channel or driven by an expression reads every clip (its value is only known after the plan). Preroll of neighbouring columns is not done.
 - Legato and layer groups (FR-S1) are not implemented.
 - Launching a clip on a layer whose `target` is bound to a channel replaces the binding (the tooltip says so); column launch skips such layers.
 - Autopilot, one-shot returns and flash releases are app behaviour: they write edits (undo steps) and do not run in `atidarla render`.
@@ -40,4 +40,4 @@
 2. **Crossfader curve:** both groups at full in the middle (A = min(1, 2(1−x)), B = min(1, 2x)). Linear instead?
 3. **Column launch on empty cells** stops that layer (scene behaviour). Leave such layers playing instead?
 4. **Clip settings** live in the layer's `slots` text (`slot,mode,beats,label`), as M3.md suggests. Fine as text, or per-slot parameters?
-5. **The Stage deck cooks every frame in the app**, viewed or not, through the Stage panel rather than marking `img.mixer` as a sink (sink means external side effects). An `Engine::cook_frame` variant taking extra outputs would remove the duplicated sink loop in `atd-app/src/stage.rs`.
+5. ~~The Stage deck cooks every frame in the app~~ Resolved 2026-10-30: `Engine::cook_frame_with(viewed, extra, time)` cooks the deck's mixer with the viewed node and every sink; the duplicated loop is gone.
