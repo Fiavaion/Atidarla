@@ -179,12 +179,15 @@ fn without_the_lock_changes_are_staged_until_accepted() {
     assert_eq!(ws.network().len(), 2);
     assert_eq!(ws.history, ["Assistant: noise and blur"], "one undo step");
     // Wrong wires and unknown parameters are answered, not applied.
-    let e = refused(&agent.call(
+    // An unknown parameter is left out and named; the node is still made.
+    let made = json(&agent.call(
         &mut ws,
         "create_node",
         &json!({"type": "img.blur", "params": {"radius": 1}}),
     ));
-    assert!(e.contains("has no parameter `radius`"), "{e}");
+    assert_eq!(made["ignored_params"], json!(["radius"]), "{made}");
+    assert_eq!(made["params_it_has"], json!(["size"]), "{made}");
+    json(&agent.call(&mut ws, "delete_node", &json!({"node": made["name"]})));
     json(&agent.call(
         &mut ws,
         "create_node",

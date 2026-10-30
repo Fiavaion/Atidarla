@@ -12,6 +12,8 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
+use atd_core::registry::ParamKind;
+
 use crate::tools::{Agent, Output, output_text};
 use crate::workspace::Workspace;
 
@@ -81,7 +83,7 @@ impl Llm for Ollama {
             "messages": messages,
             "tools": tools,
             "stream": false,
-            "options": {"temperature": 0.2, "num_ctx": 32768},
+            "options": {"temperature": 0.2, "num_ctx": 32768, "num_predict": 2048},
         });
         let r = post_json(&format!("{}/api/chat", self.base), &[], &body)?;
         if let Some(e) = r.get("error") {
@@ -178,13 +180,24 @@ pub fn system_prompt(ws: &dyn Workspace) -> String {
     let mut s = String::from(
         "You build node networks (patches) in Atidarla, a real-time visual instrument, by calling tools. \
 Rules:\n\
-- Call get_schema for every operator type before creating a node of it: use only parameter names and input names it lists.\n\
+- Build with ONE build_network call holding every node, its parameters and every wire; use only the operator types, parameter names and input names listed (call get_schema for any other type first).\n\
 - Wires connect an output to an input of the same wire type (IMG to IMG, SIG to SIG, GEO to GEO). Most image nodes take their image on input `in`; check the schema.\n\
 - Changes are staged. When the network is built, call accept_changes, then read the errors it returns and fix them (set_param, connect, delete_node) and accept again, until there are no errors.\n\
 - Animate with expressions such as `0.5 + 0.5 * sin(time)` in set_param, or bind a parameter to a SIG node's channel.\n\
 - Do not explain; act with tools. Stop when the network is accepted with no errors.\n\nOperators (type — summary):\n",
     );
-    for op in ws.registry().iter() {
+    // Image and channel operators first: a small model copies the prefix
+    // of whatever it read first (an alphabetical list opens with `ai.`).
+    let order = ["img.", "sig.", "pnt.", "msh.", "mat.", "cmp.", "dat."];
+    let rank = |t: &str| {
+        order
+            .iter()
+            .position(|p| t.starts_with(p))
+            .unwrap_or(order.len())
+    };
+    let mut ops: Vec<_> = ws.registry().iter().collect();
+    ops.sort_by_key(|op| rank(&op.type_id));
+    for op in ops {
         if op.type_id.starts_with(atd_core::pack::TYPE_PREFIX) {
             continue;
         }
@@ -197,8 +210,8 @@ Rules:\n\
 /// Tool calls a model wrote into its text instead of the tool-call field
 /// (qwen2.5-coder 7B through Ollama does this): every JSON object in the
 /// text, fenced or not, whose `name` is one of the offered tools.
-fn calls_in_text(text: &str, tools: &[Value]) -> Vec<Value> {
-    let known = |n: &str| tools.iter().any(|t| t["function"]["name"] == n);
+fn calls_in_text(text: &str, tools: &[Value], is_op: impl Fn(&str) -> bool) -> Vec<Value> {
+    let known = |n: &str| tools.iter().any(|t| t["function"]["name"] == n) || is_op(n);
     let mut calls = Vec::new();
     let mut i = 0;
     while let Some(off) = text[i..].find('{') {
@@ -218,7 +231,126 @@ fn calls_in_text(text: &str, tools: &[Value]) -> Vec<Value> {
     calls
 }
 
-/// How a request went.
+/// Words of a text, lower case, with a plural or verb ending taken off
+/// (`blurred` → `blur`, `gradients` → `gradient`).
+fn words(text: &str) -> Vec<String> {
+    text.split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() > 2)
+        .map(|w| {
+            let w = w.to_ascii_lowercase();
+            for end in ["ing", "red", "ed", "es", "s"] {
+                if let Some(stem) = w.strip_suffix(end)
+                    && stem.len() > 3
+                {
+                    return stem.to_owned();
+                }
+            }
+            w
+        })
+        .collect()
+}
+
+/// Operators every patch tends to need, always described in full.
+const CORE_OPS: &[&str] = &[
+    "img.noise",
+    "img.ramp",
+    "img.constant",
+    "img.composite",
+    "img.blend",
+    "img.transform",
+    "img.level",
+    "sig.lfo",
+    "sig.math",
+];
+
+/// The operators that match the request best (by the words of their type,
+/// label and summary), plus [`CORE_OPS`], with their parameters and
+/// sockets written compactly, so a small model needs no schema lookups.
+pub fn relevant_ops(ws: &dyn Workspace, request: &str) -> String {
+    let asked = words(request);
+    let mut scored: Vec<(usize, &atd_core::registry::OperatorSchema)> = ws
+        .registry()
+        .iter()
+        .filter(|op| !op.type_id.starts_with(atd_core::pack::TYPE_PREFIX))
+        .map(|op| {
+            let name = words(&format!(
+                "{} {}",
+                op.type_id.replace(['.', '_'], " "),
+                op.label
+            ));
+            let summary = words(&op.summary);
+            // Same word, or one a prefix of the other (`displac` / `displace`).
+            let like = |a: &str, b: &str| {
+                a == b || a.len().min(b.len()) >= 4 && (a.starts_with(b) || b.starts_with(a))
+            };
+            let hit = |ws: &[String], w: &str| ws.iter().any(|x| like(x, w));
+            let score = asked
+                .iter()
+                .map(|w| 3 * usize::from(hit(&name, w)) + usize::from(hit(&summary, w)))
+                .sum();
+            (score, op)
+        })
+        .filter(|(score, op)| *score > 0 || CORE_OPS.contains(&op.type_id.as_str()))
+        .collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.type_id.cmp(&b.1.type_id)));
+    let mut out = String::from(
+        "\nOperators for this request (type: inputs -> outputs; parameters as name kind=default):\n",
+    );
+    let mut shown = 0;
+    for (score, op) in scored {
+        if score == 0 && !CORE_OPS.contains(&op.type_id.as_str()) || shown >= 24 {
+            continue;
+        }
+        shown += 1;
+        let sockets = |s: &[atd_core::registry::SocketSchema]| {
+            s.iter()
+                .map(|s| {
+                    format!(
+                        "{}:{:?}{}",
+                        s.name,
+                        s.wire,
+                        if s.optional { "?" } else { "" }
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let params: Vec<String> = op
+            .params
+            .iter()
+            .map(|p| {
+                let kind = match &p.kind {
+                    ParamKind::Float { min, max, .. } => {
+                        format!("float[{}..{}]", opt(*min), opt(*max))
+                    }
+                    ParamKind::Int { min, max, .. } => format!(
+                        "int[{}..{}]",
+                        opt(min.map(|v| v as f64)),
+                        opt(max.map(|v| v as f64))
+                    ),
+                    ParamKind::Menu { options, .. } => format!("menu({})", options.join("|")),
+                    k => format!("{k:?}").to_ascii_lowercase(),
+                };
+                format!("{} {kind}={}", p.name, p.default)
+            })
+            .collect();
+        let _ = writeln!(
+            out,
+            "{}: {} -> {}; {}",
+            op.type_id,
+            sockets(&op.inputs),
+            sockets(&op.outputs),
+            params.join(", ")
+        );
+    }
+    out
+}
+
+fn opt(v: Option<f64>) -> String {
+    v.map_or(String::new(), |v| format!("{v}"))
+}
+
+/// How a request went./// How a request went.
 #[derive(Debug, Clone, Default)]
 pub struct Run {
     pub steps: u32,
@@ -244,8 +376,9 @@ pub fn build(
         .iter()
         .map(|t| json!({"type": "function", "function": {"name": t.name, "description": t.description, "parameters": t.schema}}))
         .collect();
+    let system = format!("{}{}", system_prompt(ws), relevant_ops(ws, request));
     let mut messages = vec![
-        json!({"role": "system", "content": system_prompt(ws)}),
+        json!({"role": "system", "content": system}),
         json!({"role": "user", "content": request}),
     ];
     let mut run = Run::default();
@@ -264,7 +397,9 @@ pub fn build(
         };
         let mut calls = reply["tool_calls"].as_array().cloned().unwrap_or_default();
         if calls.is_empty() {
-            calls = calls_in_text(reply["content"].as_str().unwrap_or_default(), &tools);
+            calls = calls_in_text(reply["content"].as_str().unwrap_or_default(), &tools, |n| {
+                ws.registry().get(n).is_some()
+            });
         }
         let mut assistant =
             json!({"role": "assistant", "content": reply["content"].as_str().unwrap_or_default()});
@@ -291,6 +426,9 @@ pub fn build(
         messages.push(assistant);
         if calls.is_empty() {
             run.final_text = reply["content"].as_str().unwrap_or_default().to_owned();
+            if trace {
+                eprintln!("[{}] text: {}", run.steps, run.final_text);
+            }
             // Built but never accepted: ask once to accept and check.
             if !agent.staged().is_empty() && !nudged {
                 nudged = true;
@@ -312,10 +450,16 @@ pub fn build(
         }
         let mut failed = Vec::new();
         for c in &calls {
-            let name = c["name"].as_str().unwrap_or_default();
+            let mut name = c["name"].as_str().unwrap_or_default();
             let mut args = c["arguments"].clone();
             if let Some(s) = args.as_str() {
                 args = serde_json::from_str(s).unwrap_or(json!({}));
+            }
+            // An operator type used as the tool name means "make one".
+            if ws.registry().get(name).is_some() {
+                let params = args.as_object().cloned().unwrap_or_default();
+                args = json!({"type": name, "params": params});
+                name = "create_node";
             }
             let out = agent.call(ws, name, &args);
             if trace {
@@ -420,12 +564,53 @@ mod tests {
         let text = "{\"name\": \"create_node\", \"arguments\": {\"type\": \"img.noise\"}}\n\
 ```json\n{\"name\": \"connect\", \"parameters\": {\"from\": \"a\", \"to\": \"b\"}}\n```\n\
 {\"name\": \"rm_rf\", \"arguments\": {}} and {not json";
-        let calls = calls_in_text(text, &tools);
+        let calls = calls_in_text(text, &tools, |n| n == "img.noise");
         assert_eq!(calls.len(), 2, "{calls:?}");
         assert_eq!(calls[0]["arguments"]["type"], "img.noise");
         assert_eq!(calls[1]["name"], "connect");
         assert_eq!(calls[1]["arguments"]["to"], "b");
-        assert!(calls_in_text("done, the network is built", &tools).is_empty());
+        assert!(calls_in_text("done, the network is built", &tools, |_| false).is_empty());
+    }
+
+    #[test]
+    fn build_network_stages_everything_and_updates_by_name() {
+        let mut reg = atd_core::Registry::default();
+        atd_ops_img::register(&mut reg);
+        let mut ws = NetworkWorkspace::new(reg);
+        let mut agent = Agent::new(Scope::defaults().into_iter().collect(), ShowLock::default());
+        let net = json!({
+            "nodes": [
+                {"name": "noise1", "type": "img.noise", "params": {"scale": "2 + sin(time)", "octaves": "5"}},
+                {"name": "blur1", "type": "img.blur", "params": {"size": 4, "radius": 1}},
+                {"name": "bad", "type": "ai.noise"}
+            ],
+            "wires": [
+                {"from": "noise1", "to": "blur1", "input": "in"},
+                {"from": "bad", "to": "blur1", "input": "in"}
+            ]
+        });
+        let Output::Json(out) = agent.call(&mut ws, "build_network", &net) else {
+            panic!("build_network failed");
+        };
+        assert_eq!(out["nodes"], json!(["noise1", "blur1"]), "{out}");
+        assert_eq!(out["wires"], 1);
+        let errors = out["errors"].to_string();
+        assert!(errors.contains("did you mean `img.noise`"), "{errors}");
+        let view = agent.view(&ws).clone();
+        let noise = view.node_by_name("noise1").unwrap();
+        assert!(noise.params.contains_key("scale"), "{errors} {:?}", noise.params);
+        assert_eq!(noise.params["scale"].expr.as_deref(), Some("2 + sin(time)"));
+        assert_eq!(noise.params["octaves"].value, json!(5));
+        // Again with the same names: updated, not duplicated.
+        let again =
+            json!({"nodes": [{"name": "blur1", "type": "img.blur", "params": {"size": 8}}]});
+        agent.call(&mut ws, "build_network", &again);
+        let view = agent.view(&ws).clone();
+        assert_eq!(view.len(), 2);
+        assert_eq!(
+            view.node_by_name("blur1").unwrap().params["size"].value,
+            json!(8)
+        );
     }
 
     #[test]

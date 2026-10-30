@@ -85,6 +85,25 @@ pub fn specs() -> Vec<ToolSpec> {
             scope: Some(Scope::Edit),
         },
         ToolSpec {
+            name: "build_network",
+            description: "Stages a whole network in one call: nodes (type, name, parameter values) and the wires between them. A node whose name already exists with the same type is updated, not duplicated, so call it again with the same names to fix errors. A text value for a number parameter is taken as an expression (e.g. `0.5 + 0.5 * sin(time)`). Returns the nodes made and every error; then call accept_changes.",
+            schema: obj(
+                json!({
+                    "nodes": {"type": "array", "items": {"type": "object", "properties": {
+                        "name": {"type": "string"},
+                        "type": {"type": "string", "description": "Operator type id, e.g. `img.noise`."},
+                        "params": {"type": "object", "description": "Parameter values (or expressions) by name."}
+                    }, "required": ["name", "type"]}},
+                    "wires": {"type": "array", "items": {"type": "object", "properties": {
+                        "from": {"type": "string"}, "output": {"type": "string", "default": "out"},
+                        "to": {"type": "string"}, "input": {"type": "string"}
+                    }, "required": ["from", "to", "input"]}}
+                }),
+                &["nodes"],
+            ),
+            scope: Some(Scope::Edit),
+        },
+        ToolSpec {
             name: "delete_node",
             description: "Stages removing a node and its wires.",
             schema: obj(json!({"node": node.clone()}), &["node"]),
@@ -330,7 +349,7 @@ impl Agent {
         )
     }
 
-    fn view<'a>(&'a self, ws: &'a dyn Workspace) -> &'a Network {
+    pub(crate) fn view<'a>(&'a self, ws: &'a dyn Workspace) -> &'a Network {
         self.preview.as_ref().unwrap_or_else(|| ws.network())
     }
 
@@ -423,17 +442,14 @@ impl Agent {
                     ];
                 }
                 let mut edits = vec![Edit::AddNode { node }];
+                // Unknown parameters are left out and reported; the node is
+                // still made (a model can set the right ones next).
+                let mut ignored = Vec::new();
                 if let Some(params) = a.get("params").and_then(Value::as_object) {
                     for (p, v) in params {
                         if !op.params.iter().any(|s| &s.name == p) {
-                            return Err(format!(
-                                "`{t}` has no parameter `{p}`; it has: {}",
-                                op.params
-                                    .iter()
-                                    .map(|s| s.name.as_str())
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            ));
+                            ignored.push(p.clone());
+                            continue;
                         }
                         edits.push(Edit::SetParam {
                             node: id,
@@ -443,10 +459,19 @@ impl Agent {
                     }
                 }
                 self.stage(ws, net, edits, format!("add {name} ({t})"))?;
-                Ok(Output::Json(
-                    json!({"name": name, "id": id.to_string(), "staged": true}),
-                ))
+                let mut out = json!({"name": name, "id": id.to_string(), "staged": true});
+                if !ignored.is_empty() {
+                    out["ignored_params"] = json!(ignored);
+                    out["params_it_has"] = json!(
+                        op.params
+                            .iter()
+                            .map(|s| s.name.as_str())
+                            .collect::<Vec<_>>()
+                    );
+                }
+                Ok(Output::Json(out))
             }
+            "build_network" => self.build_network(ws, a),
             "delete_node" => {
                 self.lock.check_graph_edit().map_err(|e| e.to_string())?;
                 let net = self.view(ws).clone();
@@ -933,6 +958,105 @@ impl Agent {
     }
 }
 
+impl Agent {
+    /// `build_network`: the nodes, then their parameters, then the wires,
+    /// each through the single-step tools so the same checks apply; one
+    /// failure does not stop the rest.
+    fn build_network(
+        &mut self,
+        ws: &mut dyn Workspace,
+        a: &Map<String, Value>,
+    ) -> Result<Output, String> {
+        self.lock.check_graph_edit().map_err(|e| e.to_string())?;
+        let mut made = Vec::new();
+        let mut errors = Vec::new();
+        let args = |v: Value| v.as_object().cloned().unwrap_or_default();
+        for n in a
+            .get("nodes")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let (Some(t), Some(name)) = (n["type"].as_str(), n["name"].as_str()) else {
+                errors.push(format!("node {n}: needs `type` and `name`"));
+                continue;
+            };
+            let existing = self.view(ws).node_by_name(name).map(|x| x.type_id.clone());
+            match existing {
+                Some(e) if e == t => {}
+                Some(e) => {
+                    errors.push(format!("node `{name}` exists as `{e}`; use another name"));
+                    continue;
+                }
+                None => {
+                    if let Err(e) =
+                        self.run(ws, "create_node", &args(json!({"type": t, "name": name})))
+                    {
+                        errors.push(format!("node `{name}`: {e}"));
+                        continue;
+                    }
+                }
+            }
+            made.push(name.to_owned());
+            let kinds: Vec<(String, bool)> = self.reg(ws).get(t).map_or(Vec::new(), |op| {
+                op.params
+                    .iter()
+                    .map(|p| {
+                        let text = matches!(
+                            p.kind,
+                            ParamKind::String | ParamKind::Menu { .. } | ParamKind::Path
+                        );
+                        (p.name.clone(), text)
+                    })
+                    .collect()
+            });
+            for (p, v) in n["params"].as_object().into_iter().flatten() {
+                let text = kinds.iter().find(|k| &k.0 == p).is_some_and(|k| k.1);
+                let expression = v
+                    .as_str()
+                    .filter(|e| !text && serde_json::from_str::<Value>(e.trim()).is_err());
+                let call = match expression {
+                    Some(e) => json!({"node": name, "param": p, "expression": e}),
+                    None => json!({"node": name, "param": p, "value": v}),
+                };
+                if let Err(e) = self.run(ws, "set_param", &args(call)) {
+                    errors.push(format!("{name}.{p}: {e}"));
+                }
+            }
+        }
+        let mut wired = 0;
+        for w in a
+            .get("wires")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let call = json!({
+                "from": w["from"], "to": w["to"], "input": w["input"],
+                "output": w.get("output").cloned().unwrap_or(json!("out")),
+            });
+            match self.run(ws, "connect", &args(call)) {
+                Ok(_) => wired += 1,
+                Err(e) => errors.push(format!(
+                    "wire {}.{} → {}.{}: {e}",
+                    w["from"].as_str().unwrap_or("?"),
+                    w["output"].as_str().unwrap_or("out"),
+                    w["to"].as_str().unwrap_or("?"),
+                    w["input"].as_str().unwrap_or("?")
+                )),
+            }
+        }
+        let next = if errors.is_empty() {
+            "call accept_changes"
+        } else {
+            "fix these errors (call build_network again with the same names), then call accept_changes"
+        };
+        Ok(Output::Json(json!({
+            "nodes": made, "wires": wired, "errors": errors, "staged": true, "next": next,
+        })))
+    }
+}
+
 /// Finds a node by name, or by id written `n12` / `12`.
 fn find(net: &Network, r: &str) -> Result<NodeId, String> {
     if let Some(n) = net.node_by_name(r) {
@@ -945,8 +1069,15 @@ fn find(net: &Network, r: &str) -> Result<NodeId, String> {
         return Ok(NodeId(i));
     }
     let names: Vec<&str> = net.nodes().map(|n| n.name.as_str()).collect();
+    let hint = if r.contains('.') {
+        " (that is an operator type, not a node: create a node of that type with build_network or create_node, then wire it by the node's name)"
+    } else {
+        ""
+    };
     Err(if names.is_empty() {
-        format!("no node named `{r}`: the network is empty; create it first")
+        format!("no node named `{r}`: the network is empty; create it first{hint}")
+    } else if !hint.is_empty() {
+        format!("no node named `{r}`{hint}; nodes are: {}", names.join(", "))
     } else {
         format!("no node named `{r}`; nodes are: {}", names.join(", "))
     })
