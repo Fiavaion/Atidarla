@@ -1,0 +1,49 @@
+# Learn quest (docs/learn.md).
+title = "A ComfyUI workflow as a node"
+summary = "Open a project whose operator is a ComfyUI workflow, feed it your own picture and learn what runs where."
+minutes = 12
+prerequisites = ["first-patch"]
+start = "examples/comfy-invert.atidarla"
+
+[[step]]
+title = "Open the example"
+text = '''
+ComfyUI is a separate program for building image-generation workflows. Atidarla does not include or start it: you run a ComfyUI server yourself, on this computer or on your network, and Atidarla talks to it. A workflow you export from ComfyUI becomes an **operator** of your project.
+
+Press **Open the example project** above. It opens `comfy-invert`, whose workflow loads an image, inverts it and saves it. This step ticks when the project is open.
+'''
+hint = "If the button cannot find the example, use File, Open Project and choose examples/comfy-invert.atidarla in your Atidarla folder."
+check = { kind = "node_exists", type = "comfy.*" }
+
+[[step]]
+title = "Look at the node"
+text = '''
+Select the `invert` node. Its first parameters are always the same: **Server** (`host:port`, by default `127.0.0.1:8188`), **Run** (run the workflow now) and **Auto Run** (run whenever an input or parameter changes). After those come the workflow's own widgets.
+
+The line under the node says what is happening: `queued`, `running`, `done in ...`, or `server not reachable`. A missing server is not an error, so the project still opens without one. This step ticks when the node has cooked without an error.
+'''
+check = { kind = "cooks_without_error", type = "comfy.*" }
+
+[[step]]
+title = "Feed it your own picture"
+text = '''
+The workflow's Load Image node became an image input, `in0`. Add **Noise** (IMG) and wire it into the `invert` node's `in0`, replacing the ramp.
+'''
+hint = "Dropping a wire on an input that already has one replaces it."
+check = { kind = "wired", from_type = "img.noise", to_type = "comfy.*", input = "in0" }
+
+[[step]]
+title = "Run on demand"
+text = '''
+Untick **Auto Run**. Now the workflow only runs when you press **Run**, which is the safe choice for slow workflows. With auto run, changes are waited out for a quarter of a second before the workflow is sent.
+'''
+check = { kind = "param", type = "comfy.*", name = "auto_run", op = "eq", value = false }
+
+[[step]]
+title = "Turn it back on"
+text = '''
+Tick **Auto Run** again. If your server is running, the inverted noise appears in the Viewer. Without a server the node keeps showing its last result and says it cannot reach it.
+
+To bring in your own workflow, export it from ComfyUI with **Workflow, Export (API)** and use **File, Import ComfyUI Workflow...** while the server runs. It becomes `comfy.<name>`.
+'''
+check = { kind = "param", type = "comfy.*", name = "auto_run", op = "eq", value = true }

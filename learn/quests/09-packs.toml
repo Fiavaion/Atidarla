@@ -1,0 +1,54 @@
+# Learn quest (docs/learn.md).
+title = "Use a Pack"
+summary = "Open a project built from a shipped Pack, look inside it, change its tempo and wire your own reaction to its flash."
+minutes = 12
+prerequisites = ["first-patch", "audio-reactive"]
+start = "examples/pack-beat-flash.atidarla"
+
+[[step]]
+title = "Open a project that uses a Pack"
+text = '''
+A **Pack** is a network saved as a reusable unit with a name, a version, promoted parameters and a help page. In a project it appears as one node.
+
+Press **Open the example project** above. It opens `pack-beat-flash`, which uses the **Beat Flash** Pack (a tempo clock that flashes an image on every beat). This step ticks when the project is open.
+'''
+hint = "If the button cannot find the example, use File, Open Project and choose examples/pack-beat-flash.atidarla in your Atidarla folder."
+check = { kind = "pack_instance", name = "beat_flash" }
+
+[[step]]
+title = "Look inside"
+text = '''
+The app shows a Pack instance **expanded**: its insides are ordinary nodes named `<instance>__<name>`, such as `flash1__clock`. Find them on the canvas (press F to frame everything). The Pack's tempo clock is a **Beat** node.
+'''
+hint = "The Beat Flash Pack contains a clock, a Select, a Trigger, a Math and a Level node."
+check = { kind = "node_exists", type = "sig.beat" }
+
+[[step]]
+title = "Speed it up"
+text = '''
+Select the Pack's Beat node (`flash1__clock`) and set **BPM** above 140. On a real Pack instance this is a promoted parameter, `bpm`, that you would set on the one Pack node; here you are editing the same value inside.
+'''
+check = { kind = "param", type = "sig.beat", name = "bpm", op = "gt", value = 140.0 }
+
+[[step]]
+title = "React to the flash"
+text = '''
+A Pack can also give you signals. Beat Flash outputs its flash envelope. Add **Transform** (IMG) after the example's `kick` node, then next to its **Rotate** open **bind...** and pick the Pack's `flash1__boost` entry. The picture now turns on every beat.
+'''
+check = { kind = "param", type = "img.transform", name = "rotate", op = "bound" }
+
+[[step]]
+title = "Check that it works"
+text = '''
+Select your new Transform. This step ticks when a Transform has cooked without an error.
+'''
+check = { kind = "cooks_without_error", type = "img.transform" }
+
+[[step]]
+title = "Read the Pack's help"
+text = '''
+Every Pack carries a help page. A project keeps its own copy of each Pack it uses, in `packs/beat_flash/` inside the project folder, so it still opens when the library changes. Open `packs/beat_flash/help.md` in a text editor to read what the Pack promises. This step ticks because the copy is there.
+
+The app cannot save a project that uses Packs yet, because saving would replace each Pack with its insides. To make and edit Packs, see `docs/packs.md`.
+'''
+check = { kind = "file_exists", path = "packs/beat_flash/help.md" }

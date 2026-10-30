@@ -1,0 +1,59 @@
+# Learn quest (docs/learn.md).
+title = "Your first clip deck"
+summary = "Build a Stage deck with one layer and two clips, launch them from the Stage tab and fade between them."
+minutes = 15
+prerequisites = ["first-patch"]
+
+[[step]]
+title = "Add a Mixer"
+text = '''
+The **Stage** is a performance view: a grid of clips you launch live. It reads a **deck**, which is a **Mixer** node with **Layer** nodes wired into it.
+
+Add **Mixer** from the **IMG** group.
+'''
+check = { kind = "node_exists", type = "img.mixer" }
+
+[[step]]
+title = "Add a Layer and wire it into the Mixer"
+text = '''
+Add **Layer** (IMG) and wire its `out` into the Mixer's `layer0` input. A layer plays one clip at a time; layers stack from the bottom (`layer0`) upwards.
+'''
+check = { kind = "wired", from_type = "img.layer", to_type = "img.mixer", input = "layer0" }
+
+[[step]]
+title = "Wire in your first clip"
+text = '''
+A **clip** is any image node. Add **Noise** and wire it into the Layer's `clip0` input. Slot 0 is the first column of the Stage grid.
+'''
+check = { kind = "wired", from_type = "img.noise", to_type = "img.layer", input = "clip0" }
+
+[[step]]
+title = "Wire in a second clip"
+text = '''
+Add **Ramp** (IMG, a gradient) and wire it into the Layer's `clip1` input. Now the layer has two clips to choose between.
+'''
+check = { kind = "wired", from_type = "img.ramp", to_type = "img.layer", input = "clip1" }
+
+[[step]]
+title = "Launch a clip"
+text = '''
+Open the **Stage** tab. You should see a grid with your layer as a row and two clip cells. Click a cell to launch it.
+
+This step ticks when a layer is playing a clip.
+'''
+hint = "No Stage tab? Choose View, then Stage. A Mixer with at least one clip must exist; the Stage shows the first Mixer unless you tick Stage Deck on another."
+check = { kind = "stage_layer_playing" }
+
+[[step]]
+title = "Choose a transition"
+text = '''
+Select the Layer and set **Transition** to `fade`. The layer will now blend from one clip to the next over **Transition Length** (one beat by default) instead of cutting.
+'''
+check = { kind = "param", type = "img.layer", name = "transition", op = "eq", value = "fade" }
+
+[[step]]
+title = "Launch the other clip"
+text = '''
+Go back to the Stage and launch the second column. Launching sets the Layer's **Target** to that slot, which is an ordinary undoable edit and is saved with the project. This step ticks when Target is `1`.
+'''
+check = { kind = "param", type = "img.layer", name = "target", op = "eq", value = 1 }

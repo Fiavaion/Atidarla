@@ -7,6 +7,7 @@ mod canvas;
 mod channels;
 mod dock;
 mod heartbeat;
+mod learn;
 mod mappings;
 mod models_panel;
 mod outputs;

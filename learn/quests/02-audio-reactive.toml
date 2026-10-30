@@ -1,0 +1,86 @@
+# Learn quest (docs/learn.md).
+title = "Make a picture follow sound"
+summary = "Play a drum loop, measure its spectrum and let the beat turn a feedback tunnel."
+minutes = 20
+prerequisites = ["first-patch"]
+
+[[step]]
+title = "Add Audio File In"
+text = '''
+Add **Audio File In** from the **SIG** group. It plays a WAV file as audio-rate channels.
+'''
+check = { kind = "node_exists", type = "sig.audio_file_in" }
+
+[[step]]
+title = "Choose a sound"
+text = '''
+Select the node and set **File** to a WAV file. A new project has no folder yet, so use the full path of the drum loop that ships with Atidarla:
+
+`examples/audio-reactive-feedback.atidarla/media/beat.wav`
+
+inside your Atidarla folder.
+'''
+hint = "Type or paste the complete path, for example /Users/you/Atidarla/examples/audio-reactive-feedback.atidarla/media/beat.wav on macOS."
+check = { kind = "param", type = "sig.audio_file_in", name = "file", op = "changed" }
+
+[[step]]
+title = "Measure the spectrum"
+text = '''
+Add **Spectrum** (SIG) and wire the audio node into its `in`. Spectrum splits the sound into bands, `band1` (low) to `band8` (high), plus an overall `level`.
+'''
+check = { kind = "wired", from_type = "sig.audio_file_in", to_type = "sig.spectrum", input = "in" }
+
+[[step]]
+title = "Start a feedback loop"
+text = '''
+Add **Noise** and **Feedback** from the **IMG** group and wire Noise into Feedback's `in`.
+
+Feedback outputs the previous frame of whatever you wire into its `loop` socket, which lets a picture build on itself. Until the loop is closed it simply passes `in` through.
+'''
+check = { kind = "wired", from_type = "img.noise", to_type = "img.feedback", input = "in" }
+
+[[step]]
+title = "Transform the previous frame"
+text = '''
+Add **Transform** (IMG) and wire Feedback into it. Transform moves, turns and scales a picture around a pivot.
+'''
+check = { kind = "wired", from_type = "img.feedback", to_type = "img.transform", input = "in" }
+
+[[step]]
+title = "Zoom a little each pass"
+text = '''
+Set Transform's **Scale** to about `1.02` on both axes and its **Extend** to `mirror`. Each pass through the loop will zoom in slightly, and mirrored edges avoid black borders.
+'''
+check = { kind = "param", type = "img.transform", name = "scale", op = "changed" }
+
+[[step]]
+title = "Mix the new frame with the old"
+text = '''
+Add **Composite** (IMG). Wire `noise1` into its `a` input and Transform into its `b` input. With **Opacity** around 0.85, the old frame fades while new noise keeps arriving.
+'''
+check = { kind = "wired", from_type = "img.transform", to_type = "img.composite", input = "b" }
+
+[[step]]
+title = "Close the loop"
+text = '''
+Wire Composite's `out` back into Feedback's **loop** socket. This is the one place a wire may point backwards: Feedback reads the previous frame, so there is no endless chase.
+'''
+hint = "If a wire is refused anywhere else, it would make a cycle. Only the loop input of Feedback accepts one."
+check = { kind = "wired", from_type = "img.composite", to_type = "img.feedback", input = "loop" }
+
+[[step]]
+title = "Turn on the beat"
+text = '''
+Select Transform. Next to **Rotate**, open **bind...** and pick a Spectrum band, for example `spectrum1:band2`. Now the kick drum turns the picture.
+
+Keep Transform selected so the Viewer shows it. Tune the band, Spectrum's **Gain** and its **Smoothing** until it feels right.
+'''
+hint = "Bands run from low (band1) to high (band8). Drums sit in the lowest bands."
+check = { kind = "param", type = "img.transform", name = "rotate", op = "bound" }
+
+[[step]]
+title = "Check that the sound is flowing"
+text = '''
+This step ticks when the audio node has cooked without an error. If it shows an error such as a missing file, check the path you typed in step 2.
+'''
+check = { kind = "cooks_without_error", type = "sig.audio_file_in" }

@@ -260,6 +260,7 @@ dependencies = [
  "atd-gpu",
  "atd-interop",
  "atd-io",
+ "atd-kernel",
  "atd-ops-ai",
  "atd-ops-cmp",
  "atd-ops-dat",
@@ -279,6 +280,7 @@ dependencies = [
  "pollster 0.4.0",
  "rfd",
  "serde_json",
+ "toml_edit",
  "wgpu",
 ]
 

@@ -1,0 +1,69 @@
+# Learn quest (docs/learn.md).
+title = "An AI clip on the deck"
+summary = "Put Prompt Clips on a Stage layer, let Diffusion take its prompt from the deck, and try the pipeline with the built-in test model."
+minutes = 20
+prerequisites = ["first-clip-deck"]
+
+[[step]]
+title = "Build a deck"
+text = '''
+AI clips live on the Stage like any other clip. Start with a deck: add a **Mixer** and a **Layer** (both IMG), and wire the Layer's `out` into the Mixer's `layer0`.
+
+If you did the clip deck quest, this is the same thing.
+'''
+check = { kind = "wired", from_type = "img.layer", to_type = "img.mixer", input = "layer0" }
+
+[[step]]
+title = "Add a Prompt Clip"
+text = '''
+Add **Prompt Clip** from the **AI** group and wire its `out` into the Layer's `clip0`. A Prompt Clip is a clip that carries a prompt, a seed and an optional LoRA instead of pixels of its own.
+'''
+check = { kind = "wired", from_type = "ai.prompt", to_type = "img.layer", input = "clip0" }
+
+[[step]]
+title = "Give it a picture to show"
+text = '''
+Add **Noise** (IMG) and wire it into the Prompt Clip's `image` input. The clip passes that picture on, so the AI has something to work from.
+'''
+check = { kind = "wired", from_type = "img.noise", to_type = "ai.prompt", input = "image" }
+
+[[step]]
+title = "Write the prompt"
+text = '''
+Select the Prompt Clip and change **Prompt**, for example to `a neon jellyfish in the deep sea`. Add a second Prompt Clip into `clip1` with a different prompt if you like.
+'''
+check = { kind = "param", type = "ai.prompt", name = "prompt", op = "changed" }
+
+[[step]]
+title = "Add Diffusion after the deck"
+text = '''
+Add **Diffusion** (AI) and wire the Mixer's `out` into its `image` input. Diffusion re-draws each frame with a diffusion model running on an AI Host, and the Output Governor keeps the picture at the project frame rate while results arrive.
+
+**You need SD-Turbo for real results.** Install it in the **Models** window (View, then Models); its licence is shown there. Without it the node cannot run the model, and the status line under the node tells you what is missing. The last step of this quest works without it.
+'''
+check = { kind = "wired", from_type = "img.mixer", to_type = "ai.diffusion", input = "image" }
+
+[[step]]
+title = "Take the prompt from the deck"
+text = '''
+Select Diffusion and type the Mixer's name (for example `mixer1`) into **Prompts From**. Now the Prompt Clips playing on the deck steer it, and the crossfader blends between them.
+'''
+hint = "The name is shown in the Mixer's title bar on the canvas."
+check = { kind = "param", type = "ai.diffusion", name = "prompts_from", op = "changed" }
+
+[[step]]
+title = "Launch the clip"
+text = '''
+Open the **Stage** tab and launch the Prompt Clip. This step ticks when a layer is playing.
+'''
+check = { kind = "stage_layer_playing" }
+
+[[step]]
+title = "No SD-Turbo? Try the built-in test model"
+text = '''
+Atidarla ships a tiny reference model that needs no downloads, so you can test the whole AI pipeline anywhere. Add **AI Model** (AI), wire the Mixer's `out` into its `image` input and select it. Its default model, `builtin.invert`, inverts the picture on an AI Host.
+
+This step ticks when AI Model has cooked without an error. If the node reports a problem with the AI Host, open **View, AI Hosts** to see where AI nodes run.
+'''
+hint = "Sovereign mode (on by default) stops AI nodes from using cloud hosts, so this runs on your own computer."
+check = { kind = "cooks_without_error", type = "ai.model" }
