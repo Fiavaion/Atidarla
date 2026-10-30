@@ -1,10 +1,11 @@
 # Kernel DSL reference
 
-> **Status:** decision A12 ratified 2026-10-30. The compiler lives in `crates/atd-kernel`;
-> the operator **Kernel** (`pnt.kernel`) runs Points kernels in the engine: inline code or a
-> `.atk` file (by convention in the project's `kernels/` folder) that reloads when saved, with
-> the simulation's state kept (see "In the engine" below). Example:
-> `examples/kernel-particles.atidarla`. Pixels kernels compile but have no operator yet.
+> **Status:** decision A12 ratified 2026-10-30. The compiler lives in `crates/atd-kernel`.
+> In the engine (see "In the engine" below): the operators **Kernel** (`pnt.kernel`, Points)
+> and **Kernel** (`img.kernel`, Pixels) run inline code or a `.atk` file that reloads when
+> saved; and every file in a project's `kernels/` folder is an operator of its own,
+> `kernel.<name>`, whose controls are its `ch()` parameters. Examples:
+> `examples/kernel-particles.atidarla`, `examples/kernel-pixels.atidarla`.
 
 A kernel is a short program that runs once per element: once per point (target **Points**)
 or once per pixel (target **Pixels**). It reads and writes the element's attributes with
@@ -240,9 +241,11 @@ output pixel.
 ## Parameters: `ch()`
 
 `ch("name", default, min, max)` reads a parameter and makes the operator show a control
-for it (in `pnt.kernel` today every `ch()` takes its default; controls come with project
-kernel operators). `default`, `min` and `max` are optional and must be constants (literals, `-`,
-constructors and `{}`). Using one name twice is fine if both uses agree.
+for it (on a project kernel operator, see "Project kernel operators" below; the inline
+`pnt.kernel` and `img.kernel` have no controls for them, so there every `ch()` takes its
+default). `default`, `min` and `max` are optional and must be constants (literals, `-`,
+constructors and `{}`). Using one name twice is fine if both uses agree. A `//` comment on
+the line of a parameter's first `ch()` is its control's help text.
 
 | Call | Result | Control |
 |---|---|---|
@@ -251,6 +254,9 @@ constructors and `{}`). Using one name twice is fine if both uses agree.
 | `chu(name, {x, y})` | `vec2` | two fields |
 | `chv(name, {x, y, z})` | `vec3` | three fields |
 | `chp(name, {x, y, z, w})` | `vec4` | four fields |
+
+There is no colour or toggle `ch()` yet: use `chp` for a colour and `chi(name, 0, 0, 1)` for
+a switch.
 
 Parameter values are uniforms, not part of the shader text: changing a value never
 recompiles.
@@ -361,12 +367,14 @@ Integer arithmetic wraps, in constant expressions too: `2147483647 + 1` is `-214
 - Only input 0 for geometry lookups; no `detail()`, `prim()`, `setpointattrib()`,
   `addpoint()` or `removepoint()` (geometry creation is up to operators).
 
-## In the engine: the Kernel operator
+## In the engine: the Kernel operators
 
 `pnt.kernel` (Kernel) takes a GEO input and runs its Points kernel over every point, writing
 in place when the engine hands it the geometry and copying on write otherwise, like the other
 PNT operators. It dispatches from the geometry's GPU header, so the point count never comes
-back to the CPU.
+back to the CPU. `img.kernel` (Kernel) runs a Pixels kernel as one full-screen draw: inputs
+`in0` to `in3` are the images `texture(0..3, uv)` samples (an unconnected one is transparent
+black), `@Cd` starts as `in0` and `@res` is the output size.
 
 - **Code or file.** `code` holds the kernel; when `file` is set, that file is read instead
   (relative to the project folder) and read again whenever it is saved. Offline renders read
@@ -387,4 +395,31 @@ back to the CPU.
   ten-line kernel above and the four-node chain agree bit for bit on DX12 and Vulkan; on
   Metal, whose compiler optimises one shader with fast math, they agree to about 1e-5 after
   120 frames.
-- **Not yet:** image inputs (`texture()`), `ch()` controls, prims and voxels.
+- **Not yet:** image inputs (`texture()`) in Points kernels, prims and voxels.
+
+### Project kernel operators
+
+Every `kernels/<name>.atk` (Points) and `kernels/<name>.pixels.atk` (Pixels) file in a
+project is an operator type `kernel.<name>` (shown under "Project" in the palette), with the
+inputs and output of `pnt.kernel` or `img.kernel`. Its parameters are the file's `ch()`
+declarations, in order of first use: `ch`/`chf` a float slider and `chi` an integer slider
+(with the declared minimum and maximum), `chu`, `chv` and `chp` two, three or four fields;
+the default is the declared one, and the help text is a `//` comment on the line (else the
+file it comes from). A leading comment in the file starts the operator's summary. The file
+name is the operator's name, so it must be lower-case letters, digits and `_`; two files
+with one name (`curl.atk` and `curl.pixels.atk`) are an error on the second.
+
+- **Values.** A node's parameters are the kernel's uniforms: constants, bindings to channels,
+  expressions and live values (MIDI/OSC mappings, the timeline) all work, and changing one
+  never recompiles. The cook writes them into the uniform buffer by slot without allocating.
+- **Opening a project** reads and compiles the files, so the network validates against their
+  operators; an unknown `kernel.<name>` is explained (no such file, or the file's error).
+  `atidarla check` and `render` fail on a file that does not compile.
+- **Saving a file** (the app watches `kernels/`) compiles it on the watcher thread and, when
+  its `ch()` declarations changed, updates the operator: a node keeps the value of every
+  parameter whose name and kind still fit and drops the others (with a note naming them, one
+  undo step). The nodes then compile the new kernel as `pnt.kernel` does, so a simulation
+  keeps its state. A file that no longer compiles keeps its last operator and the last kernel
+  running, with the error on the node; a removed file keeps its operator, whose nodes report
+  the removal.
+- **Offline renders** read every file once, when the render starts.
