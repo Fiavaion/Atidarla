@@ -908,25 +908,31 @@ mod tests {
         let mut rig = Rig::new(&[("send_clock", json!(true)), ("out_device", json!(VIRTUAL))]);
         let mut op = Beat::default();
         // Two cooks only; the pulses must keep coming in between.
+        let started = std::time::Instant::now();
         rig.step(&mut op, 0.0, 0.0);
         rig.step(&mut op, 0.016, 0.016);
         std::thread::sleep(std::time::Duration::from_millis(500));
         let sent = drain_out(&op);
+        // Counted against the time that passed: a shared CI runner
+        // oversleeps; two cooks' worth of bursts would give 2 or 48.
+        let expected = started.elapsed().as_secs_f64() * 48.0;
         assert_eq!(sent[0], [0xFA], "Start at beat 0");
         let pulses = count(&sent, 0xF8);
         assert!(
-            (22..=26).contains(&pulses),
-            "{pulses} pulses in 0.5 s at 120 BPM"
+            (pulses as f64 - expected).abs() <= 3.0,
+            "{pulses} pulses at 120 BPM (expected {expected:.1})"
         );
 
         // A tempo change reaches the thread without another cook per pulse.
         rig.set("bpm", json!(240.0));
+        let changed = std::time::Instant::now();
         rig.step(&mut op, 0.5, 0.016);
         std::thread::sleep(std::time::Duration::from_millis(250));
         let pulses = count(&drain_out(&op), 0xF8);
+        let expected = changed.elapsed().as_secs_f64() * 96.0;
         assert!(
-            (20..=28).contains(&pulses),
-            "{pulses} pulses in 0.25 s at 240 BPM"
+            (pulses as f64 - expected).abs() <= 5.0,
+            "{pulses} pulses at 240 BPM (expected {expected:.1})"
         );
 
         // Resync is a new Start; reset stops the transport, and the pulses.
