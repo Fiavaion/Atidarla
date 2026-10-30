@@ -442,7 +442,7 @@ pub fn classify(type_id: &str) -> Option<Class> {
         "img.blend" | "img.bloom" | "img.blur" | "img.channel_image" | "img.channel_mix"
         | "img.chroma_key" | "img.composite" | "img.constant" | "img.crop" | "img.displace"
         | "img.edge" | "img.hsv_adjust" | "img.kaleidoscope" | "img.level" | "img.lookup"
-        | "img.luma_key" | "img.mirror" | "img.noise" | "img.normal_map" | "img.projection"
+        | "img.luma_key" | "img.mirror" | "img.mixer" | "img.noise" | "img.normal_map" | "img.projection"
         | "img.ramp" | "img.remap" | "img.resolution" | "img.shape" | "img.slope"
         | "img.switch" | "img.threshold" | "img.tile" | "img.transform" => Pure,
         "sig.constant" | "sig.lfo" | "sig.limit" | "sig.math" | "sig.merge" | "sig.noise"
@@ -450,6 +450,8 @@ pub fn classify(type_id: &str) -> Option<Class> {
         "img.cache"
         | "img.feedback"
         | "img.fluid"
+        // The clip playing, a transition, a launch waiting for its quantum.
+        | "img.layer"
         // Also waits for its pipelines and weights file.
         | "img.nca"
         | "img.reaction_diffusion"

@@ -51,7 +51,9 @@ fn vec2(p: &Params<'_>, name: &str) -> [f32; 2] {
 }
 
 const RAMP_TYPES: &[&str] = &["horizontal", "vertical", "radial", "angular"];
-const COMPOSITE_OPS: &[&str] = &[
+/// Blend operations (Composite, Layer, Mixer); `COMPOSITE_WGSL` implements
+/// them in this order.
+pub(crate) const COMPOSITE_OPS: &[&str] = &[
     "over",
     "add",
     "multiply",
@@ -62,6 +64,24 @@ const COMPOSITE_OPS: &[&str] = &[
     "minimum",
     "average",
 ];
+/// `composite(a, b, k)`: A on top of B with operation `k`, an index into
+/// [`COMPOSITE_OPS`]. Shared by Composite, Layer and Mixer.
+pub(crate) const COMPOSITE_WGSL: &str = r#"
+fn composite(a: vec4f, b: vec4f, k: i32) -> vec4f {
+    let al = max(a.a, b.a);
+    switch k {
+        case 0: { return vec4f(a.rgb * a.a + b.rgb * (1.0 - a.a), a.a + b.a * (1.0 - a.a)); }
+        case 1: { return vec4f(a.rgb + b.rgb, al); }
+        case 2: { return a * b; }
+        case 3: { return vec4f(vec3f(1.0) - (vec3f(1.0) - a.rgb) * (vec3f(1.0) - b.rgb), al); }
+        case 4: { return vec4f(a.rgb - b.rgb, al); }
+        case 5: { return vec4f(abs(a.rgb - b.rgb), al); }
+        case 6: { return max(a, b); }
+        case 7: { return min(a, b); }
+        default: { return (a + b) * 0.5; }
+    }
+}
+"#;
 const CHANNELS: &[&str] = &["luminance", "red", "green", "blue", "alpha"];
 const MIRROR_AXES: &[&str] = &["left_to_right", "top_to_bottom", "both"];
 const EXTEND: &[&str] = &["zero", "hold", "repeat", "mirror"];
@@ -337,25 +357,11 @@ pub static DEFS: &[Def] = &[
                 120,
             )
         },
-        helpers: "",
+        helpers: COMPOSITE_WGSL,
         body: r#"
     let a = textureSample(in0, samp, uv);
     let b = textureSample(in1, samp, uv);
-    let k = i32(params.v[0].x);
-    let al = max(a.a, b.a);
-    var r = vec4f(0.0);
-    switch k {
-        case 0: { r = vec4f(a.rgb * a.a + b.rgb * (1.0 - a.a), a.a + b.a * (1.0 - a.a)); }
-        case 1: { r = vec4f(a.rgb + b.rgb, al); }
-        case 2: { r = a * b; }
-        case 3: { r = vec4f(vec3f(1.0) - (vec3f(1.0) - a.rgb) * (vec3f(1.0) - b.rgb), al); }
-        case 4: { r = vec4f(a.rgb - b.rgb, al); }
-        case 5: { r = vec4f(abs(a.rgb - b.rgb), al); }
-        case 6: { r = max(a, b); }
-        case 7: { r = min(a, b); }
-        default: { r = (a + b) * 0.5; }
-    }
-    return mix(b, r, params.v[0].y);"#,
+    return mix(b, composite(a, b, i32(params.v[0].x)), params.v[0].y);"#,
         pack: |c| {
             let p = &c.params;
             *Packed::default().push([
