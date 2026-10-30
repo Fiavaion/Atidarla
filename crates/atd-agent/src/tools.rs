@@ -1,0 +1,789 @@
+//! The agent's typed tools (FR-G1) and the session that runs them.
+//!
+//! Every tool has a JSON Schema for its arguments and returns JSON. Graph
+//! changes are not applied as they are made: they are staged on a preview
+//! copy of the network (FR-G2), reviewed with `review_changes`, and applied
+//! by `accept_changes` as one undo step — by a person in the app, or by the
+//! agent itself only when the session has the `accept` scope (headless
+//! `serve --auto-accept`). Under Show Lock (FR-G3) graph edits are refused
+//! and only whitelisted parameters move, within their ranges, at once.
+//! There is no arbitrary code execution: `python_exec` exists only when
+//! the session has the `python.exec` scope (CLAUDE.md rule 9).
+
+use std::collections::BTreeSet;
+use std::fmt::Write as _;
+
+use atd_core::graph::{Edit, Endpoint, Network, Node, NodeId, Param, Wire};
+use atd_core::registry::{OpFamily, OperatorSchema};
+use serde_json::{Map, Value, json};
+
+use crate::lock::{Refusal, Scope, ShowLock};
+use crate::workspace::Workspace;
+
+/// A tool as offered to a model: name, description, argument schema.
+#[derive(Debug, Clone)]
+pub struct ToolSpec {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub schema: Value,
+    /// Scope needed to see and call it (`None`: always).
+    pub scope: Option<Scope>,
+}
+
+/// A tool's answer: JSON, an image, or an error message for the model.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Output {
+    Json(Value),
+    Png(Vec<u8>, String),
+    Error(String),
+}
+
+fn obj(props: Value, required: &[&str]) -> Value {
+    json!({"type": "object", "properties": props, "required": required, "additionalProperties": false})
+}
+
+/// Every tool there is.
+pub fn specs() -> Vec<ToolSpec> {
+    let node = json!({"type": "string", "description": "A node's name (or its id, e.g. `n12`)."});
+    vec![
+        ToolSpec {
+            name: "list_ops",
+            description: "Lists the operator types (type id, label, one-line summary), optionally of one family: img (images), sig (channels: audio, control, MIDI), pnt (points), msh (meshes), mat (materials), cmp (scene, Packs), dat, ai.",
+            schema: obj(
+                json!({"family": {"type": "string", "enum": ["img", "sig", "pnt", "msh", "mat", "cmp", "dat", "ai"]}}),
+                &[],
+            ),
+            scope: None,
+        },
+        ToolSpec {
+            name: "get_schema",
+            description: "The full schema of an operator type: parameters (kind, default, range, menu options, help), inputs and outputs with their wire types (IMG, SIG, GEO, MAT, CMP, DAT), capability flags. Read it before creating or wiring a node of that type.",
+            schema: obj(json!({"type": {"type": "string"}}), &["type"]),
+            scope: None,
+        },
+        ToolSpec {
+            name: "get_network",
+            description: "The current network as the agent sees it (including staged, not yet accepted changes): each node's name, id, type, parameters that differ from their defaults (with expressions and channel bindings), and what is wired into each input; plus node errors from the last cook.",
+            schema: obj(json!({}), &[]),
+            scope: None,
+        },
+        ToolSpec {
+            name: "create_node",
+            description: "Stages a new node. Returns its name and id. Parameters not given keep their defaults. Wire it with `connect`.",
+            schema: obj(
+                json!({
+                    "type": {"type": "string", "description": "Operator type id, e.g. `img.noise`."},
+                    "name": {"type": "string", "description": "Optional name; a unique one is made from the type if omitted."},
+                    "params": {"type": "object", "description": "Parameter values by name."},
+                    "position": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}
+                }),
+                &["type"],
+            ),
+            scope: Some(Scope::Edit),
+        },
+        ToolSpec {
+            name: "delete_node",
+            description: "Stages removing a node and its wires.",
+            schema: obj(json!({"node": node.clone()}), &["node"]),
+            scope: Some(Scope::Edit),
+        },
+        ToolSpec {
+            name: "connect",
+            description: "Stages a wire from an output of one node to an input of another (replacing what was wired there). Wire types must match (IMG to IMG, SIG to SIG, GEO to GEO …).",
+            schema: obj(
+                json!({
+                    "from": node.clone(), "output": {"type": "string", "default": "out"},
+                    "to": node.clone(), "input": {"type": "string"}
+                }),
+                &["from", "to", "input"],
+            ),
+            scope: Some(Scope::Edit),
+        },
+        ToolSpec {
+            name: "disconnect",
+            description: "Stages removing the wire into an input.",
+            schema: obj(
+                json!({"to": node.clone(), "input": {"type": "string"}}),
+                &["to", "input"],
+            ),
+            scope: Some(Scope::Edit),
+        },
+        ToolSpec {
+            name: "set_param",
+            description: "Sets a parameter: a value, an expression (e.g. `0.5 + 0.5 * sin(time)`, or `op('lfo1')['lfo']`), or a binding to a SIG node's channel. Without Show Lock this is staged; under Show Lock only whitelisted parameters within their ranges move, at once.",
+            schema: obj(
+                json!({
+                    "node": node.clone(), "param": {"type": "string"},
+                    "value": {"description": "The value (number, bool, string, or an array for vectors and colours)."},
+                    "expression": {"type": "string"},
+                    "bind": {"type": "object", "properties": {"node": {"type": "string"}, "channel": {"type": "string"}}, "required": ["node", "channel"]}
+                }),
+                &["node", "param"],
+            ),
+            scope: None,
+        },
+        ToolSpec {
+            name: "review_changes",
+            description: "The staged changes as a list (nodes added/removed, wires, parameter changes old → new). Nothing is applied until accepted.",
+            schema: obj(json!({}), &[]),
+            scope: None,
+        },
+        ToolSpec {
+            name: "accept_changes",
+            description: "Applies every staged change as one undo step and cooks the network; returns node errors so you can fix them. Only available when this session may accept on its own; otherwise a person accepts in the app.",
+            schema: obj(
+                json!({"label": {"type": "string", "description": "What the changes do, for the undo history."}}),
+                &[],
+            ),
+            scope: Some(Scope::Accept),
+        },
+        ToolSpec {
+            name: "discard_changes",
+            description: "Drops every staged change.",
+            schema: obj(json!({}), &[]),
+            scope: None,
+        },
+        ToolSpec {
+            name: "get_errors",
+            description: "Cooks the network once and lists node errors (empty when everything cooks).",
+            schema: obj(json!({}), &[]),
+            scope: None,
+        },
+        ToolSpec {
+            name: "screenshot_viewer",
+            description: "A PNG of a node's image output, to see what the patch looks like.",
+            schema: obj(
+                json!({"node": node.clone(), "max_size": {"type": "integer", "minimum": 64, "maximum": 2048, "default": 512}}),
+                &["node"],
+            ),
+            scope: None,
+        },
+        ToolSpec {
+            name: "run_bench",
+            description: "Cooks the network for a number of frames and reports each node's mean cook time in milliseconds against its budget.",
+            schema: obj(
+                json!({"frames": {"type": "integer", "minimum": 1, "maximum": 600, "default": 60}}),
+                &[],
+            ),
+            scope: None,
+        },
+        ToolSpec {
+            name: "write_kernel",
+            description: "Writes a Kernel DSL file into the project's `kernels/` folder (`<name>.atk` for points, `<name>.pixels.atk` for pixels); it becomes operator `kernel.<name>`. Returns compile errors, if any. See the Kernel DSL reference.",
+            schema: obj(
+                json!({
+                    "name": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+                    "target": {"type": "string", "enum": ["points", "pixels"]},
+                    "source": {"type": "string"}
+                }),
+                &["name", "target", "source"],
+            ),
+            scope: Some(Scope::Files),
+        },
+        ToolSpec {
+            name: "stage_list",
+            description: "The Stage decks: layers, their clips by slot, what each layer plays, the crossfader.",
+            schema: obj(json!({}), &[]),
+            scope: None,
+        },
+        ToolSpec {
+            name: "stage_launch",
+            description: "Launches the clip in a slot of a Stage layer (or stops the layer with slot -1); the layer's transition and quantise settings apply.",
+            schema: obj(
+                json!({"layer": node.clone(), "slot": {"type": "integer", "minimum": -1, "maximum": 15}}),
+                &["layer", "slot"],
+            ),
+            scope: Some(Scope::Stage),
+        },
+        ToolSpec {
+            name: "stage_crossfader",
+            description: "Moves a deck's crossfader (0 = side A, 1 = side B).",
+            schema: obj(
+                json!({"mixer": node, "value": {"type": "number", "minimum": 0, "maximum": 1}}),
+                &["mixer", "value"],
+            ),
+            scope: Some(Scope::Stage),
+        },
+        ToolSpec {
+            name: "python_exec",
+            description: "Runs Python in the project's interpreter and returns what it printed. Only in sessions the user granted `python.exec`.",
+            schema: obj(json!({"code": {"type": "string"}}), &["code"]),
+            scope: Some(Scope::PythonExec),
+        },
+    ]
+}
+
+/// One agent session over a workspace.
+#[derive(Debug, Clone)]
+pub struct Agent {
+    pub scopes: BTreeSet<Scope>,
+    pub lock: ShowLock,
+    /// The network with the staged changes applied, while any are staged.
+    preview: Option<Network>,
+    staged: Vec<Edit>,
+    /// What each staged edit is, for review.
+    notes: Vec<String>,
+}
+
+impl Agent {
+    pub fn new(scopes: BTreeSet<Scope>, lock: ShowLock) -> Self {
+        Self {
+            scopes,
+            lock,
+            preview: None,
+            staged: Vec::new(),
+            notes: Vec::new(),
+        }
+    }
+
+    /// The tools this session may call.
+    pub fn tools(&self) -> Vec<ToolSpec> {
+        specs()
+            .into_iter()
+            .filter(|t| t.scope.as_ref().is_none_or(|s| self.scopes.contains(s)))
+            .collect()
+    }
+
+    pub fn staged(&self) -> &[Edit] {
+        &self.staged
+    }
+
+    /// The staged changes, taken (for a person accepting them in the app).
+    pub fn take_staged(&mut self) -> (Vec<Edit>, Vec<String>) {
+        self.preview = None;
+        (
+            std::mem::take(&mut self.staged),
+            std::mem::take(&mut self.notes),
+        )
+    }
+
+    fn view<'a>(&'a self, ws: &'a dyn Workspace) -> &'a Network {
+        self.preview.as_ref().unwrap_or_else(|| ws.network())
+    }
+
+    /// Runs a tool. Errors are answers for the model, not failures.
+    pub fn call(&mut self, ws: &mut dyn Workspace, name: &str, args: &Value) -> Output {
+        let Some(spec) = specs().into_iter().find(|t| t.name == name) else {
+            return Output::Error(format!("unknown tool `{name}`"));
+        };
+        if let Some(scope) = &spec.scope
+            && !self.scopes.contains(scope)
+        {
+            return Output::Error(Refusal::Scope(scope.name()).to_string());
+        }
+        let empty = Map::new();
+        let a = args.as_object().unwrap_or(&empty);
+        match self.run(ws, name, a) {
+            Ok(o) => o,
+            Err(e) => Output::Error(e),
+        }
+    }
+
+    fn run(
+        &mut self,
+        ws: &mut dyn Workspace,
+        name: &str,
+        a: &Map<String, Value>,
+    ) -> Result<Output, String> {
+        let s = |k: &str| a.get(k).and_then(Value::as_str);
+        let need = |k: &str| s(k).ok_or_else(|| format!("missing argument `{k}`"));
+        match name {
+            "list_ops" => {
+                let family = s("family");
+                let ops: Vec<Value> = ws
+                    .registry()
+                    .iter()
+                    .filter(|o| family.is_none_or(|f| family_name(o.family) == f))
+                    .map(|o| json!({"type": o.type_id, "label": o.label, "summary": o.summary}))
+                    .collect();
+                Ok(Output::Json(json!(ops)))
+            }
+            "get_schema" => {
+                let t = need("type")?;
+                let op = ws
+                    .registry()
+                    .get(t)
+                    .ok_or_else(|| format!("no operator type `{t}`; see list_ops"))?;
+                Ok(Output::Json(schema_json(op)))
+            }
+            "get_network" => {
+                let errors = ws.cook_errors();
+                Ok(Output::Json(network_json(self.view(ws), ws, &errors)))
+            }
+            "create_node" => {
+                self.lock.check_graph_edit().map_err(|e| e.to_string())?;
+                let t = need("type")?;
+                let op = ws
+                    .registry()
+                    .get(t)
+                    .ok_or_else(|| format!("no operator type `{t}`; see list_ops"))?
+                    .clone();
+                let mut net = self.view(ws).clone();
+                let id = net.alloc_id();
+                let base = op.type_id.split('.').nth(1).unwrap_or("node").to_owned();
+                let name = match s("name") {
+                    Some(n) if net.node_by_name(n).is_some() => {
+                        return Err(format!("a node named `{n}` exists; pick another name"));
+                    }
+                    Some(n) => n.to_owned(),
+                    None => net.unique_name(&base),
+                };
+                let mut node = Node::new(id, op.type_id.clone(), name.clone());
+                if let Some(p) = a.get("position").and_then(Value::as_array)
+                    && let (Some(x), Some(y)) = (
+                        p.first().and_then(Value::as_f64),
+                        p.get(1).and_then(Value::as_f64),
+                    )
+                {
+                    node.pos = [x as f32, y as f32];
+                } else {
+                    node.pos = [
+                        220.0 * (net.len() % 6) as f32,
+                        160.0 * (net.len() / 6) as f32,
+                    ];
+                }
+                let mut edits = vec![Edit::AddNode { node }];
+                if let Some(params) = a.get("params").and_then(Value::as_object) {
+                    for (p, v) in params {
+                        if !op.params.iter().any(|s| &s.name == p) {
+                            return Err(format!(
+                                "`{t}` has no parameter `{p}`; it has: {}",
+                                op.params
+                                    .iter()
+                                    .map(|s| s.name.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ));
+                        }
+                        edits.push(Edit::SetParam {
+                            node: id,
+                            param: p.clone(),
+                            value: Some(Param::constant(v.clone())),
+                        });
+                    }
+                }
+                self.stage(ws, net, edits, format!("add {name} ({t})"))?;
+                Ok(Output::Json(
+                    json!({"name": name, "id": id.to_string(), "staged": true}),
+                ))
+            }
+            "delete_node" => {
+                self.lock.check_graph_edit().map_err(|e| e.to_string())?;
+                let net = self.view(ws).clone();
+                let id = find(&net, need("node")?)?;
+                let name = net.node(id).map(|n| n.name.clone()).unwrap_or_default();
+                self.stage(
+                    ws,
+                    net,
+                    vec![Edit::RemoveNode { id }],
+                    format!("remove {name}"),
+                )?;
+                Ok(Output::Json(json!({"removed": name, "staged": true})))
+            }
+            "connect" => {
+                self.lock.check_graph_edit().map_err(|e| e.to_string())?;
+                let net = self.view(ws).clone();
+                let from = find(&net, need("from")?)?;
+                let to = find(&net, need("to")?)?;
+                let output = s("output").unwrap_or("out");
+                let input = need("input")?;
+                let wire = Wire::new(Endpoint::new(from, output), Endpoint::new(to, input));
+                let note = format!(
+                    "wire {}.{output} → {}.{input}",
+                    net.node(from).map_or("?", |n| n.name.as_str()),
+                    net.node(to).map_or("?", |n| n.name.as_str())
+                );
+                self.stage(ws, net, vec![Edit::Connect { wire }], note)?;
+                Ok(Output::Json(json!({"connected": true, "staged": true})))
+            }
+            "disconnect" => {
+                self.lock.check_graph_edit().map_err(|e| e.to_string())?;
+                let net = self.view(ws).clone();
+                let to = find(&net, need("to")?)?;
+                let input = need("input")?;
+                let (_, src) = net
+                    .inputs_of(to)
+                    .find(|(n, _)| *n == input)
+                    .ok_or_else(|| format!("nothing is wired into `{input}`"))?;
+                let wire = Wire::new(src.clone(), Endpoint::new(to, input));
+                self.stage(
+                    ws,
+                    net,
+                    vec![Edit::Disconnect { wire }],
+                    format!("unwire {input}"),
+                )?;
+                Ok(Output::Json(json!({"disconnected": true, "staged": true})))
+            }
+            "set_param" => self.set_param(ws, a),
+            "review_changes" => Ok(Output::Json(json!({
+                "staged": self.notes,
+                "count": self.staged.len(),
+            }))),
+            "accept_changes" => {
+                let label = s("label").unwrap_or("Agent changes").to_owned();
+                let errors = self.accept(ws, &label)?;
+                Ok(Output::Json(
+                    json!({"applied": true, "errors": errors_json(ws, &errors)}),
+                ))
+            }
+            "discard_changes" => {
+                let n = self.staged.len();
+                self.take_staged();
+                Ok(Output::Json(json!({"discarded": n})))
+            }
+            "get_errors" => {
+                let errors = ws.cook_errors();
+                Ok(Output::Json(errors_json(ws, &errors)))
+            }
+            "screenshot_viewer" => {
+                let id = find(ws.network(), need("node")?)?;
+                let max = a
+                    .get("max_size")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(512)
+                    .clamp(64, 2048) as u32;
+                let png = ws.screenshot(id, max)?;
+                Ok(Output::Png(png, format!("image of {}", need("node")?)))
+            }
+            "run_bench" => {
+                let frames = a
+                    .get("frames")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(60)
+                    .clamp(1, 600) as u32;
+                let times = ws.bench(frames)?;
+                let net = ws.network();
+                let rows: Vec<Value> = times
+                    .iter()
+                    .filter_map(|(id, ms)| {
+                        let n = net.node(*id)?;
+                        let budget = ws.registry().get(&n.type_id).map(|o| f64::from(o.cook_budget_us) / 1e3);
+                        Some(json!({"node": n.name, "type": n.type_id, "mean_ms": ms, "budget_ms": budget}))
+                    })
+                    .collect();
+                Ok(Output::Json(json!({"frames": frames, "nodes": rows})))
+            }
+            "write_kernel" => {
+                self.lock.check_graph_edit().map_err(|e| e.to_string())?;
+                let kname = need("name")?;
+                if !kname
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+                    || !kname.starts_with(|c: char| c.is_ascii_lowercase())
+                {
+                    return Err("a kernel name is lower-case letters, digits and `_`".into());
+                }
+                let pixels = need("target")? == "pixels";
+                let source = need("source")?;
+                let target = if pixels {
+                    atd_kernel::Target::Pixels
+                } else {
+                    atd_kernel::Target::Points
+                };
+                if let Err(errs) =
+                    atd_kernel::compile(source, &atd_kernel::CompileOptions::new(target))
+                {
+                    let list: Vec<String> = errs.iter().map(ToString::to_string).collect();
+                    return Ok(Output::Json(json!({"written": false, "errors": list})));
+                }
+                let dir = ws
+                    .project_dir()
+                    .ok_or("there is no project folder to write kernels into")?
+                    .join("kernels");
+                std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+                let file = dir.join(if pixels {
+                    format!("{kname}.pixels.atk")
+                } else {
+                    format!("{kname}.atk")
+                });
+                std::fs::write(&file, source).map_err(|e| e.to_string())?;
+                ws.files_changed()?;
+                Ok(Output::Json(
+                    json!({"written": true, "operator": format!("kernel.{kname}")}),
+                ))
+            }
+            "stage_list" => Ok(Output::Json(stage_json(ws))),
+            "stage_launch" => {
+                self.lock.check_stage().map_err(|e| e.to_string())?;
+                let layer = find(ws.network(), need("layer")?)?;
+                let slot = a
+                    .get("slot")
+                    .and_then(Value::as_i64)
+                    .ok_or("missing argument `slot`")?;
+                let target = usize::try_from(slot).ok();
+                ws.apply("Agent: launch", vec![atd_stage::set_target(layer, target)])?;
+                Ok(Output::Json(json!({"launched": slot})))
+            }
+            "stage_crossfader" => {
+                self.lock.check_stage().map_err(|e| e.to_string())?;
+                let mixer = find(ws.network(), need("mixer")?)?;
+                let v = a
+                    .get("value")
+                    .and_then(Value::as_f64)
+                    .ok_or("missing argument `value`")?;
+                ws.apply(
+                    "Agent: crossfader",
+                    vec![Edit::SetParam {
+                        node: mixer,
+                        param: "crossfader".into(),
+                        value: Some(Param::constant(json!(v.clamp(0.0, 1.0)))),
+                    }],
+                )?;
+                Ok(Output::Json(json!({"crossfader": v.clamp(0.0, 1.0)})))
+            }
+            "python_exec" => {
+                let out = ws.python_exec(need("code")?)?;
+                Ok(Output::Json(json!({"output": out})))
+            }
+            other => Err(format!("unknown tool `{other}`")),
+        }
+    }
+
+    fn set_param(
+        &mut self,
+        ws: &mut dyn Workspace,
+        a: &Map<String, Value>,
+    ) -> Result<Output, String> {
+        let net = self.view(ws).clone();
+        let node_ref = a
+            .get("node")
+            .and_then(Value::as_str)
+            .ok_or("missing argument `node`")?;
+        let id = find(&net, node_ref)?;
+        let node = net.node(id).expect("found");
+        let param = a
+            .get("param")
+            .and_then(Value::as_str)
+            .ok_or("missing argument `param`")?;
+        let op = ws
+            .registry()
+            .get(&node.type_id)
+            .ok_or("unknown operator type")?;
+        let schema = op.params.iter().find(|p| p.name == param).ok_or_else(|| {
+            format!(
+                "`{}` has no parameter `{param}`; it has: {}",
+                node.type_id,
+                op.params
+                    .iter()
+                    .map(|s| s.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        })?;
+        let current = node.params.get(param).cloned();
+        let mut p = current.unwrap_or_else(|| Param::constant(schema.default.clone()));
+        if let Some(v) = a.get("value") {
+            p.value = v.clone();
+        }
+        if let Some(e) = a.get("expression").and_then(Value::as_str) {
+            p.expr = (!e.trim().is_empty()).then(|| e.to_owned());
+        }
+        if let Some(b) = a.get("bind").and_then(Value::as_object) {
+            let src = find(
+                &net,
+                b.get("node")
+                    .and_then(Value::as_str)
+                    .ok_or("bind needs `node`")?,
+            )?;
+            let ch = b
+                .get("channel")
+                .and_then(Value::as_str)
+                .ok_or("bind needs `channel`")?;
+            p = Param::bound(p.value.clone(), src, ch);
+        }
+        let edit = Edit::SetParam {
+            node: id,
+            param: param.to_owned(),
+            value: Some(p.clone()),
+        };
+        let note = format!("{}.{param} = {}", node.name, describe(&p));
+        if self.lock.engaged {
+            // Show time: only whitelisted moves, in range, applied at once.
+            if p.expr.is_some() || p.bind.is_some() {
+                return Err(Refusal::GraphEdit.to_string());
+            }
+            let pack = node.type_id.strip_prefix(atd_core::pack::TYPE_PREFIX);
+            self.lock
+                .check_param(&node.name, pack, param, p.value.as_f64())
+                .map_err(|e| e.to_string())?;
+            ws.apply(&format!("Agent: {note}"), vec![edit])?;
+            return Ok(Output::Json(json!({"applied": true})));
+        }
+        if !self.scopes.contains(&Scope::Edit) {
+            return Err(Refusal::Scope("edit").to_string());
+        }
+        self.stage(ws, net, vec![edit], note)?;
+        Ok(Output::Json(json!({"staged": true})))
+    }
+
+    /// Applies `edits` to the preview (checking them against the registry)
+    /// and records them.
+    fn stage(
+        &mut self,
+        ws: &dyn Workspace,
+        mut net: Network,
+        edits: Vec<Edit>,
+        note: String,
+    ) -> Result<(), String> {
+        for e in &edits {
+            net.apply(ws.registry(), e.clone())
+                .map_err(|e| e.to_string())?;
+        }
+        self.preview = Some(net);
+        self.staged.extend(edits);
+        self.notes.push(note);
+        Ok(())
+    }
+
+    /// Applies the staged changes as one undo step and cooks.
+    pub fn accept(
+        &mut self,
+        ws: &mut dyn Workspace,
+        label: &str,
+    ) -> Result<Vec<(NodeId, String)>, String> {
+        self.lock.check_graph_edit().map_err(|e| e.to_string())?;
+        if self.staged.is_empty() {
+            return Ok(ws.cook_errors());
+        }
+        let (edits, _) = self.take_staged();
+        ws.apply(label, edits)?;
+        Ok(ws.cook_errors())
+    }
+}
+
+/// Finds a node by name, or by id written `n12` / `12`.
+fn find(net: &Network, r: &str) -> Result<NodeId, String> {
+    if let Some(n) = net.node_by_name(r) {
+        return Ok(n.id);
+    }
+    let digits = r.strip_prefix('n').unwrap_or(r);
+    if let Ok(i) = digits.parse::<u64>()
+        && net.node(NodeId(i)).is_some()
+    {
+        return Ok(NodeId(i));
+    }
+    Err(format!("no node named `{r}`; see get_network"))
+}
+
+fn family_name(f: OpFamily) -> &'static str {
+    f.prefix()
+}
+
+fn describe(p: &Param) -> String {
+    match (&p.expr, &p.bind) {
+        (Some(e), _) => format!("`{e}`"),
+        (_, Some(b)) => format!("bound to {}['{}']", b.node, b.channel),
+        _ => p.value.to_string(),
+    }
+}
+
+/// An operator's schema for a model.
+pub fn schema_json(op: &OperatorSchema) -> Value {
+    let params: Vec<Value> = op
+        .params
+        .iter()
+        .map(|p| {
+            let mut v = serde_json::to_value(p).unwrap_or(Value::Null);
+            if let Some(o) = v.as_object_mut() {
+                o.retain(|k, _| {
+                    matches!(
+                        k.as_str(),
+                        "name" | "kind" | "default" | "help" | "multiline"
+                    )
+                });
+            }
+            v
+        })
+        .collect();
+    let sockets = |s: &[atd_core::registry::SocketSchema]| -> Vec<Value> {
+        s.iter()
+            .map(|s| json!({"name": s.name, "wire": format!("{:?}", s.wire).to_uppercase(), "optional": s.optional}))
+            .collect()
+    };
+    json!({
+        "type": op.type_id,
+        "label": op.label,
+        "summary": op.summary,
+        "params": params,
+        "inputs": sockets(&op.inputs),
+        "outputs": sockets(&op.outputs),
+        "capabilities": op.capabilities.iter().map(|c| c.flag.to_string()).collect::<Vec<_>>(),
+        "cook_budget_us": op.cook_budget_us,
+    })
+}
+
+fn network_json(net: &Network, ws: &dyn Workspace, errors: &[(NodeId, String)]) -> Value {
+    let nodes: Vec<Value> = net
+        .nodes()
+        .map(|n| {
+            let params: Map<String, Value> = n
+                .params
+                .iter()
+                .map(|(k, p)| (k.clone(), json!(describe(p))))
+                .collect();
+            let inputs: Map<String, Value> = net
+                .inputs_of(n.id)
+                .map(|(i, src)| {
+                    let from = net.node(src.node).map_or("?".to_owned(), |s| s.name.clone());
+                    (i.to_owned(), json!(format!("{from}.{}", src.socket)))
+                })
+                .collect();
+            let mut v = json!({"name": n.name, "id": n.id.to_string(), "type": n.type_id, "params": params, "inputs": inputs});
+            if let Some((_, e)) = errors.iter().find(|(id, _)| *id == n.id) {
+                v["error"] = json!(e);
+            }
+            if let Some(s) = ws.status(n.id) {
+                v["status"] = json!(s);
+            }
+            v
+        })
+        .collect();
+    json!({"nodes": nodes})
+}
+
+fn errors_json(ws: &dyn Workspace, errors: &[(NodeId, String)]) -> Value {
+    let net = ws.network();
+    json!(
+        errors
+            .iter()
+            .map(|(id, e)| json!({"node": net.node(*id).map_or(id.to_string(), |n| n.name.clone()), "error": e}))
+            .collect::<Vec<_>>()
+    )
+}
+
+fn stage_json(ws: &dyn Workspace) -> Value {
+    let stage = atd_stage::Stage::read(ws.network(), ws.registry());
+    let decks: Vec<Value> = stage
+        .decks
+        .iter()
+        .map(|d| {
+            let layers: Vec<Value> = d
+                .layers
+                .iter()
+                .map(|l| {
+                    let clips: Vec<Value> = l
+                        .clips
+                        .iter()
+                        .map(|c| json!({"slot": c.slot, "clip": c.label}))
+                        .collect();
+                    json!({"layer": l.name, "playing": l.target, "clips": clips})
+                })
+                .collect();
+            json!({"mixer": d.name, "crossfader": d.crossfader, "layers": layers})
+        })
+        .collect();
+    json!({"decks": decks})
+}
+
+/// A short text form of a tool's output (for logs and plain transports).
+pub fn output_text(o: &Output) -> String {
+    match o {
+        Output::Json(v) => serde_json::to_string_pretty(v).unwrap_or_default(),
+        Output::Png(p, what) => {
+            let mut s = String::new();
+            let _ = write!(s, "[{what}: PNG, {} bytes]", p.len());
+            s
+        }
+        Output::Error(e) => format!("error: {e}"),
+    }
+}
