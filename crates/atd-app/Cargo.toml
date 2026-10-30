@@ -27,12 +27,14 @@ atd-ops-dat.workspace = true
 atd-ops-cmp.workspace = true
 atd-ops-ai.workspace = true
 atd-stage.workspace = true
+atd-kernel.workspace = true
 egui.workspace = true
 eframe = { workspace = true, features = ["wgpu", "default_fonts", "x11", "wayland"] }
 wgpu.workspace = true
 env_logger.workspace = true
 log.workspace = true
 serde_json.workspace = true
+toml_edit.workspace = true
 png.workspace = true
 atd-format.workspace = true
 atd-ai.workspace = true

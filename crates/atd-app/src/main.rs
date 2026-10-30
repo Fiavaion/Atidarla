@@ -6,6 +6,7 @@ mod app;
 mod canvas;
 mod channels;
 mod dock;
+mod learn;
 mod mappings;
 mod models_panel;
 mod outputs;

@@ -45,6 +45,8 @@ pub enum Tab {
     Platform,
     /// The Python console (docs/textport.md); closed by default.
     Textport,
+    /// Interactive quests (docs/learn.md); closed by default.
+    Learn,
 }
 
 pub struct AtidarlaApp {
@@ -92,6 +94,8 @@ struct Panels {
     models: crate::models_panel::ModelsPanel,
     /// Sovereign mode, spend cap and AI Hosts (FR-A2, FR-A7, FR-A8).
     ai_hosts: crate::ai_hosts::AiHostsPanel,
+    /// Learn mode: quests that check themselves against the project.
+    learn: crate::learn::LearnPanel,
 }
 
 impl AtidarlaApp {
@@ -208,6 +212,7 @@ impl AtidarlaApp {
                 outputs: Default::default(),
                 models: Default::default(),
                 ai_hosts: Default::default(),
+                learn: Default::default(),
             },
             smoke: smoke.map(Smoke::new),
             start: Instant::now(),
@@ -364,6 +369,13 @@ impl eframe::App for AtidarlaApp {
                         self.panels.ai_hosts.open = true;
                     }
                     if ui
+                        .button(tab_title(Tab::Learn))
+                        .on_hover_text("Quests that teach Atidarla and check your progress")
+                        .clicked()
+                    {
+                        self.dock.open(Area::Right, Tab::Learn);
+                    }
+                    if ui
                         .button(tab_title(Tab::Textport))
                         .on_hover_text("Python console over the open project")
                         .clicked()
@@ -430,6 +442,7 @@ impl eframe::App for AtidarlaApp {
         p.models.window(ui.ctx(), &mut meta.ai, &meta.models);
         p.ai_hosts.window(ui.ctx(), &mut meta.ai);
         p.ai_hosts.confirm(ui.ctx(), &mut meta.ai);
+        self.learn_frame(ui.ctx());
         self.cook_and_present(ui.ctx(), frame);
         self.textport_frame(ui.ctx());
         if let Some(smoke) = &mut self.smoke {
@@ -595,6 +608,25 @@ impl AtidarlaApp {
     /// The open project's kernel operators: hot reload of saved
     /// `kernels/*.atk` files (FR-K4). Parameter values whose name and kind
     /// still fit the new schema are kept.
+    /// Learn mode: starts what the panel asked for, and checks the open
+    /// quest's step against the project a few times a second.
+    fn learn_frame(&mut self, ctx: &egui::Context) {
+        match self.panels.learn.take_request() {
+            Some(crate::learn::Request::NewProject) => self.request(Action::New),
+            Some(crate::learn::Request::OpenExample(dir)) => self.request(Action::OpenDir(dir)),
+            None => {}
+        }
+        let Some(engine) = self.panels.engine.as_ref() else {
+            return;
+        };
+        let now = self.start.elapsed().as_secs_f64();
+        let learn = &mut self.panels.learn;
+        learn.frame(now, engine, &self.project);
+        if learn.is_active() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(400));
+        }
+    }
+
     fn kernels_frame(&mut self) {
         let (Some(engine), Some(kernels)) = (&mut self.panels.engine, &mut self.project.kernels)
         else {
@@ -858,6 +890,7 @@ fn tab_title(tab: Tab) -> &'static str {
         Tab::Operators => "Operators",
         Tab::Platform => "Platform",
         Tab::Textport => "Textport",
+        Tab::Learn => "Learn",
     }
 }
 
@@ -914,6 +947,7 @@ impl TabViewer for Panels {
             Tab::Operators => self.operators_ui(ui),
             Tab::Platform => self.platform_ui(ui),
             Tab::Textport => self.textport.ui(ui, self.engine.as_ref()),
+            Tab::Learn => self.learn.ui(ui),
         }
     }
 }
@@ -1137,7 +1171,7 @@ fn load_isf(registry: &mut Registry, library: &mut OpLibrary) {
     }
 }
 
-fn builtin_registry() -> Registry {
+pub(crate) fn builtin_registry() -> Registry {
     let mut registry = Registry::default();
     atd_ops_img::register(&mut registry);
     atd_ops_sig::register(&mut registry);
