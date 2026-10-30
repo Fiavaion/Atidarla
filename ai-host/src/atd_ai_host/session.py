@@ -422,6 +422,7 @@ class Session:
             self.frames += 1
             result["host_ms"] = (time.perf_counter() - job.received) * 1e3
             result["skipped"] = skipped
+            result.update(adapter.extras(loaded.state))
             self.reply(job.request_id, result, payload)
         except RpcError as e:
             self.fail(job.request_id, e.code, e.message)

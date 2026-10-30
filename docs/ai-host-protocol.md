@@ -74,6 +74,7 @@ FrameSubmit  { seq: u64, timestamp_us: u64, model_id: str,
                payload?: bytes }                                // inline: input pixels follow (codec from session)
 FrameResult  { seq, width, height, output_slot: u32|null, host_ms: f64,
                skipped: bool,           // the similarity filter reused the previous output
+               cost_s?: f64,            // optional: seconds a metered cloud service billed since the previous result
                payload?: bytes }        // inline: output pixels follow
 ```
 
@@ -101,7 +102,11 @@ Pixels are RGBA8, unpremultiplied, rows top to bottom, tightly packed
 | `builtin` | `builtin.invert`, `builtin.echo` | – (`echo` returns its input; used by tests) |
 | `diffusion.sd` | e.g. `sd-turbo` (path = the model folder) | `prompts: [{text, weight}]`, `negative: str`, `seed: int`, `strength: f32` (0–1), `steps: int` (1–4), `guidance: f32`, `rcfg: "none"\|"self"\|"onetime"`, `delta: f32`, `similarity: f32` (0 = off, else η), `lora: [{path, weight}]` |
 | `onnx` | any (path = the `.onnx` file) | `task: "generic"\|"depth"\|"segment"\|"pose"\|"flow"\|"background"\|"upscale"`, `input: {name, layout, mean, std, size}` (generic only) |
-| `video.v2v` | per model | `prompts`, `seed` |
+| `video.v2v` | per model; `decart/lucy-2.6` with the `cloud` extra (`options.api_key` only when `DECART_API_KEY` is not set on the host) | `prompts`, `seed` (Decart: one prompt, the highest-weight text) |
+
+`cost_s` is sent by hosts whose adapter pays a metered service (Decart, billed
+per second of generation): the engine's spend meter charges it at the host's
+rate instead of the time between results. Older engines ignore it.
 
 `prompts` is the Prompt Blend (FR-A4): the host encodes each distinct text once,
 caches the embedding and uses the weighted sum (weights normalised to sum 1).

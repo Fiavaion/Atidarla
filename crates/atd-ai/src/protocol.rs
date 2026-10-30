@@ -203,6 +203,11 @@ pub struct FrameResult {
     /// The similarity filter reused the previous output.
     #[serde(default)]
     pub skipped: bool,
+    /// Seconds a metered cloud service billed since the previous result
+    /// (Decart); when present the spend meter charges these instead of
+    /// wall-clock time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_s: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

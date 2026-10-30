@@ -1,6 +1,7 @@
 //! `atidarla` — headless entry points (PRD §7.10).
 
 mod bench;
+mod cloud;
 mod docs;
 mod export;
 mod isf_import;
@@ -212,6 +213,12 @@ enum Command {
         #[command(subcommand)]
         action: models::ModelsCommand,
     },
+    /// Cloud AI hosts (A59, docs/cloud.md): bring a Runpod pod running the
+    /// AI Host container up, check it, and stop it.
+    Cloud {
+        #[command(subcommand)]
+        action: cloud::CloudCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -350,6 +357,7 @@ fn main() -> ExitCode {
         } => export::run(&project, &out, export::ExportOptions { zip, gpu: !no_gpu }),
         Command::VerifyShow { bundle, gpu } => export::verify(&bundle, gpu),
         Command::Models { action } => models::run(action),
+        Command::Cloud { action } => cloud::run(action),
         Command::Run { .. } => return not_yet("run", "M3 (FR-H2)"),
         Command::Bake { .. } => return not_yet("bake", "M2"),
         Command::Serve { .. } => return not_yet("serve", "M5 (FR-H3)"),

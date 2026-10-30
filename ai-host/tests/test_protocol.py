@@ -4,6 +4,7 @@ import pytest
 from conftest import Client, InProcessHost, RpcFailure, SlowAdapter, open_inline, open_shm, pixels
 
 from atd_ai_host import PROTOCOL_VERSION
+from atd_ai_host.adapters import video
 from atd_ai_host.adapters.builtin import invert
 from atd_ai_host.errors import (
     BAD_SLOT,
@@ -280,5 +281,5 @@ def test_capabilities_shape(host):
     assert caps["transports"] == ["shm", "inline"]
     assert "cpu-reference" in caps["runtimes"]
     assert {"builtin.invert", "builtin.echo"} <= set(caps["models"])
-    assert "video.v2v" not in caps["adapters"]  # no backend installed
+    assert ("video.v2v" in caps["adapters"]) == bool(video.BACKENDS)  # only with a backend installed
     assert all({"name", "vendor", "vram_mb"} <= set(d) for d in caps["devices"])

@@ -669,7 +669,7 @@ impl Worker {
         result: &crate::protocol::FrameResult,
         payload: Option<Vec<u8>>,
     ) {
-        let Some((client, _, host)) = &self.session else {
+        let Some((client, ..)) = &self.session else {
             return;
         };
         let now = Instant::now();
@@ -696,11 +696,10 @@ impl Worker {
             .last_result
             .map(|t| now.duration_since(t).as_secs_f64());
         self.last_result = Some(now);
-        let cost = match (&self.session, interval) {
-            (Some((_, t, host)), Some(dt)) if t.is_cloud() => router::spend().charge(host, dt),
-            _ => 0.0,
+        let cost = match &self.session {
+            Some((_, t, host)) => charge(t, host, interval, result.cost_s),
+            None => 0.0,
         };
-        let _ = host;
         let ewma = |old: f64, new: f64| {
             if old == 0.0 {
                 new
@@ -743,6 +742,20 @@ impl Worker {
     }
 }
 
+/// Charges a cloud result to the spend meter: the seconds the service
+/// billed (`cost_s`) when the host reports them, else the time since the
+/// previous result. Local and LAN results cost nothing.
+fn charge(target: &Target, host: &str, interval: Option<f64>, cost_s: Option<f64>) -> f64 {
+    if !target.is_cloud() {
+        return 0.0;
+    }
+    match (cost_s, interval) {
+        (Some(s), _) if s.is_finite() && s >= 0.0 => router::spend().charge(host, s),
+        (None, Some(dt)) => router::spend().charge(host, dt),
+        _ => 0.0,
+    }
+}
+
 fn describe(skipped: &[(Target, Skip)]) -> String {
     if skipped.is_empty() {
         return "no route".into();
@@ -766,6 +779,36 @@ fn describe(skipped: &[(Target, Skip)]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Touches the process-wide spend meter, so it holds the flags lock.
+    #[test]
+    fn decart_results_are_charged_by_billed_seconds() {
+        let _flags = crate::egress::TEST_FLAGS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let result: crate::protocol::FrameResult = serde_json::from_value(json!({
+            "seq": 3, "width": 2, "height": 2, "output_slot": null,
+            "host_ms": 40.0, "skipped": false, "cost_s": 10.0
+        }))
+        .unwrap();
+        assert_eq!(result.cost_s, Some(10.0));
+        let spend = router::spend();
+        spend.reset();
+        spend.set_rate(crate::cloud::DECART_HOST, crate::cloud::DECART_USD_PER_HOUR);
+        let decart = Target::Cloud("decart".into());
+        // Ten billed seconds at $0.02/s, whatever the wall-clock interval.
+        let usd = charge(&decart, crate::cloud::DECART_HOST, Some(0.5), result.cost_s);
+        assert!((usd - 0.2).abs() < 1e-9, "{usd}");
+        assert!((spend.spent_usd() - 0.2).abs() < 1e-6);
+        // Nothing billed since the last frame: nothing charged.
+        assert_eq!(
+            charge(&decart, crate::cloud::DECART_HOST, Some(0.5), Some(0.0)),
+            0.0
+        );
+        // Local results are free.
+        assert_eq!(charge(&Target::Local, "local", Some(1.0), Some(10.0)), 0.0);
+        spend.reset();
+    }
 
     #[test]
     fn prompts_become_a_weighted_list() {

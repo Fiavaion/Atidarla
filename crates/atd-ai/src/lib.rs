@@ -11,6 +11,7 @@
 //! (CLAUDE.md rule 1).
 
 pub mod client;
+pub mod cloud;
 pub mod comfy;
 pub mod egress;
 pub mod hosts;
