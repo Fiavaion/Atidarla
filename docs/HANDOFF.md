@@ -1,5 +1,12 @@
 # Handoff: continuing M1 locally
 
+> **2026-10-30 (newest; read this first):** a day on an Apple M5 Pro Mac (macOS 26.6, Metal). Mark ratified A9, A12, A24, A25 and the M2 proposals (A26–A52); A53–A56 were decided while building and are marked for review in `PRD.md` §0.
+> - **M1:** Syphon Share In/Out works on macOS (official framework, A55); VideoToolbox decode checked on real Apple hardware. Open: the hand checks in `docs/milestones/M1.md` (AC1 in the app on Windows and Mac, PT-1 on the RTX 4070, Spout/Syphon with real apps).
+> - **M2:** the Kernel DSL runs in the engine (`pnt.kernel`, project `kernels/*.atk` operators with `ch()` controls, `img.kernel`); AC2 (ten-line kernel = node chain) and AC3 (hot reload keeps state) have tests. Solver sub-steps, For-Each blocks and deformer fusion (5.7–6.7× on 30 transforms) are built. All 43+ examples render byte-identically on Metal; Boolean → UV → glTF opens in Blender. Open: PT-2/PT-12 on the RTX 4070. See `docs/milestones/M2.md` (pre-work log).
+> - **M3:** every FR-S and FR-T requirement has a first implementation; see the "At a glance" table in `docs/milestones/M3.md`. PT-8 met here. Open: AC1 (scripted 60-minute set on the RTX 4070, runner not built), AC2 (show export Windows → Mac by hand), PT-7 numbers, the macOS multi-window repaint stall.
+> - Gate at `6405b5a`: `cargo test --workspace` 723 passed, 0 failed (twice), clippy, fmt, `docs --check`, `check --gpu examples/*.atidarla`, `cargo deny check`, app smoke runs. Two fresh-context reviews ran (kernel/live values; merged M3); their findings are fixed with regression tests.
+> - Local set-up on a Mac: `brew install rustup python@3.13 pkgconf ffmpeg`; export `PYO3_PYTHON=$(brew --prefix python@3.13)/bin/python3.13`; Xcode with its Metal toolchain (Syphon builds from source).
+
 > **2026-10-19:** the M2 foundations (geometry, PNT/MSH/MAT operators, 3D render, Packs, Python operators, NCA and compute, a Kernel DSL compiler, offline render) were built overnight and are on this branch, CI green. Start with [`docs/milestones/m2/REVIEW.md`](milestones/m2/REVIEW.md): what exists, what to try, the decisions needed and the caveats. M1 is still open on hardware checks (see `docs/milestones/M1.md`, "Hand checks for Mark"). The rest of this file describes the state on 2026-10-16.
 
 Written 2026-10-16 when work moved from a cloud session to local VS Code + Claude Code.
