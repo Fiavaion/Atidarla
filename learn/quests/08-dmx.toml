@@ -1,0 +1,83 @@
+# Learn quest (docs/learn.md).
+title = "Drive lights over DMX"
+summary = "Send a signal to DMX slots over Art-Net, then sample a picture into LED pixels with a patch file."
+minutes = 20
+prerequisites = ["first-patch"]
+
+[[step]]
+title = "A signal to send"
+text = '''
+DMX is how lighting desks talk to fixtures: up to 512 slots per universe, each a number from 0 to 255. Atidarla sends it over Ethernet as Art-Net or sACN. Start with something that moves: add an **LFO** (SIG).
+'''
+check = { kind = "node_exists", type = "sig.lfo" }
+
+[[step]]
+title = "Add DMX Out"
+text = '''
+Add **DMX Out** (SIG) and wire the LFO into its `in`. Every input channel (0 to 1) becomes one slot, starting at **Start**.
+'''
+check = { kind = "wired", from_type = "sig.lfo", to_type = "sig.dmx_out", input = "in" }
+
+[[step]]
+title = "Keep it on your computer"
+text = '''
+With **Host** empty, Art-Net is broadcast to every device on your network. While you learn, send to yourself: set **Host** to `127.0.0.1`. Any Art-Net monitor on the same computer will then show your slot moving.
+'''
+check = { kind = "param", type = "sig.dmx_out", name = "host", op = "changed" }
+
+[[step]]
+title = "Check that it is sending"
+text = '''
+DMX Out is a **sink**: it cooks every frame even when nothing is viewed, because it has an effect outside the app. This step ticks when it has cooked without an error.
+'''
+check = { kind = "cooks_without_error", type = "sig.dmx_out" }
+
+[[step]]
+title = "Save the project"
+text = '''
+Next you will write a **patch file** that places LED pixels on the picture. A patch lives in the project folder, so save first: **File, Save As...** and choose a name. This step ticks when the project folder exists.
+'''
+hint = "The Save As window creates a folder with a .atidarla ending. Everything the project needs goes inside it."
+check = { kind = "file_exists", path = "project.toml" }
+
+[[step]]
+title = "Write a patch file"
+text = '''
+In the project folder, next to `project.toml`, create a text file named `patch.toml` with this content:
+
+```
+# Eight RGB pixels along the middle of the picture, universe 1.
+[[fixture]]
+id = "strip"
+type = "pixel-rgb"
+universe = 1
+address = 1
+count = 8
+line = [[0.0, 0.5], [1.0, 0.5]]
+```
+
+Coordinates run from 0 to 1 over the picture, with the origin at the top left. A pixel of type `pixel-rgb` uses three slots (red, green, blue).
+'''
+hint = "The file must be exactly named patch.toml and be in the project folder, not inside networks."
+check = { kind = "file_exists", path = "patch.toml" }
+
+[[step]]
+title = "Add Pixel Map"
+text = '''
+Add **Noise** and **Pixel Map** (both IMG) and wire Noise into Pixel Map's `in`. Pixel Map samples the picture at each fixture and outputs the DMX slot values.
+'''
+check = { kind = "wired", from_type = "img.noise", to_type = "img.pixel_map", input = "in" }
+
+[[step]]
+title = "Point it at your patch"
+text = '''
+Select Pixel Map and set **Patch** to `patch.toml`. Set **Send** to `artnet` and **Host** to `127.0.0.1` to send every patched universe. The node lists its channels as `u1_1`, `u1_2` and so on.
+'''
+check = { kind = "param", type = "img.pixel_map", name = "patch", op = "eq", value = "patch.toml" }
+
+[[step]]
+title = "See the pixels"
+text = '''
+Select Pixel Map. This step ticks when it has cooked without an error. If the patch has a mistake, the node names the fixture and the problem, and its channels stay empty until you fix the file.
+'''
+check = { kind = "cooks_without_error", type = "img.pixel_map" }

@@ -1,0 +1,62 @@
+# Learn quest (docs/learn.md).
+title = "A fountain of particles"
+summary = "Start a GPU particle system, shape how it is born and moves, and let a signal breathe life into it."
+minutes = 15
+prerequisites = ["first-patch"]
+
+[[step]]
+title = "Add a particle system"
+text = '''
+**Particles** (in the **PNT** group) is a GPU particle system: it emits particles, ages them, removes them when they die and moves them with curl noise, attraction, gravity and drag. Add it to the patch.
+'''
+check = { kind = "node_exists", type = "pnt.particles" }
+
+[[step]]
+title = "Draw the particles"
+text = '''
+Add **Render Points** (IMG) and wire Particles' `out` into its `geo` input. Render Points looks down the Z axis and draws every point as a small square sprite.
+'''
+check = { kind = "wired", from_type = "pnt.particles", to_type = "img.render_points", input = "geo" }
+
+[[step]]
+title = "Watch them"
+text = '''
+Select Render Points so the Viewer shows it. You should see a glowing cloud swirling in curl noise. This step ticks when it has cooked without an error.
+'''
+check = { kind = "cooks_without_error", type = "img.render_points" }
+
+[[step]]
+title = "Fewer, longer-lived particles"
+text = '''
+Select Particles. **Rate** is how many particles are born per second (100,000 by default). Lower it below 100,000, for example 20,000, and watch the cloud thin out.
+'''
+check = { kind = "param", type = "pnt.particles", name = "rate", op = "lt", value = 100000.0 }
+
+[[step]]
+title = "Add gravity"
+text = '''
+Set **Gravity** to pull downwards: make its Y value negative, for example `-0.5`. Particles accelerate that way until drag slows them.
+'''
+check = { kind = "param", type = "pnt.particles", name = "gravity", op = "changed" }
+
+[[step]]
+title = "Stronger swirl"
+text = '''
+Raise **Curl Amplitude** above 1. Curl noise swirls particles without ever squeezing them together or pulling them apart, which is why it looks like smoke.
+'''
+check = { kind = "param", type = "pnt.particles", name = "curl_amplitude", op = "gt", value = 1.0 }
+
+[[step]]
+title = "Recolour"
+text = '''
+Change **Birth Colour** so new particles start in your own colour. **Death Colour** is what they fade to at the end of their life.
+'''
+check = { kind = "param", type = "pnt.particles", name = "colour_birth", op = "changed" }
+
+[[step]]
+title = "Let a signal breathe"
+text = '''
+Add an **LFO** (SIG) and bind Particles' **Attract** to it with the **bind...** menu next to the parameter. The cloud now pulls toward the centre and relaxes again, over and over.
+'''
+hint = "Attract is a spring pulling particles toward the Attract Point. A negative value pushes them away."
+check = { kind = "param", type = "pnt.particles", name = "attract", op = "bound" }

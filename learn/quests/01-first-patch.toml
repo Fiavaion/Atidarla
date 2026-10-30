@@ -1,0 +1,75 @@
+# Learn quest (docs/learn.md).
+title = "Your first patch"
+summary = "Build a moving kaleidoscope from three nodes and one oscillator, and see how wires and parameters work."
+minutes = 12
+prerequisites = []
+
+[[step]]
+title = "Add a Noise node"
+text = '''
+A **patch** is a network of nodes joined by wires. Each node does one small job, and the picture flows from left to right.
+
+Open the **Operators** panel on the left, unfold **IMG** (image operators) and click **Noise**. A node called `noise1` appears on the **Patch** canvas.
+'''
+hint = "No Operators panel? Choose View, then Platform or Patch to bring the panels back. You can also press Tab over the canvas and type the name of an operator."
+check = { kind = "node_exists", type = "img.noise" }
+
+[[step]]
+title = "Add a Kaleidoscope and wire it"
+text = '''
+Add **Kaleidoscope** from the IMG group. Then drag from the small socket on the **right** of `noise1` to the `in` socket on the **left** of `kaleidoscope1`.
+
+A wire means "use this node's picture as that node's input".
+'''
+hint = "Start the drag on the output socket (right side) and let go on top of the input socket (left side). Right-click an input socket to remove a wire."
+check = { kind = "wired", from_type = "img.noise", to_type = "img.kaleidoscope", input = "in" }
+
+[[step]]
+title = "Change a parameter"
+text = '''
+Click `kaleidoscope1` to select it. The **Parameters** panel shows its controls. Change **Segments** to any other number.
+
+Every change you make is an undoable edit: press Cmd/Ctrl+Z to take it back.
+'''
+check = { kind = "param", type = "img.kaleidoscope", name = "segments", op = "changed" }
+
+[[step]]
+title = "Add a Level node at the end"
+text = '''
+Add **Level** (IMG) and wire `kaleidoscope1` into it. Level adjusts brightness, contrast and gamma, and it will be the end of this chain.
+'''
+check = { kind = "wired", from_type = "img.kaleidoscope", to_type = "img.level", input = "in" }
+
+[[step]]
+title = "Look at the result"
+text = '''
+Select `level1`. The **Viewer** shows the selected node's picture, and the node cooks (does its work) every frame.
+
+If a node has a problem, its message appears under it on the canvas. This step ticks when `level1` has cooked without an error.
+'''
+hint = "Click the node's title bar, not an empty part of the canvas."
+check = { kind = "cooks_without_error", type = "img.level" }
+
+[[step]]
+title = "Make the contrast stronger"
+text = '''
+With `level1` selected, drag **Contrast** above 1. Values above 1 push light and dark apart.
+'''
+check = { kind = "param", type = "img.level", name = "contrast", op = "gt", value = 1.0 }
+
+[[step]]
+title = "Add an oscillator"
+text = '''
+Not everything is a picture. **SIG** operators make signals: numbers that change over time. Open the **SIG** group and add **LFO** (a low-frequency oscillator). It outputs a smooth wave called `lfo`.
+'''
+check = { kind = "node_exists", type = "sig.lfo" }
+
+[[step]]
+title = "Let the oscillator move the noise"
+text = '''
+Select `noise1`. Next to the **Z** parameter there is a **bind...** menu. Pick `lfo1:lfo`. Z now follows the oscillator, and the noise drifts by itself.
+
+Try changing the LFO's **Frequency** and **Amplitude** while you watch the Viewer.
+'''
+hint = "Z moves the noise through its third dimension. If bind... lists nothing, the LFO is missing from the patch."
+check = { kind = "param", type = "img.noise", name = "z", op = "bound" }

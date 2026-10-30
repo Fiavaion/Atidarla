@@ -1,0 +1,48 @@
+# Learn quest (docs/learn.md).
+title = "Control it with MIDI or OSC"
+summary = "Learn a knob or fader onto a parameter, and see how a mapping differs from a binding."
+minutes = 12
+prerequisites = ["first-patch"]
+
+[[step]]
+title = "A picture to control"
+text = '''
+Add **Noise** (IMG), then **Level** (IMG), and wire Noise into Level. Select Level so the Viewer shows it.
+'''
+check = { kind = "wired", from_type = "img.noise", to_type = "img.level", input = "in" }
+
+[[step]]
+title = "Learn a control"
+text = '''
+In the Parameters panel, **right-click the name Brightness** and choose **Learn MIDI/OSC**. The Mappings window opens and waits. Now move a knob, fader or pad on your MIDI controller, or send an OSC message. The first control that arrives becomes the mapping.
+
+**No controller?** Send an OSC message from a terminal while Atidarla is waiting (it listens on UDP port 9000):
+
+```
+python3 -c "import socket,struct;s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.sendto(b'/fader/1\0\0\0\0,f\0\0'+struct.pack('>f',0.5),('127.0.0.1',9000))"
+```
+'''
+hint = "A small dot before the parameter name turns amber while it waits and blue once it is mapped. Afterwards open View, Mappings to change the input and output ranges, the curve and the mode."
+check = { kind = "mapping_exists", param = "brightness" }
+
+[[step]]
+title = "Map a second parameter"
+text = '''
+Learn **Contrast** the same way, with a different control (or a different OSC address, such as `/fader/2`).
+'''
+check = { kind = "mapping_exists", param = "contrast" }
+
+[[step]]
+title = "Another way in: OSC as signals"
+text = '''
+Mappings set a parameter directly. You can also turn OSC into a signal and use it anywhere. Add **OSC In** (SIG): each address it receives becomes a channel, for example `/fader/1` becomes `fader_1`.
+'''
+check = { kind = "node_exists", type = "sig.osc_in" }
+
+[[step]]
+title = "Bind a parameter to it"
+text = '''
+Next to Level's **Gamma**, open **bind...** and pick an OSC In channel. A binding is part of the patch and lives in the saved network; a mapping is a live control that wins while you move it. Use bindings for patch logic and mappings for playing.
+'''
+hint = "Channels only appear once a message has arrived. Send the OSC message from step 2 again."
+check = { kind = "param", type = "img.level", name = "gamma", op = "bound" }

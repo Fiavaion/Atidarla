@@ -1,0 +1,72 @@
+# Learn quest (docs/learn.md).
+title = "Write a Kernel"
+summary = "Move thousands of points with a few lines of the Kernel DSL, then run the same idea per pixel."
+minutes = 20
+prerequisites = ["first-patch"]
+
+[[step]]
+title = "Make some points"
+text = '''
+A **Kernel** is a short program that runs once for every point (or every pixel) on the GPU. First you need points: add **Points** from the **PNT** group. By default it makes a grid of 10,000 points.
+'''
+check = { kind = "node_exists", type = "pnt.points" }
+
+[[step]]
+title = "Add a Kernel after the points"
+text = '''
+Add **Kernel** from the **PNT** group (not the IMG one) and wire Points into its `in`.
+'''
+check = { kind = "wired", from_type = "pnt.points", to_type = "pnt.kernel", input = "in" }
+
+[[step]]
+title = "Draw the points"
+text = '''
+Points are only data until something draws them. Add **Render Points** (IMG) and wire the Kernel's `out` into its `geo` input.
+'''
+check = { kind = "wired", from_type = "pnt.kernel", to_type = "img.render_points", input = "geo" }
+
+[[step]]
+title = "See a grid of dots"
+text = '''
+Select Render Points so the Viewer shows it. You should see a square of dots. This step ticks when it has cooked without an error.
+'''
+check = { kind = "cooks_without_error", type = "img.render_points" }
+
+[[step]]
+title = "Write your own kernel"
+text = '''
+Select the Kernel node and replace its **Code** with:
+
+```
+// Ripples spreading out from the centre.
+float d = length(@P.xy);
+@P.z = sin(d * ch("freq", 8.0) - @Time * 3.0) * ch("height", 0.2);
+@P.y += @P.z;
+```
+
+`@P` is the point's position, `@Time` the clock in seconds, and `ch("name", default)` is a parameter with a default value.
+'''
+hint = "Copy the lines exactly, including the semicolons. Errors are reported with a line and column on the node."
+check = { kind = "param", type = "pnt.kernel", name = "code", op = "contains", value = "ch(" }
+
+[[step]]
+title = "Make sure it compiles"
+text = '''
+The kernel is compiled to a GPU shader. If there is a mistake, the node shows the line and column and keeps running the last version that worked. This step ticks while every kernel in your patch compiles.
+'''
+hint = "Check for a missing semicolon or a misspelt name. Names that start with @ are point attributes."
+check = { kind = "kernel_compiles" }
+
+[[step]]
+title = "Now one per pixel"
+text = '''
+The same language can run per pixel. Add **Noise** (IMG) and a **Kernel** from the **IMG** group, and wire Noise into the kernel's `in0` (a pixel kernel has four image inputs, `in0` to `in3`). Inside a pixel kernel, `@Cd` is the pixel's colour, starting as the input.
+'''
+check = { kind = "wired", from_type = "img.noise", to_type = "img.kernel", input = "in0" }
+
+[[step]]
+title = "Check the pixel kernel"
+text = '''
+Select the pixel kernel and look at the Viewer. This step ticks when it has cooked without an error. Then try `@Cd.r = 1.0 - @Cd.r;` in its code.
+'''
+check = { kind = "cooks_without_error", type = "img.kernel" }
