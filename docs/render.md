@@ -118,6 +118,12 @@ through and do not emit offline.
 | Live input | Opens nothing; idle value; `render` warns. | Share In (black), Audio In (no channels), Input Devices (keys up, no gamepad, pointer at rest), MIDI In (no channels), OSC In (no channels), Timecode In (all zero, unlocked). |
 | Sink | Passes its input through; emits nothing; `render` warns. | Share Out, Audio Out, DMX Out, MIDI Out, OSC Out. |
 
+Beat stays Stateful with every source: offline its `midi` source reads no port (the clock sits
+at beat 0, and `render` does not warn: Beat is not a live input in the table), its MIDI clock out
+sends nothing, and its `audio` source follows its SIG input, which is as deterministic as that
+input. A synced LFO or Timer is a function of the clock it reads, so two offline renders give
+identical channels (`cargo test -p atd-ops-sig --test clock_offline`).
+
 ## Evidence
 
 Tests (`cargo test -p atd-cli render`, `cargo test -p atd-py --test engine`; GPU tests skip
