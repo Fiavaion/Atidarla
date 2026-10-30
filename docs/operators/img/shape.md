@@ -44,3 +44,4 @@ All platforms.
 - [Pack: Neon Edges](../../../examples/pack-neon-edges.atidarla/) — `pentagon`
 - [Pack: RGB Delay](../../../examples/pack-rgb-delay.atidarla/) — `bar`, `triangle`
 - [Simulations](../../../examples/simulations.atidarla/) — `dot`, `seed`
+- [Stage deck](../../../examples/stage-deck.atidarla/) — `circle`, `star`, `bar`, `dots`, `burst`, `frame`

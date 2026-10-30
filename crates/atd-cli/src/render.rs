@@ -442,7 +442,7 @@ pub fn classify(type_id: &str) -> Option<Class> {
         "img.blend" | "img.bloom" | "img.blur" | "img.channel_image" | "img.channel_mix"
         | "img.chroma_key" | "img.composite" | "img.constant" | "img.crop" | "img.displace"
         | "img.edge" | "img.hsv_adjust" | "img.kaleidoscope" | "img.level" | "img.lookup"
-        | "img.luma_key" | "img.mirror" | "img.noise" | "img.normal_map" | "img.projection"
+        | "img.luma_key" | "img.mirror" | "img.mixer" | "img.noise" | "img.normal_map" | "img.projection"
         | "img.ramp" | "img.remap" | "img.resolution" | "img.shape" | "img.slope"
         | "img.switch" | "img.threshold" | "img.tile" | "img.transform" => Pure,
         "sig.constant" | "sig.lfo" | "sig.limit" | "sig.math" | "sig.merge" | "sig.noise"
@@ -450,6 +450,8 @@ pub fn classify(type_id: &str) -> Option<Class> {
         "img.cache"
         | "img.feedback"
         | "img.fluid"
+        // The clip playing, a transition, a launch waiting for its quantum.
+        | "img.layer"
         // Also waits for its pipelines and weights file.
         | "img.nca"
         | "img.reaction_diffusion"
@@ -741,6 +743,30 @@ mod tests {
             .id;
         let level = a.engine.channels(spectrum).and_then(|c| c.value("level"));
         assert!(level.is_some_and(|l| l > 0.0), "{level:?}");
+    }
+
+    /// M3 Stage: the deck example (layers switching on the clock's beats,
+    /// a wipe, a fade) renders to identical frames twice, and the layer
+    /// driven by an LFO changes clip within the range.
+    #[test]
+    fn two_renders_of_the_stage_deck_are_identical() {
+        let Some(mut a) = renderer() else { return };
+        let mut b = renderer().unwrap();
+        assert_eq!(classify("img.layer"), Some(Class::Stateful));
+        let dir = example("stage-deck");
+        a.load(&dir, &opts(0..60)).unwrap();
+        b.load(&dir, &opts(0..60)).unwrap();
+        let (fa, fb) = (render(&mut a, 0..60), render(&mut b, 0..60));
+        assert_eq!(fa, fb);
+        assert_ne!(fa[0].1, fa[59].1);
+        let shapes = a.engine.network().node_by_name("shapes").unwrap().id;
+        assert!(
+            a.engine
+                .status(shapes)
+                .is_some_and(|s| s.starts_with("playing ")),
+            "{:?}",
+            a.engine.status(shapes)
+        );
     }
 
     /// The Python operators example (`docs/python-ops.md`) renders to the

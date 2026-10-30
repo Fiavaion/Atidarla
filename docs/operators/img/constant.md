@@ -27,3 +27,4 @@ All platforms.
 ## Examples
 
 - [Beat switcher](../../../examples/beat-switcher.atidarla/) — `solid`
+- [Stage deck](../../../examples/stage-deck.atidarla/) — `strobe`

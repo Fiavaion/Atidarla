@@ -77,6 +77,7 @@ struct Panels {
     /// The time the engine cooked last, in seconds.
     time: f64,
     textport: crate::textport::TextportPanel,
+    stage: crate::stage::StagePanel,
 }
 
 impl AtidarlaApp {
@@ -182,6 +183,7 @@ impl AtidarlaApp {
                 history: Default::default(),
                 time: 0.0,
                 textport: Default::default(),
+                stage: Default::default(),
             },
             smoke: smoke.map(Smoke::new),
             start: Instant::now(),
@@ -691,7 +693,7 @@ impl AtidarlaApp {
         }
         let viewed = p.viewed;
         p.time = self.start.elapsed().as_secs_f64();
-        let cooked = match engine.cook_frame(viewed, p.time) {
+        let cooked = match p.stage.cook_frame(engine, viewed, p.time) {
             Ok(n) => n,
             Err(e) => {
                 p.patch.status(e.to_string());
@@ -765,7 +767,10 @@ impl TabViewer for Panels {
                 }
                 None => placeholder(ui, "No GPU device: the engine is unavailable."),
             },
-            Tab::Stage => placeholder(ui, "Clip deck, layers and outputs arrive in M3."),
+            Tab::Stage => match &mut self.engine {
+                Some(engine) => self.stage.ui(ui, engine, self.time),
+                None => placeholder(ui, "No GPU device: the engine is unavailable."),
+            },
             Tab::Timeline => placeholder(ui, "Keyframes, cues and timecode arrive in M3."),
             Tab::Parameters => match (&mut self.engine, self.patch.selected) {
                 (Some(engine), Some(node)) => {

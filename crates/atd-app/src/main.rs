@@ -8,6 +8,7 @@ mod params;
 mod patch;
 mod project;
 mod smoke;
+mod stage;
 mod suggest;
 mod textport;
 mod viewer;

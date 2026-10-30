@@ -246,6 +246,7 @@ dependencies = [
  "atd-ops-pnt",
  "atd-ops-sig",
  "atd-py",
+ "atd-stage",
  "eframe",
  "egui",
  "env_logger",
@@ -491,6 +492,12 @@ dependencies = [
 [[package]]
 name = "atd-stage"
 version = "0.0.1"
+dependencies = [
+ "atd-core",
+ "atd-ops-img",
+ "atd-ops-sig",
+ "serde_json",
+]
 
 [[package]]
 name = "atd-timeline"

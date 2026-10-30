@@ -19,6 +19,7 @@ mod ops;
 mod ops2;
 mod resolution;
 mod share;
+pub mod stage;
 mod stateful;
 mod text;
 mod time_machine;
@@ -136,6 +137,8 @@ pub fn register(registry: &mut Registry) {
             compute::schema(),
             share::out_schema(),
             share::in_schema(),
+            stage::layer_schema(),
+            stage::mixer_schema(),
         ]);
     for schema in schemas {
         registry
@@ -153,6 +156,8 @@ pub fn library(library: &mut OpLibrary) {
     library.add(compute::schema().type_id, compute::create);
     library.add(share::out_schema().type_id, share::create_out);
     library.add(share::in_schema().type_id, share::create_in);
+    library.add(stage::layer_schema().type_id, stage::create_layer);
+    library.add(stage::mixer_schema().type_id, stage::create_mixer);
     library.add_img_to_sig(analyze::schema().type_id, analyze::create);
     for (schema, factory) in STATEFUL {
         library.add(schema().type_id, factory);
@@ -183,7 +188,7 @@ mod tests {
         register(&mut registry);
         assert_eq!(
             registry.len(),
-            DEFS.len() + DEFS2.len() + STATEFUL.len() + 8
+            DEFS.len() + DEFS2.len() + STATEFUL.len() + 10
         );
         for op in registry.iter() {
             assert!(op.cook_budget_us > 0, "{} has a cook budget", op.type_id);
@@ -198,6 +203,10 @@ mod tests {
                 p.validate(&p.default)
                     .unwrap_or_else(|e| panic!("{}: {e}", op.type_id));
             }
+        }
+        // Declarative operators pack one float per parameter at most.
+        for def in defs() {
+            let op = (def.schema)();
             assert!(
                 op.params.len() <= MAX_PARAM_VEC4 * 4,
                 "{} fits the uniform block",
@@ -224,5 +233,7 @@ mod tests {
         assert!(lib.contains(&compute::schema().type_id));
         assert!(lib.contains(&share::out_schema().type_id));
         assert!(lib.contains(&share::in_schema().type_id));
+        assert!(lib.contains(&stage::layer_schema().type_id));
+        assert!(lib.contains(&stage::mixer_schema().type_id));
     }
 }

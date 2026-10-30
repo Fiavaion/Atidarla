@@ -30,3 +30,4 @@ All platforms.
 ## Examples
 
 - [Image processing](../../../examples/image-processing.atidarla/) — `edges`
+- [Stage deck](../../../examples/stage-deck.atidarla/) — `grid`

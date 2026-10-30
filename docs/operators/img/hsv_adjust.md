@@ -33,4 +33,5 @@ All platforms.
 - [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `colour`
 - [Pack: Audio Pulse](../../../examples/pack-audio-pulse.atidarla/) — `colour`
 - [Pack: LFO Bank](../../../examples/pack-lfo-bank.atidarla/) — `hue`
+- [Stage deck](../../../examples/stage-deck.atidarla/) — `glow`
 - [Texture sharing](../../../examples/texture-sharing.atidarla/) — `tint`

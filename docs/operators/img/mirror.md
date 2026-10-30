@@ -29,3 +29,4 @@ All platforms.
 ## Examples
 
 - [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `mirror1`
+- [Stage deck](../../../examples/stage-deck.atidarla/) — `bars`
