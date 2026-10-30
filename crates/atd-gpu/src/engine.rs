@@ -532,6 +532,10 @@ pub struct CookCtx<'a> {
     /// One entry per input socket in schema order; `None` if unconnected,
     /// not an IMG input, or the source has no result.
     pub inputs: &'a [Option<wgpu::Texture>],
+    /// An input's source was cooked earlier this frame (its result may have
+    /// changed). False when only this node's parameters changed or it is
+    /// cooking again to collect results ([`Self::cook_again`]).
+    pub inputs_cooked: bool,
     /// SIG inputs by input index (`None` for IMG sockets), for operators
     /// that turn channels into images.
     pub sig_inputs: SigInputs<'a>,
@@ -2076,11 +2080,14 @@ impl Engine {
             // Size of the first connected IMG input (feedback inputs carry
             // last frame's image and do not set the size).
             let mut input_size = None;
+            let mut inputs_cooked = false;
             for socket in &schema.inputs {
                 let src = net
                     .inputs_of(id)
                     .find(|(name, _)| *name == socket.name)
                     .map(|(_, src)| src.node);
+                // The plan is in dependency order: sources come first.
+                inputs_cooked |= !socket.feedback && src.is_some_and(|s| plan.contains(&s));
                 let tex = src.and_then(|s| results.get(&s)).cloned();
                 if input_size.is_none()
                     && socket.wire == WireType::Img
@@ -2133,6 +2140,7 @@ impl Engine {
                 queue,
                 encoder: &mut encoder,
                 inputs,
+                inputs_cooked,
                 sig_inputs: SigInputs {
                     sources: sig_sources,
                     sig,
