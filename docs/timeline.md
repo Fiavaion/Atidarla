@@ -32,7 +32,9 @@ same graph as the Patch: it owns no media and no second model. Try it with
 | Cues | Name, time (or manual), condition, status (`>` current, `done` fired, `armed` waiting for its condition) and actions. `+ set` and `+ live` add the selected node's picked parameter at its current value; `+ launch` adds the selected layer (a node with `target`) to the cue's launch of a slot, so a column is one action over several layers |
 | Markers | Name, time, Go to, delete |
 
-Timeline edits mark the project as unsaved; **Save** writes `timeline.toml`.
+Timeline edits mark the project as unsaved; **Save** writes `timeline.toml`, including the Stage
+mode and the chased clock with its offset. Offline renders (`atidarla render`) always drive the
+Stage from cues.
 
 ## Curves
 
@@ -94,6 +96,11 @@ format = 1
 length = 32.0          # seconds
 fps = 60.0             # display, snapping and timecode
 loop = [8.0, 16.0]     # optional loop region
+stage = "follow"       # "drive" (default, not written) or "follow"
+
+[clock]                # optional: chase timecode instead of the internal clock
+node = 12              # the Timecode In node
+offset = -3600.0       # timeline time = timecode + offset (default 0)
 
 [[track]]
 node = 2               # stable node ID

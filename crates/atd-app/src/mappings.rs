@@ -5,8 +5,8 @@
 //! The project's mappings live in `ProjectState::meta.mappings` (saved as
 //! `mappings.toml`); this module holds what runs: the I/O, learn state and
 //! the window. Mapped values are live values (A54): not edits, not saved.
-//! Saving first stores the current live value of every mapped parameter
-//! as its value ([`write_back`]), so a show reopens where it was left.
+//! Saving stores what each mapping last wrote as its parameter's value
+//! ([`Control::stored_values`]), so a show reopens where it was left.
 
 use atd_core::graph::{Edit, NodeId, Param};
 use atd_core::registry::ParamSchema;
@@ -82,6 +82,7 @@ impl Control {
             // nodes that happen to share an ID.
             self.opened = Some(opened);
             engine.clear_live();
+            self.rt.forget_written();
             self.rt.cancel_learn();
             self.fingerprint = None;
         }
@@ -96,6 +97,13 @@ impl Control {
         {
             self.open = true;
         }
+        self.apply(engine, maps);
+    }
+
+    /// The latest mapped values as live values. A parameter no mapping
+    /// drives any more (deleted or retargeted) gets its live value cleared,
+    /// unless another writer has set it since.
+    fn apply(&mut self, engine: &mut Engine, maps: &Mappings) {
         self.rt.update(maps, |n, p| {
             mapping::resolve(
                 engine.network(),
@@ -105,9 +113,21 @@ impl Control {
                 engine.live_values().get(n, p),
             )
         });
-        for (n, p, v) in self.rt.writes() {
-            engine.set_live(n, p, Some(v.clone()));
+        for (n, p, v) in self.rt.released() {
+            engine.clear_live_if(n, p, v);
         }
+        for (n, p, v) in self.rt.writes() {
+            engine.set_live(n, p, Some(v));
+        }
+    }
+
+    /// Edits storing what each mapping last wrote as its parameter's value
+    /// (only the components mappings drive), for saving: a show reopens
+    /// where the controls left it. Bindings and expressions stay;
+    /// parameters no mapping has written, and live values from the
+    /// timeline or OSCQuery, are left alone.
+    pub fn stored_values(&self, engine: &Engine) -> Vec<Edit> {
+        store_edits(engine, self.rt.written())
     }
 
     /// Opens or closes the OSC socket and MIDI inputs the project needs.
@@ -498,50 +518,47 @@ fn target_label(engine: Option<&Engine>, t: &Target) -> String {
     }
 }
 
-/// Stores the live value of every mapped parameter as its value (one undo
-/// step), so saving keeps what the controls set. Bindings and expressions
-/// stay; parameters without a live value are untouched.
-pub fn write_back(engine: &mut Engine, maps: &Mappings) -> Result<(), String> {
-    let mut edits: Vec<Edit> = Vec::new();
-    for m in &maps.mappings {
-        let t = &m.target;
-        if edits
+/// Edits setting each target's stored value to what its mapping wrote,
+/// component by component; unchanged values give no edit.
+fn store_edits<'a>(engine: &Engine, written: impl Iterator<Item = (&'a Target, f64)>) -> Vec<Edit> {
+    let (net, reg) = (engine.network(), engine.registry());
+    let mut values: Vec<(NodeId, &str, serde_json::Value)> = Vec::new();
+    for (t, y) in written {
+        let Some((kind, stored)) = mapping::resolve(net, reg, t.node, &t.param, None) else {
+            continue;
+        };
+        let at = values
             .iter()
-            .any(|e| matches!(e, Edit::SetParam { node, param, .. } if *node == t.node && *param == t.param))
-        {
-            continue;
-        }
-        let Some(live) = engine.live_values().get(t.node, &t.param).cloned() else {
+            .position(|(n, p, _)| *n == t.node && *p == t.param);
+        let current = at.map_or(stored, |i| &values[i].2);
+        let Some(v) = mapping::live_value(kind, current, t.component, y) else {
             continue;
         };
-        let Some(node) = engine.network().node(t.node) else {
-            continue;
-        };
-        let stored = engine
-            .network()
-            .param_value(engine.registry(), t.node, &t.param);
-        if stored == Some(&live) {
-            continue;
+        match at {
+            Some(i) => values[i].2 = v,
+            None => values.push((t.node, &t.param, v)),
         }
-        let mut param = node
-            .params
-            .get(&t.param)
-            .cloned()
-            .unwrap_or_else(|| Param::constant(live.clone()));
-        param.value = live;
-        edits.push(Edit::SetParam {
-            node: t.node,
-            param: t.param.clone(),
-            value: Some(param),
-        });
     }
-    if edits.is_empty() {
-        return Ok(());
-    }
-    engine
-        .edit("Store mapped values", edits)
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+    values
+        .into_iter()
+        .filter_map(|(node, param, value)| {
+            if net.param_value(reg, node, param) == Some(&value) {
+                return None;
+            }
+            let mut p = net
+                .node(node)?
+                .params
+                .get(param)
+                .cloned()
+                .unwrap_or_else(|| Param::constant(value.clone()));
+            p.value = value;
+            Some(Edit::SetParam {
+                node,
+                param: param.to_owned(),
+                value: Some(p),
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -601,5 +618,159 @@ mod tests {
             .label(),
             "CC 7 ch1"
         );
+    }
+
+    fn add_constant(e: &mut Engine, name: &str) -> NodeId {
+        let id = e.alloc_id();
+        e.edit(
+            "add",
+            [Edit::AddNode {
+                node: atd_core::graph::Node::new(id, "img.constant", name),
+            }],
+        )
+        .unwrap();
+        id
+    }
+
+    fn osc_map(maps: &mut Mappings, address: &str, node: NodeId, component: usize) -> u64 {
+        maps.add(
+            Source::Osc {
+                address: address.into(),
+                arg: 0,
+            },
+            Target {
+                node,
+                param: "colour".into(),
+                component: Some(component),
+            },
+            [0.0, 1.0],
+        )
+    }
+
+    /// One frame of the mappings, after `x` arrived on `address`.
+    fn osc(c: &mut Control, e: &mut Engine, maps: &Mappings, address: &str, x: f64) {
+        // The hub matches against the mappings the last update synced.
+        c.apply(e, maps);
+        c.rt.hub().push_osc(address, &[x]);
+        c.apply(e, maps);
+    }
+
+    fn colour(e: &Engine, id: NodeId) -> serde_json::Value {
+        e.network()
+            .param_value(e.registry(), id, "colour")
+            .unwrap()
+            .clone()
+    }
+
+    /// Saving stores what the mapping wrote, only in the component it
+    /// drives (not a timeline's or OSCQuery's live value), and only once
+    /// the files were written.
+    #[test]
+    fn saving_stores_only_what_mappings_wrote() {
+        use serde_json::json;
+        let Some(mut e) = crate::project::tests::engine() else {
+            return;
+        };
+        let id = add_constant(&mut e, "constant1");
+        let stored = colour(&e, id);
+        let s = stored.as_array().unwrap().clone();
+        let mut state = crate::project::ProjectState::untitled(e.network());
+        state.meta.name = "Mapped".into();
+        osc_map(&mut state.meta.mappings, "/red", id, 0);
+        let maps = state.meta.mappings.clone();
+        let mut c = Control::new(false);
+        osc(&mut c, &mut e, &maps, "/red", 0.5);
+        assert_eq!(
+            e.live_values().get(id, "colour"),
+            Some(&json!([0.5, s[1], s[2], s[3]]))
+        );
+        // Another writer (the timeline, OSCQuery) moves component 1.
+        e.set_live(id, "colour", Some(&json!([0.5, 0.9, s[2], s[3]])));
+
+        // A save that fails edits nothing.
+        let blocker = std::env::temp_dir().join(format!("atd-app-blocker-{}", std::process::id()));
+        std::fs::write(&blocker, "file").unwrap();
+        let before = e.network().clone();
+        let store = c.stored_values(&e);
+        assert_eq!(store.len(), 1, "one parameter to store");
+        state.save_to(&mut e, &blocker.join("x.atidarla"), store);
+        assert_eq!(state.message.as_ref().map(|m| m.1), Some(true));
+        assert_eq!(e.network(), &before, "no stored-value edit");
+        std::fs::remove_file(&blocker).ok();
+
+        let dir =
+            std::env::temp_dir().join(format!("atd-app-mapped-{}.atidarla", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = c.stored_values(&e);
+        state.save_to(&mut e, &dir, store);
+        assert_eq!(
+            state.message.as_ref().map(|m| m.1),
+            Some(false),
+            "{:?}",
+            state.message
+        );
+        assert!(!state.dirty(&e));
+        let want = json!([0.5, s[1], s[2], s[3]]);
+        assert_eq!(colour(&e, id), want, "the patch has it");
+        let project = atd_format::load(&dir).unwrap();
+        assert_eq!(project.mappings, state.meta.mappings);
+        let node = project.main().unwrap().node(id).unwrap();
+        assert_eq!(node.params["colour"].value, want, "the file has it");
+        assert!(
+            e.live_values().get(id, "colour").is_some(),
+            "still live after saving"
+        );
+        // Nothing written by a mapping: nothing to store.
+        assert!(Control::new(false).stored_values(&e).is_empty());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A deleted or retargeted mapping releases its parameter (or it
+    /// would stay frozen), unless another mapping still drives it or
+    /// another writer has set it since.
+    #[test]
+    fn removing_a_mapping_releases_its_parameter() {
+        use serde_json::json;
+        let Some(mut e) = crate::project::tests::engine() else {
+            return;
+        };
+        let a = add_constant(&mut e, "constant1");
+        let b = add_constant(&mut e, "constant2");
+        let mut maps = Mappings::default();
+        let red = osc_map(&mut maps, "/red", a, 0);
+        let green = osc_map(&mut maps, "/green", a, 1);
+        let mut c = Control::new(false);
+        osc(&mut c, &mut e, &maps, "/red", 0.5);
+        osc(&mut c, &mut e, &maps, "/green", 0.25);
+        assert!(e.live_values().get(a, "colour").is_some());
+
+        maps.remove(green);
+        c.apply(&mut e, &maps);
+        assert!(
+            e.live_values().get(a, "colour").is_some(),
+            "another mapping still drives it"
+        );
+
+        // Retargeted to another node: the first one is released.
+        maps.mappings[0].target.node = b;
+        c.apply(&mut e, &maps);
+        assert_eq!(e.live_values().get(a, "colour"), None, "retargeted");
+        osc(&mut c, &mut e, &maps, "/red", 0.75);
+        assert!(e.live_values().get(b, "colour").is_some());
+
+        // Another writer set it since: deleting the mapping leaves that.
+        let theirs = json!([0.1, 0.2, 0.3, 1.0]);
+        e.set_live(b, "colour", Some(&theirs));
+        maps.remove(red);
+        c.apply(&mut e, &maps);
+        assert_eq!(e.live_values().get(b, "colour"), Some(&theirs));
+
+        // Deleted with its value still live: released.
+        let blue = osc_map(&mut maps, "/blue", a, 2);
+        osc(&mut c, &mut e, &maps, "/blue", 1.0);
+        assert!(e.live_values().get(a, "colour").is_some());
+        maps.remove(blue);
+        c.apply(&mut e, &maps);
+        assert_eq!(e.live_values().get(a, "colour"), None, "deleted");
     }
 }

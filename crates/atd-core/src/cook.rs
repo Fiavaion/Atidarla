@@ -81,16 +81,20 @@ pub struct Scheduler {
     stack: Vec<(NodeId, Step)>,
     /// Per node, a bit per input (schema order) it will not read this frame.
     idle: HashMap<NodeId, u64>,
+    /// Scratch for `mark_dirty`.
+    queue: Vec<NodeId>,
 }
 
 impl Scheduler {
     /// Marks `nodes` and everything downstream of them dirty, including
     /// nodes whose expressions read them.
     pub fn mark_dirty(&mut self, net: &Network, nodes: impl IntoIterator<Item = NodeId>) {
-        let mut queue: Vec<NodeId> = nodes.into_iter().collect();
+        let mut queue = std::mem::take(&mut self.queue);
+        queue.clear();
+        queue.extend(nodes);
         while let Some(n) = queue.pop() {
             if self.dirty.insert(n) {
-                queue.extend(net.downstream_of(n));
+                queue.extend(net.downstream_iter(n));
                 queue.extend(
                     self.extra
                         .iter()
@@ -99,6 +103,13 @@ impl Scheduler {
                 );
             }
         }
+        self.queue = queue;
+    }
+
+    /// [`Self::mark_dirty`] for one node (a live value changing every
+    /// frame). Allocates nothing once the dirty set and queue have grown.
+    pub fn mark_dirty_one(&mut self, net: &Network, node: NodeId) {
+        self.mark_dirty(net, std::iter::once(node));
     }
 
     /// Replaces the expression dependencies of every node.

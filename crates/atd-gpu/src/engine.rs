@@ -31,7 +31,7 @@ use std::time::Instant;
 
 use atd_core::cook::{CookStat, PlanError, Scheduler};
 use atd_core::expr::{PyJob, PythonHost};
-use atd_core::graph::{Edit, GraphError, Network, NodeId};
+use atd_core::graph::{Edit, GraphError, Network, NodeId, assign_value};
 use atd_core::history::History;
 use atd_core::registry::{Registry, WireType};
 use serde_json::Value;
@@ -300,18 +300,20 @@ impl LiveValues {
             .map(|(_, v)| v)
     }
 
-    /// Sets or clears one value; whether anything changed.
-    pub fn set(&mut self, node: NodeId, param: &str, value: Option<Value>) -> bool {
+    /// Sets or clears one value; whether anything changed. A value of the
+    /// same shape as the one set (a number, a colour) is overwritten in
+    /// place, so a value changing every frame allocates nothing.
+    pub fn set(&mut self, node: NodeId, param: &str, value: Option<&Value>) -> bool {
         let list = self.nodes.entry(node).or_default();
         let at = list.iter().position(|(name, _)| name == param);
         let changed = match (at, value) {
-            (Some(i), Some(v)) if list[i].1 == v => false,
+            (Some(i), Some(v)) if list[i].1 == *v => false,
             (Some(i), Some(v)) => {
-                list[i].1 = v;
+                assign_value(&mut list[i].1, v);
                 true
             }
             (None, Some(v)) => {
-                list.push((param.to_owned(), v));
+                list.push((param.to_owned(), v.clone()));
                 true
             }
             (Some(i), None) => {
@@ -437,6 +439,21 @@ impl<'a> Params<'a> {
     pub fn bound(&self, name: &str) -> Option<f32> {
         let bind = self.net.node(self.node)?.params.get(name)?.bind.as_ref()?;
         self.sig.get(&bind.node)?.value(&bind.channel)
+    }
+
+    /// Whether the parameter follows a channel binding or an expression
+    /// and no live value overrides it. Such a value is only current once
+    /// its sources have cooked this frame, so before the plan (in
+    /// [`GpuOp::needed_inputs`]) it may still be last frame's. Live values
+    /// are set before the plan and are always current.
+    pub fn is_driven(&self, name: &str) -> bool {
+        if self.live(name).is_some() {
+            return false;
+        }
+        self.net
+            .node(self.node)
+            .and_then(|n| n.params.get(name))
+            .is_some_and(|p| p.bind.is_some() || p.expr.is_some())
     }
 
     /// The value the parameter's expression gave this frame, if it has
@@ -1146,6 +1163,8 @@ pub struct Engine {
     exprs: ExprTable,
     /// Live parameter values (see [`LiveValues`]).
     live: LiveValues,
+    /// Bumped by every change to the network (see [`Engine::revision`]).
+    revision: u64,
     /// The Python worker for expressions outside the native subset.
     python: Option<Box<dyn PythonHost>>,
     py_jobs: Vec<PyJob>,
@@ -1231,6 +1250,7 @@ impl Engine {
             project_dir: None,
             exprs: ExprTable::default(),
             live: LiveValues::default(),
+            revision: 0,
             python: None,
             py_jobs: Vec::new(),
             py_results: Vec::new(),
@@ -1270,13 +1290,26 @@ impl Engine {
     /// value until cleared, is not an edit (no undo step, not saved) and
     /// marks the node for cooking when it changes. For MIDI/OSC mappings and
     /// the timeline (M3); unknown nodes are ignored.
-    pub fn set_live(&mut self, node: NodeId, param: &str, value: Option<Value>) {
+    /// Allocates nothing when a value of the same shape changes.
+    pub fn set_live(&mut self, node: NodeId, param: &str, value: Option<&Value>) {
         if self.net.node(node).is_none() {
             return;
         }
         if self.live.set(node, param, value) {
-            self.scheduler.mark_dirty(&self.net, vec![node]);
+            self.scheduler.mark_dirty_one(&self.net, node);
         }
+    }
+
+    /// Clears the live value of `node`'s `param` only if it is still
+    /// `value`: a writer (the timeline, a mapping) releases what it set
+    /// without clearing what another writer set since. Whether it cleared.
+    pub fn clear_live_if(&mut self, node: NodeId, param: &str, value: &Value) -> bool {
+        if self.live.get(node, param) != Some(value) {
+            return false;
+        }
+        self.live.set(node, param, None);
+        self.scheduler.mark_dirty_one(&self.net, node);
+        true
     }
 
     /// Clears every live value (for example when a show stops).
@@ -1435,7 +1468,15 @@ impl Engine {
         Ok(true)
     }
 
+    /// A counter bumped by every change to the network: each applied
+    /// edit, undo, redo and load. Views that derive a model from the
+    /// network (the Stage) re-read it only when this moves.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
     fn after_change(&mut self, dirty: Vec<NodeId>) {
+        self.revision += 1;
         let net = &self.net;
         self.live.nodes.retain(|id, _| net.node(*id).is_some());
         let alive = |id: &NodeId| self.net.node(*id).is_some();
@@ -2187,6 +2228,7 @@ impl Engine {
     pub fn load(&mut self, net: Network) -> Result<(), EngineError> {
         let net = net.validated(&self.registry)?;
         self.net = net;
+        self.revision += 1;
         self.history = History::default();
         self.scheduler = Scheduler::default();
         self.gpu_ops.clear();

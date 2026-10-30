@@ -3,13 +3,13 @@
 //!
 //! The panel owns the project's timeline document while it is open and
 //! writes it back to the project after every edit (so Save writes
-//! `timeline.toml`). Its [`Player`] ticks once per frame before the cook
-//! and applies tracks as live values (`Engine::set_live`); stopping clears
-//! them.
+//! `timeline.toml`, with the chased clock and the Stage mode). Its
+//! [`Player`] ticks once per frame before the cook and applies tracks as
+//! live values (`Engine::set_live`); stopping clears those it still owns.
 
 use atd_core::graph::NodeId;
 use atd_core::registry::ParamKind;
-use atd_format::timeline::{Cue, CueAction, Interp, Marker, TimelineDoc};
+use atd_format::timeline::{Cue, CueAction, Interp, Marker, TimecodeClock, TimelineDoc};
 use atd_gpu::engine::Engine;
 use atd_io::timecode::Timecode;
 use atd_timeline::{ChaseState, ClockSource, PlayState, Player};
@@ -122,9 +122,6 @@ impl TimelinePanel {
         }
     }
 
-    /// Cooks the frame: what `Engine::cook_frame` cooks (the viewed node
-    /// and every sink) plus the nodes the timeline reads (conditions, the
-    /// chased Timecode In node), in one cook.
     /// Nodes the timeline reads this frame (cue conditions, the chased
     /// Timecode In): they cook whatever node is viewed.
     pub fn watched(&self) -> &[NodeId] {
@@ -259,7 +256,9 @@ impl TimelinePanel {
                 self.revision += 1;
             }
             ui.separator();
-            let mut follow = p.timeline().follow_stage();
+            // Stage mode and clock are saved in the document; the player
+            // takes them when it rebinds (next frame).
+            let mut follow = self.doc.follow_stage;
             egui::ComboBox::from_id_salt("atd-timeline-stage")
                 .selected_text(if follow {
                     "Follow Stage"
@@ -272,8 +271,9 @@ impl TimelinePanel {
                     ui.selectable_value(&mut follow, true, "Follow Stage")
                         .on_hover_text("Launches on the Stage advance the cue list");
                 });
-            if follow != p.timeline().follow_stage() {
-                p.set_follow_stage(follow);
+            if follow != self.doc.follow_stage {
+                self.doc.follow_stage = follow;
+                self.revision += 1;
             }
             ui.separator();
             // Clock: the local clock, or a Timecode In node (MTC or LTC).
@@ -283,11 +283,12 @@ impl TimelinePanel {
                 .filter(|n| n.type_id == "sig.timecode_in")
                 .map(|n| (n.id, n.name.clone()))
                 .collect();
-            let current = match p.transport.clock {
-                ClockSource::Internal => "Internal clock".to_owned(),
-                ClockSource::Timecode => p
-                    .timecode_node()
-                    .and_then(|id| nodes.iter().find(|(n, _)| *n == id))
+            let chased = self.doc.clock.map(|c| c.node);
+            let current = match chased {
+                None => "Internal clock".to_owned(),
+                Some(id) => nodes
+                    .iter()
+                    .find(|(n, _)| *n == id)
                     .map_or("Timecode (no node)".into(), |(_, name)| {
                         format!("Chase {name}")
                     }),
@@ -297,17 +298,13 @@ impl TimelinePanel {
                 .selected_text(current)
                 .show_ui(ui, |ui| {
                     if ui
-                        .selectable_label(
-                            p.transport.clock == ClockSource::Internal,
-                            "Internal clock",
-                        )
+                        .selectable_label(chased.is_none(), "Internal clock")
                         .clicked()
                     {
                         choice = Some(None);
                     }
                     for (id, name) in &nodes {
-                        let on = p.transport.clock == ClockSource::Timecode
-                            && p.timecode_node() == Some(*id);
+                        let on = chased == Some(*id);
                         if ui.selectable_label(on, format!("Chase {name}")).clicked() {
                             choice = Some(Some(*id));
                         }
@@ -316,16 +313,16 @@ impl TimelinePanel {
                         ui.weak("Add a Timecode In node to chase MTC or LTC.");
                     }
                 });
-            if let Some(c) = choice {
-                p.transport.clock = if c.is_some() {
-                    ClockSource::Timecode
-                } else {
-                    ClockSource::Internal
-                };
-                p.set_timecode_node(c);
-                p.transport.chase.reset();
+            if let Some(c) = choice
+                && c != chased
+            {
+                let offset = self.doc.clock.map_or(0.0, |k| k.offset);
+                self.doc.clock = c.map(|node| TimecodeClock { node, offset });
+                self.revision += 1;
             }
-            if p.transport.clock == ClockSource::Timecode {
+            if p.transport.clock == ClockSource::Timecode
+                && let Some(clock) = &mut self.doc.clock
+            {
                 let state = match p.transport.chase.state() {
                     ChaseState::NoCode => "no code",
                     ChaseState::Locking => "locking",
@@ -333,13 +330,18 @@ impl TimelinePanel {
                     ChaseState::Freewheel => "freewheel",
                 };
                 ui.label(state);
-                ui.add(
-                    egui::DragValue::new(&mut p.transport.chase.config.offset)
-                        .speed(0.04)
-                        .prefix("offset ")
-                        .suffix(" s"),
-                )
-                .on_hover_text("Timeline time = timecode + offset");
+                if ui
+                    .add(
+                        egui::DragValue::new(&mut clock.offset)
+                            .speed(0.04)
+                            .prefix("offset ")
+                            .suffix(" s"),
+                    )
+                    .on_hover_text("Timeline time = timecode + offset")
+                    .changed()
+                {
+                    self.revision += 1;
+                }
             }
         });
     }

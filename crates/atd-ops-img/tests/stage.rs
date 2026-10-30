@@ -299,3 +299,76 @@ fn only_the_playing_clip_cooks() {
         "the clip that stopped does not cook"
     );
 }
+
+/// The clip in `layer`'s slot 3 (blue in [`red_blue_layer`]).
+fn slot3_clip(e: &Engine, layer: NodeId) -> NodeId {
+    e.network()
+        .inputs_of(layer)
+        .find(|(n, _)| *n == "clip3")
+        .map(|(_, s)| s.node)
+        .unwrap()
+}
+
+/// A `target` bound to a channel is only known once the channel cooks, so
+/// the clip it switches to must cook in the switch frame (not show the
+/// frame it last cooked, or nothing).
+#[test]
+fn bound_target_shows_the_current_clip_in_the_switch_frame() {
+    use atd_core::graph::ChannelRef;
+    let mut e = engine_or_skip!();
+    let ctl = add(
+        &mut e,
+        "sig.constant",
+        &[("name1", json!("slot")), ("value1", json!(0.0))],
+    );
+    let layer = red_blue_layer(&mut e, &[("target", json!(0))]);
+    e.edit(
+        "bind",
+        [Edit::SetParam {
+            node: layer,
+            param: "target".into(),
+            value: Some(Param {
+                value: json!(0),
+                expr: None,
+                bind: Some(ChannelRef {
+                    node: ctl,
+                    channel: "slot".into(),
+                }),
+            }),
+        }],
+    )
+    .unwrap();
+    near(cook_px(&mut e, layer, 0.0, 0), RED);
+    near(cook_px(&mut e, layer, 0.05, 0), RED);
+    // Slot 3's clip turns green while it is not shown.
+    let idle = slot3_clip(&e, layer);
+    set(&mut e, idle, "colour", json!([0.0, 1.0, 0.0, 1.0]));
+    near(cook_px(&mut e, layer, 0.1, 0), RED);
+    set(&mut e, ctl, "value1", json!(3.0));
+    near(cook_px(&mut e, layer, 0.2, 0), [0, 255, 0, 255]);
+}
+
+/// The same for a `target` driven by an expression of time.
+#[test]
+fn expression_target_shows_the_current_clip_in_the_switch_frame() {
+    let mut e = engine_or_skip!();
+    let layer = red_blue_layer(&mut e, &[("target", json!(0))]);
+    e.edit(
+        "expr",
+        [Edit::SetParam {
+            node: layer,
+            param: "target".into(),
+            value: Some(Param {
+                value: json!(0),
+                expr: Some("0 if time < 1 else 3".into()),
+                bind: None,
+            }),
+        }],
+    )
+    .unwrap();
+    near(cook_px(&mut e, layer, 0.0, 0), RED);
+    let idle = slot3_clip(&e, layer);
+    set(&mut e, idle, "colour", json!([0.0, 1.0, 0.0, 1.0]));
+    near(cook_px(&mut e, layer, 0.5, 0), RED);
+    near(cook_px(&mut e, layer, 1.5, 0), [0, 255, 0, 255]);
+}

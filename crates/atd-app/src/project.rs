@@ -169,10 +169,11 @@ impl ProjectState {
         }
     }
 
-    /// Saves to the project folder, or asks for one first.
-    pub fn save(&mut self, engine: &mut Engine) {
+    /// Saves to the project folder, or asks for one first. `store` gives
+    /// the edits that store mapped values ([`crate::mappings::Control::stored_values`]).
+    pub fn save(&mut self, engine: &mut Engine, store: impl FnOnce(&Engine) -> Vec<Edit>) {
         match self.dir.clone() {
-            Some(dir) => self.save_to(engine, &dir),
+            Some(dir) => self.save_to(engine, &dir, store(engine)),
             None => self.save_as(),
         }
     }
@@ -190,20 +191,26 @@ impl ProjectState {
         self.dialog = Some(Dialog::SaveAs(spawn(pick)));
     }
 
-    fn save_to(&mut self, engine: &mut Engine, dir: &Path) {
+    /// Saves with `store` applied to the saved network; only once the files
+    /// are written does the patch take them too (one undo step), so a
+    /// failed save edits nothing.
+    pub(crate) fn save_to(&mut self, engine: &mut Engine, dir: &Path, store: Vec<Edit>) {
         if !self.meta.packs.is_empty() {
             // The patch shows Pack instances expanded (`open`): saving it
             // would replace them with their insides.
             self.message = Some((PACKS_READ_ONLY.into(), true));
             return;
         }
-        // Mapped parameters keep what the controls set (docs/mappings.md).
-        if let Err(e) = crate::mappings::write_back(engine, &self.meta.mappings) {
-            self.message = Some((e, true));
-            return;
-        }
-        match save(engine, &self.meta, dir) {
+        match save(engine, &self.meta, dir, &store) {
             Ok(()) => {
+                // Mapped parameters keep what the controls set
+                // (docs/mappings.md).
+                if !store.is_empty()
+                    && let Err(e) = engine.edit("Store mapped values", store)
+                {
+                    self.message = Some((e.to_string(), true));
+                    return;
+                }
                 self.saved = engine.network().clone();
                 self.saved_mappings = self.meta.mappings.clone();
                 self.saved_timeline = self.meta.timeline.clone();
@@ -216,7 +223,12 @@ impl ProjectState {
 
     /// Handles a dialog that has been answered. Returns the node to view
     /// after an open.
-    pub fn poll(&mut self, engine: &mut Engine) -> Option<NodeId> {
+    /// `store` is as for [`Self::save`].
+    pub fn poll(
+        &mut self,
+        engine: &mut Engine,
+        store: impl FnOnce(&Engine) -> Vec<Edit>,
+    ) -> Option<NodeId> {
         let (rx, open) = match &self.dialog {
             Some(Dialog::Open(rx)) => (rx, true),
             Some(Dialog::SaveAs(rx)) => (rx, false),
@@ -255,7 +267,8 @@ impl ProjectState {
                 }
                 engine.set_project_dir(Some(dir.clone()));
             }
-            self.save_to(engine, &dir);
+            let store = store(engine);
+            self.save_to(engine, &dir, store);
             None
         }
     }
@@ -420,8 +433,12 @@ pub fn open(engine: &mut Engine, dir: &Path) -> Result<Opened, String> {
 /// Saves `engine`'s network as the project at `dir`. Paths to files inside
 /// the folder are written relative to it, with `/`, so the project can be
 /// moved or opened on another OS.
-pub fn save(engine: &Engine, meta: &Project, dir: &Path) -> Result<(), String> {
-    let net = portable_paths(engine, dir);
+pub fn save(engine: &Engine, meta: &Project, dir: &Path, store: &[Edit]) -> Result<(), String> {
+    let mut net = portable_paths(engine, dir);
+    for edit in store {
+        net.apply(engine.registry(), edit.clone())
+            .map_err(|e| format!("storing mapped values: {e}"))?;
+    }
     let mut project = meta.clone();
     project.resolution = [engine.config().width, engine.config().height];
     project.networks.clear();
@@ -507,12 +524,12 @@ fn output_of(net: &Network, registry: &atd_core::Registry) -> Option<NodeId> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use atd_core::graph::Node;
     use serde_json::json;
 
-    fn engine() -> Option<Engine> {
+    pub(crate) fn engine() -> Option<Engine> {
         let instance = atd_gpu::primary_instance();
         let adapter =
             pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()));
@@ -591,7 +608,7 @@ mod tests {
         // Save: the file inside the project is written relative, with `/`.
         let mut state = ProjectState::untitled(&Network::default());
         state.meta.name = "First".into();
-        save(&e, &state.meta, &first).unwrap();
+        save(&e, &state.meta, &first, &[]).unwrap();
         let text = std::fs::read_to_string(first.join("networks/main.toml")).unwrap();
         assert!(text.contains(r#"params.file = "media/clip.mov""#), "{text}");
         // (Windows paths are written as TOML literal strings: compare values.)
@@ -622,7 +639,7 @@ mod tests {
         assert_eq!(Path::new(&file_param(&e, "inside")), inside);
         let second = root.join("second.atidarla");
         e.set_project_dir(Some(second.clone()));
-        save(&e, &meta, &second).unwrap();
+        save(&e, &meta, &second, &[]).unwrap();
         assert_eq!(Path::new(&saved_file(&second, "inside")), inside);
         std::fs::remove_dir_all(&root).ok();
     }
@@ -743,62 +760,12 @@ mod tests {
         );
         e.cook_frame(view, 0.0).unwrap();
         let before = std::fs::read(dir.join("networks/main.toml")).unwrap();
-        state.save(&mut e);
+        state.save(&mut e, |_| Vec::new());
         let (msg, error) = state.message.clone().unwrap();
         assert!(error && msg.contains("uses Packs"), "{msg}");
         assert_eq!(
             std::fs::read(dir.join("networks/main.toml")).unwrap(),
             before
-        );
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn saving_stores_mapped_live_values_and_the_mappings() {
-        use atd_format::mappings::{Source, Target};
-        let Some(mut e) = engine() else { return };
-        let id = e.alloc_id();
-        e.edit(
-            "add",
-            [Edit::AddNode {
-                node: Node::new(id, "img.constant", "constant1"),
-            }],
-        )
-        .unwrap();
-        let mut state = ProjectState::untitled(e.network());
-        state.meta.name = "Mapped".into();
-        state.meta.mappings.add(
-            Source::Osc {
-                address: "/red".into(),
-                arg: 0,
-            },
-            Target {
-                node: id,
-                param: "colour".into(),
-                component: Some(0),
-            },
-            [0.0, 1.0],
-        );
-        assert!(state.dirty(&e), "a new mapping is an unsaved change");
-        e.set_live(id, "colour", Some(json!([0.5, 0.0, 0.0, 1.0])));
-        let dir =
-            std::env::temp_dir().join(format!("atd-app-mapped-{}.atidarla", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        state.save_to(&mut e, &dir);
-        assert_eq!(
-            state.message.as_ref().map(|m| m.1),
-            Some(false),
-            "{:?}",
-            state.message
-        );
-        assert!(!state.dirty(&e));
-        let project = atd_format::load(&dir).unwrap();
-        assert_eq!(project.mappings, state.meta.mappings);
-        let node = project.main().unwrap().node(id).unwrap();
-        assert_eq!(node.params["colour"].value, json!([0.5, 0.0, 0.0, 1.0]));
-        assert!(
-            e.live_values().get(id, "colour").is_some(),
-            "still live after saving"
         );
         std::fs::remove_dir_all(&dir).ok();
     }

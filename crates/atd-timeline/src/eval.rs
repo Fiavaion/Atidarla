@@ -151,7 +151,7 @@ impl Timeline {
             go: false,
             current: None,
             edits_as_live: false,
-            follow_stage: false,
+            follow_stage: doc.follow_stage,
             problems: Vec::new(),
             watched: Vec::new(),
         };

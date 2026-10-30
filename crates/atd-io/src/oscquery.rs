@@ -274,7 +274,9 @@ pub fn respond(list: &[Advertised], name: &str, osc_port: u16, target: &str) -> 
 
 #[derive(Debug, Default)]
 struct Snapshot {
-    list: Vec<Advertised>,
+    /// Shared so a request builds its response after letting go of the
+    /// lock (the app publishes under it).
+    list: Arc<Vec<Advertised>>,
     generation: u64,
 }
 
@@ -393,6 +395,7 @@ impl OscQueryServer {
 
     /// Replaces the advertised parameters.
     pub fn publish(&self, list: Vec<Advertised>) {
+        let list = Arc::new(list);
         let mut s = self
             .shared
             .snapshot
@@ -477,7 +480,9 @@ fn serve(mut stream: TcpStream, sh: &Shared, name: &str, osc_port: u16) -> io::R
                 .unwrap_or_else(|e| e.into_inner())
                 .0;
         }
-        respond(&s.list, name, osc_port, &target)
+        let list = Arc::clone(&s.list);
+        drop(s);
+        respond(&list, name, osc_port, &target)
     };
     let text = match status {
         200 => "OK",

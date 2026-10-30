@@ -551,6 +551,13 @@ impl Launcher {
         edits
     }
 
+    /// Whether the launcher acts on the clock without input: a one-shot
+    /// or flash waiting to return, or the autopilot running. The app keeps
+    /// frames coming while it is.
+    pub fn busy(&self) -> bool {
+        !self.returns.is_empty() || self.autopilot.is_some()
+    }
+
     fn forget(&mut self, layer: NodeId) {
         self.returns.retain(|r| r.layer != layer);
     }
@@ -876,10 +883,15 @@ mod tests {
         let deck = f.deck();
         f.apply(launch.press(&deck.layers[0], 1, 10.0));
         assert_eq!(f.deck().layer(l0).unwrap().target, Some(1));
+        assert!(
+            launch.busy(),
+            "a return is pending: frames must keep coming"
+        );
         assert!(launch.tick(&f.deck(), 11.9).is_empty());
         let edits = launch.tick(&f.deck(), 12.0);
         f.apply(edits);
         assert_eq!(f.deck().layer(l0).unwrap().target, Some(0));
+        assert!(!launch.busy());
         assert!(launch.tick(&f.deck(), 13.0).is_empty(), "returned once");
 
         // A launch meanwhile wins over the return.
@@ -920,6 +932,7 @@ mod tests {
         let deck = f.deck();
         assert_eq!(deck.current_column(), Some(1));
         assert!(launch.tick(&deck, 0.0).is_empty(), "starts counting");
+        assert!(launch.busy(), "the autopilot runs");
         assert!(launch.tick(&deck, 3.9).is_empty());
         let edits = launch.tick(&deck, 4.0);
         f.apply(edits);

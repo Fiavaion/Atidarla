@@ -449,7 +449,8 @@ impl AtidarlaApp {
 
     fn save(&mut self) {
         if let Some(engine) = &mut self.panels.engine {
-            self.project.save(engine);
+            let control = &self.panels.control;
+            self.project.save(engine, |e| control.stored_values(e));
         }
     }
 
@@ -474,7 +475,8 @@ impl AtidarlaApp {
         let Some(engine) = &mut self.panels.engine else {
             return;
         };
-        if let Some(view) = self.project.poll(engine) {
+        let control = &self.panels.control;
+        if let Some(view) = self.project.poll(engine, |e| control.stored_values(e)) {
             self.show_loaded(Some(view));
         }
         let engine = self.panels.engine.as_mut().expect("checked above");
@@ -767,16 +769,15 @@ impl AtidarlaApp {
             p.outputs.present(engine, rs, cooked);
         }
         p.outputs.show_windows(ctx, engine, cooked);
-        let Some(viewed) = viewed else {
-            if cooked > 0 {
-                ctx.request_repaint();
-            }
-            return;
-        };
-        if cooked > 0 || p.timeline.playing() {
-            // Something changed or is animating: keep frames coming.
+        // Something changed or is animating (a playing timeline, a Stage
+        // one-shot or flash waiting to return, the autopilot): keep frames
+        // coming, whether or not anything is viewed.
+        if cooked > 0 || p.timeline.playing() || p.stage.wants_frames() {
             ctx.request_repaint();
         }
+        let Some(viewed) = viewed else {
+            return;
+        };
         if let Some(ch) = engine.channels(viewed) {
             if cooked > 0 || p.history.is_empty() {
                 p.history.push(viewed, ch);

@@ -7,6 +7,11 @@
 //! length = 32.0
 //! fps = 60.0
 //! loop = [8.0, 16.0]
+//! stage = "follow"
+//!
+//! [clock]
+//! node = 12
+//! offset = -3600.0
 //!
 //! [[track]]
 //! node = 3
@@ -54,6 +59,11 @@
 //!   through the key's `out` handle and the next key's `in` handle, each
 //!   `[seconds, value]` relative to its key (default: a third of the
 //!   segment, flat, which eases in and out).
+//! - `stage` is `drive` (the default, not written: cues launch clips) or
+//!   `follow` (launches on the Stage advance the cue list).
+//! - `[clock]`, when present, chases the Timecode In node `node` (MTC or
+//!   LTC); timeline time = timecode + `offset` seconds (default 0, not
+//!   written). Without it the timeline runs on the internal clock.
 //! - Reading rejects unknown keys, so a typo in a hand-edited file is an
 //!   error rather than silently ignored.
 
@@ -82,6 +92,11 @@ pub struct TimelineDoc {
     pub fps: f64,
     /// Loop region `[start, end]` in seconds, when looping is set up.
     pub loop_region: Option<[f64; 2]>,
+    /// Follow the Stage (its launches advance the cue list) instead of
+    /// driving it (cues launch).
+    pub follow_stage: bool,
+    /// The timecode chased; `None` runs on the internal clock.
+    pub clock: Option<TimecodeClock>,
     pub tracks: Vec<Track>,
     pub markers: Vec<Marker>,
     pub cues: Vec<Cue>,
@@ -93,11 +108,22 @@ impl Default for TimelineDoc {
             length: 60.0,
             fps: 60.0,
             loop_region: None,
+            follow_stage: false,
+            clock: None,
             tracks: Vec::new(),
             markers: Vec::new(),
             cues: Vec::new(),
         }
     }
+}
+
+/// Chasing timecode read by a Timecode In node.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TimecodeClock {
+    /// The Timecode In node (MTC or LTC).
+    pub node: NodeId,
+    /// Seconds added to the timecode: timeline time = timecode + offset.
+    pub offset: f64,
 }
 
 /// Keyframes animating one number: a parameter, or one component of a
@@ -302,6 +328,17 @@ pub fn timeline_to_string(doc: &TimelineDoc) -> Result<String, FormatError> {
     if let Some([a, b]) = doc.loop_region {
         out.insert("loop", Item::Value(Value::Array(Array::from_iter([a, b]))));
     }
+    if doc.follow_stage {
+        out.insert("stage", Item::Value(Value::from("follow")));
+    }
+    if let Some(c) = doc.clock {
+        let mut t = Table::new();
+        t.insert("node", Item::Value(id(c.node.0)?));
+        if c.offset != 0.0 {
+            t.insert("offset", Item::Value(Value::from(c.offset)));
+        }
+        out.insert("clock", Item::Table(t));
+    }
 
     let mut tracks = ArrayOfTables::new();
     for track in &doc.tracks {
@@ -403,7 +440,9 @@ pub fn timeline_from_str(source: &str) -> Result<TimelineDoc, FormatError> {
     let root = doc.as_table();
     only_keys(
         root,
-        &["format", "length", "fps", "loop", "track", "marker", "cue"],
+        &[
+            "format", "length", "fps", "loop", "stage", "clock", "track", "marker", "cue",
+        ],
         "the file",
     )?;
     check_format(root)?;
@@ -428,6 +467,30 @@ pub fn timeline_from_str(source: &str) -> Result<TimelineDoc, FormatError> {
             ));
         }
         out.loop_region = Some([a, b]);
+    }
+    if root.get("stage").is_some() {
+        out.follow_stage = match required_str(root, "stage", "the file")? {
+            "drive" => false,
+            "follow" => true,
+            other => {
+                return Err(invalid(format!(
+                    "`stage` must be \"drive\" or \"follow\", not \"{other}\""
+                )));
+            }
+        };
+    }
+    if let Some(item) = root.get("clock") {
+        let c = item
+            .as_table_like()
+            .ok_or_else(|| invalid("`clock` must be a table".into()))?;
+        only_keys(c, &["node", "offset"], "[clock]")?;
+        out.clock = Some(TimecodeClock {
+            node: NodeId(required_u64(c, "node", "[clock]")?),
+            offset: match c.get("offset") {
+                Some(_) => number(c, "offset", "[clock]")?,
+                None => 0.0,
+            },
+        });
     }
 
     for (i, t) in tables(root.get("track"), "track")?.into_iter().enumerate() {

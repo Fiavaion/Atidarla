@@ -8,7 +8,7 @@
 //! live value, so a frame depends on the cues before its time, not on what
 //! was rendered before it.
 
-use atd_core::graph::{Edit, NodeId, Param};
+use atd_core::graph::{Edit, NodeId, Param, assign_value};
 use atd_format::timeline::TimelineDoc;
 use atd_gpu::engine::Engine;
 use serde_json::Value;
@@ -50,7 +50,7 @@ pub struct Player {
     /// Offline: the time of the last frame rendered.
     rendered: Option<f64>,
     offline: bool,
-    /// The Timecode In node chased (see [`Self::set_timecode_node`]).
+    /// The Timecode In node chased (the document's `clock`).
     timecode_node: Option<NodeId>,
     /// Nodes to cook every frame: condition references and the Timecode
     /// In node.
@@ -60,7 +60,8 @@ pub struct Player {
 }
 
 impl Player {
-    /// A stopped player for `doc` on `engine`'s network.
+    /// A stopped player for `doc` on `engine`'s network, on the clock and
+    /// in the Stage mode the document asks for.
     pub fn new(doc: TimelineDoc, engine: &Engine) -> Self {
         let mut transport = Transport::new(doc.length);
         transport.loop_region = doc.loop_region;
@@ -76,12 +77,32 @@ impl Player {
             watched: Vec::new(),
             last_error: None,
         }
-        .watching()
+        .configured()
     }
 
-    fn watching(mut self) -> Self {
-        self.rewatch();
+    fn configured(mut self) -> Self {
+        self.configure();
         self
+    }
+
+    /// Takes the clock (internal, or chasing a Timecode In node with an
+    /// offset) and the Stage mode from the document.
+    fn configure(&mut self) {
+        let doc = self.timeline.doc();
+        let (follow, clock) = (doc.follow_stage, doc.clock);
+        self.timeline.set_follow_stage(follow);
+        let node = clock.map(|c| c.node);
+        if node != self.timecode_node {
+            self.transport.chase.reset();
+        }
+        self.transport.clock = match clock {
+            Some(c) => {
+                self.transport.chase.config.offset = c.offset;
+                ClockSource::Timecode
+            }
+            None => ClockSource::Internal,
+        };
+        self.set_timecode_node(node);
     }
 
     fn rewatch(&mut self) {
@@ -92,7 +113,8 @@ impl Player {
 
     /// Chase a Timecode In node's `time` channel while its `locked` channel
     /// is on (the node reads MTC or LTC on its own thread); `None` stops.
-    pub fn set_timecode_node(&mut self, node: Option<NodeId>) {
+    /// Set from the document's `clock` (see `configure`).
+    fn set_timecode_node(&mut self, node: Option<NodeId>) {
         self.timecode_node = node;
         self.rewatch();
     }
@@ -109,10 +131,13 @@ impl Player {
     }
 
     /// A player for offline renders: drive it with [`Self::render_at`].
+    /// Offline, cues drive the Stage whatever the document's Stage mode
+    /// (there is no performer to follow).
     pub fn offline(doc: TimelineDoc, engine: &Engine) -> Self {
         let mut p = Self::new(doc, engine);
         p.offline = true;
         p.timeline.set_edits_as_live(true);
+        p.timeline.set_follow_stage(false);
         p
     }
 
@@ -125,21 +150,15 @@ impl Player {
         self.timeline.go();
     }
 
-    /// Follow the Stage (launches come from it and advance the cue list)
-    /// instead of driving it (cues launch).
-    pub fn set_follow_stage(&mut self, yes: bool) {
-        self.timeline.set_follow_stage(yes);
-    }
-
     /// Replaces the document (after an edit, or when the network changed):
     /// values of parameters no longer driven are cleared, and while playing,
     /// cues before the playhead hold their values again (no edits repeat).
+    /// The clock and Stage mode follow the new document.
     pub fn rebind(&mut self, doc: TimelineDoc, engine: &mut Engine) {
         self.transport.length = doc.length;
         self.transport.loop_region = doc.loop_region;
         let mut next = Timeline::bind(doc, engine.network(), engine.registry());
         next.set_edits_as_live(self.offline);
-        next.set_follow_stage(self.timeline.follow_stage());
         let mut applied = vec![None; next.slots().len()];
         for (old, value) in self.timeline.slots().iter().zip(&mut self.applied) {
             let Some(value) = value.take() else { continue };
@@ -149,7 +168,9 @@ impl Player {
                 .position(|s| s.node == old.node && s.param == old.param)
             {
                 Some(i) => applied[i] = Some(value),
-                None => engine.set_live(old.node, &old.param, None),
+                None => {
+                    engine.clear_live_if(old.node, &old.param, &value);
+                }
             }
         }
         if self.transport.state() != PlayState::Stopped {
@@ -157,7 +178,10 @@ impl Player {
         }
         self.timeline = next;
         self.applied = applied;
-        self.rewatch();
+        self.configure();
+        if self.offline {
+            self.timeline.set_follow_stage(false);
+        }
         self.apply(engine);
     }
 
@@ -236,7 +260,7 @@ impl Player {
     }
 
     /// Stops: clears every live value the timeline set and forgets fired
-    /// cues.
+    /// cues. A value another writer (a mapping) set since stays.
     pub fn stop(&mut self, engine: &mut Engine) {
         self.transport.stop();
         self.clear(engine);
@@ -244,8 +268,8 @@ impl Player {
 
     fn clear(&mut self, engine: &mut Engine) {
         for (slot, value) in self.timeline.slots().iter().zip(&mut self.applied) {
-            if value.take().is_some() {
-                engine.set_live(slot.node, &slot.param, None);
+            if let Some(v) = value.take() {
+                engine.clear_live_if(slot.node, &slot.param, &v);
             }
         }
         self.timeline.reset();
@@ -289,13 +313,28 @@ impl Player {
         }
     }
 
-    /// Gives the engine every slot's value; only changes are sent.
+    /// Gives the engine every slot's value; only changes are sent. A
+    /// number or colour changing every frame allocates nothing.
     fn apply(&mut self, engine: &mut Engine) {
         for (s, slot) in self.timeline.slots().iter().enumerate() {
             let want = self.timeline.value(s);
-            if want != self.applied[s].as_ref() {
-                engine.set_live(slot.node, &slot.param, want.cloned());
-                self.applied[s] = want.cloned();
+            if want == self.applied[s].as_ref() {
+                continue;
+            }
+            match (want, &mut self.applied[s]) {
+                (Some(w), Some(a)) => {
+                    engine.set_live(slot.node, &slot.param, Some(w));
+                    assign_value(a, w);
+                }
+                (Some(w), a) => {
+                    engine.set_live(slot.node, &slot.param, Some(w));
+                    *a = Some(w.clone());
+                }
+                (None, a) => {
+                    if let Some(prev) = a.take() {
+                        engine.clear_live_if(slot.node, &slot.param, &prev);
+                    }
+                }
             }
         }
     }

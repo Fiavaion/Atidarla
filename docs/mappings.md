@@ -27,7 +27,9 @@ The **input monitor** lists the last 64 MIDI and OSC messages with their age, wh
 
 ## Saving
 
-Mappings are part of the project (`mappings.toml`, below) and count as unsaved changes. Live values themselves are never saved, but **saving stores the current live value of every mapped parameter as its value** (one undo step, "Store mapped values"; bindings and expressions stay), so a project reopens looking the way the controls left it. Opening another project clears all live values.
+Mappings are part of the project (`mappings.toml`, below) and count as unsaved changes. Live values themselves are never saved, but **saving stores the value each mapping last wrote as its parameter's value**, only in the components mappings drive (one undo step, "Store mapped values"; bindings and expressions stay), so a project reopens looking the way the controls left it. Live values from the timeline or OSCQuery are not stored. The edit is made only after the project files were written: a save that fails changes nothing. Opening another project clears all live values.
+
+Deleting or retargeting a mapping releases its parameter: the live value goes, unless another mapping still drives the parameter or another writer (the timeline, OSCQuery) has set it since. The timeline likewise clears on Stop only the values it still owns.
 
 ## OSCQuery
 
@@ -38,6 +40,8 @@ Turn on **OSCQuery** in the Mappings window (saved with the project), or start t
 - sets a parameter when OSC arrives at its address, `/<node name>/<param>` (all arguments for a colour or vector), on the project's OSC port (default 9000).
 
 Text and file parameters are advertised read-only. Values are current when asked: a request makes the app publish them on its next frame. `LISTEN` (WebSocket streaming) is not offered.
+
+A value set over OSCQuery is a live value too: it holds until another writer changes the parameter or another project is opened, and it is not written back on save.
 
 ## `mappings.toml`
 
