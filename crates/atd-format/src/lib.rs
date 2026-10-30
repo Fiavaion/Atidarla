@@ -8,6 +8,8 @@
 //!   packs/<name>/         the project's copy of each Pack it uses (see [`pack`])
 //!   mappings.toml         MIDI/OSC mappings and OSC settings (see [`mappings`])
 //!   timeline.toml         keyframe tracks, markers and cues (optional, see [`timeline`])
+//!   batch/<name>.toml     batch wedges (optional, see [`batch`])
+//!   media/bin/            batch results and their index (see [`media_bin`])
 //!   media/ shaders/ ...   files the patch refers to by relative path
 //!   .cache/               binaries, ignored by Git
 //! ```
@@ -22,7 +24,9 @@
 //! Path parameters (movies, audio, fonts) may be relative: they are
 //! relative to the project folder (`Params::resolve` in `atd-gpu`).
 
+pub mod batch;
 pub mod mappings;
+pub mod media_bin;
 pub mod models;
 mod network;
 pub mod pack;
