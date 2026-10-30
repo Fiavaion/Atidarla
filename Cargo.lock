@@ -443,6 +443,7 @@ name = "atd-ops-pnt"
 version = "0.0.1"
 dependencies = [
  "atd-core",
+ "atd-format",
  "atd-gpu",
  "atd-interop",
  "atd-kernel",

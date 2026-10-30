@@ -268,6 +268,7 @@ impl eframe::App for AtidarlaApp {
         self.shortcuts(ui);
         self.project_frame(ui.ctx());
         self.python_frame(ui.ctx());
+        self.kernels_frame();
         egui::Panel::top("menu_bar").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| self.file_menu(ui));
@@ -510,6 +511,32 @@ impl AtidarlaApp {
             let view = self.project.run(engine, action);
             self.show_loaded(view);
         }
+    }
+
+    /// The open project's kernel operators: hot reload of saved
+    /// `kernels/*.atk` files (FR-K4). Parameter values whose name and kind
+    /// still fit the new schema are kept.
+    fn kernels_frame(&mut self) {
+        let (Some(engine), Some(kernels)) = (&mut self.panels.engine, &mut self.project.kernels)
+        else {
+            return;
+        };
+        // The watcher thread read and compiled the files; this applies them.
+        let Some(reload) = engine.extend(|r, l| kernels.poll(r, l)) else {
+            return;
+        };
+        let (edits, notes) = atd_ops_pnt::project::stale_edits(engine.network(), engine.registry());
+        let mut message = match reload.errors.first() {
+            Some(e) => (e.to_string(), true),
+            None => (format!("Reloaded {}", reload.files.join(", ")), false),
+        };
+        if !edits.is_empty() {
+            match engine.edit("Reload kernels", edits) {
+                Ok(()) => message.0 += &format!(" ({})", notes.join("; ")),
+                Err(e) => message = (format!("Reloading kernels: {e}"), true),
+            }
+        }
+        self.project.message = Some(message);
     }
 
     /// The open project's Python operators: hot reload of saved files

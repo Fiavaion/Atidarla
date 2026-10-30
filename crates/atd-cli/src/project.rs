@@ -9,6 +9,7 @@ use atd_core::graph::{Edit, Network, Node, NodeId};
 use atd_core::pack::{Flat, PackError, PackSet};
 use atd_core::registry::{Availability, Registry};
 use atd_gpu::engine::{Engine, EngineConfig, OpLibrary};
+use atd_ops_pnt::project::ProjectKernels;
 
 /// What `check` verifies beyond loading.
 #[derive(Debug, Clone, Copy)]
@@ -37,14 +38,30 @@ pub(crate) fn python_ops(
     Ok(ops)
 }
 
-/// A network that does not validate, with unknown Python operator types
-/// explained (a missing file, an operator not declared).
+/// Reads and compiles a project's `kernels/` files and registers their
+/// operators; the first error in a file is an error.
+pub(crate) fn kernel_ops(
+    dir: &Path,
+    registry: &mut Registry,
+    library: &mut OpLibrary,
+) -> Result<ProjectKernels> {
+    let kernels = ProjectKernels::open(dir);
+    if let Some(e) = kernels.errors().first() {
+        bail!("{e}");
+    }
+    kernels.register(registry, library);
+    Ok(kernels)
+}
+
+/// A network that does not validate, with unknown Python and kernel
+/// operator types explained (a missing file, an operator not declared).
 pub(crate) fn explain(
     e: atd_core::graph::GraphError,
     ops: &atd_py::ops::PythonOps,
+    kernels: &ProjectKernels,
 ) -> anyhow::Error {
     if let atd_core::graph::GraphError::UnknownType(t) = &e
-        && let Some(why) = ops.explain(t)
+        && let Some(why) = ops.explain(t).or_else(|| kernels.explain(t))
     {
         return anyhow::anyhow!("{e}: {why}");
     }
@@ -115,6 +132,8 @@ pub(crate) struct Loaded {
     pub shaders: Vec<String>,
     /// The project's Python operators: declared, not yet allowed to run.
     pub python: atd_py::ops::PythonOps,
+    /// The project's kernel operators (`kernels/*.atk`).
+    pub kernels: ProjectKernels,
 }
 
 /// Loads `dir`, registers its shaders and Packs, and validates every network.
@@ -127,11 +146,12 @@ pub(crate) fn load_checked(dir: &Path) -> Result<Loaded> {
         bail!("shaders/{name}: {e}");
     }
     let python = python_ops(dir, &mut registry, &mut library)?;
+    let kernels = kernel_ops(dir, &mut registry, &mut library)?;
     let registry = project.packs.register(&registry).map_err(pack_error)?;
     for (id, net) in &project.networks {
         net.clone()
             .validated(&registry)
-            .map_err(|e| explain(e, &python))
+            .map_err(|e| explain(e, &python, &kernels))
             .with_context(|| format!("networks/{id}.toml"))?;
     }
     Ok(Loaded {
@@ -140,6 +160,7 @@ pub(crate) fn load_checked(dir: &Path) -> Result<Loaded> {
         library,
         shaders,
         python,
+        kernels,
     })
 }
 
@@ -169,6 +190,7 @@ fn check_one(dir: &Path, gpu: Option<&atd_gpu::GpuContext>, opts: CheckOptions) 
         library,
         shaders,
         mut python,
+        kernels,
     } = load_checked(dir)?;
     canonical(
         dir,
@@ -201,6 +223,10 @@ fn check_one(dir: &Path, gpu: Option<&atd_gpu::GpuContext>, opts: CheckOptions) 
     let py_count = python.ops().count();
     if py_count > 0 {
         summary += &format!(", {py_count} Python operators");
+    }
+    let kernel_count = kernels.schemas().count();
+    if kernel_count > 0 {
+        summary += &format!(", {kernel_count} kernel operators");
     }
     let Some(gpu) = gpu else {
         return Ok(summary);

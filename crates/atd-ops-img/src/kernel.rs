@@ -544,3 +544,34 @@ impl GpuOp for ProjectKernel {
         self.runner.status()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_default_kernel_compiles_with_the_layout_the_pass_expects() {
+        let c = atd_kernel::compile(DEFAULT, &CompileOptions::new(Target::Pixels)).unwrap();
+        assert_eq!(c.params[0].name, "speed");
+        assert_eq!(defaults(&c), [[1.0, 0.0, 0.0, 0.0]]);
+        let b = &c.bindings;
+        assert_eq!((b.uniforms.group, b.uniforms.binding), (0, 0));
+        assert!(
+            b.images
+                .iter()
+                .all(|i| i.group == 1 && i.binding == i.input)
+        );
+    }
+
+    #[test]
+    fn shared_sources_hand_new_text_to_nodes_once() {
+        let shared = SharedSource::new(Ok(Arc::from("a")));
+        let mut node = ProjectSource::new(shared.clone());
+        assert_eq!(node.get().unwrap().as_ref(), "a");
+        let mut seen = shared.generation.load(Ordering::Acquire);
+        assert!(shared.newer(&mut seen).is_none());
+        shared.set(Err("gone".into()));
+        assert_eq!(node.get(), Err("gone".into()));
+        assert!(shared.newer(&mut seen).is_some());
+    }
+}

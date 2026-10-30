@@ -170,6 +170,8 @@ pub struct Renderer {
     warnings: Vec<String>,
     /// The loaded project's Python operators (their worker).
     python: Option<atd_py::ops::PythonOps>,
+    /// The loaded project's kernel operators (their files' texts).
+    kernels: Option<atd_ops_pnt::project::ProjectKernels>,
 }
 
 impl Renderer {
@@ -188,6 +190,7 @@ impl Renderer {
             unavailable: BTreeSet::new(),
             warnings: Vec::new(),
             python: None,
+            kernels: None,
         })
     }
 
@@ -211,6 +214,10 @@ impl Renderer {
         if opts.allow_python_ops {
             python.allow();
         }
+        // Kernel files are read once, as they are when the render starts.
+        let kernels = self
+            .engine
+            .extend(|r, l| crate::project::kernel_ops(dir, r, l))?;
         // Pack instances are expanded into the nodes inside them
         // (`docs/packs.md`); the engine cooks the flat network.
         let registry = project
@@ -231,11 +238,14 @@ impl Renderer {
         self.engine
             .load(flat.network)
             .map_err(|e| match e {
-                atd_gpu::engine::EngineError::Graph(g) => crate::project::explain(g, &python),
+                atd_gpu::engine::EngineError::Graph(g) => {
+                    crate::project::explain(g, &python, &kernels)
+                }
                 other => other.into(),
             })
             .with_context(|| format!("{}", dir.display()))?;
         self.python = Some(python);
+        self.kernels = Some(kernels);
         let [w, h] = opts.size.unwrap_or(project.resolution);
         self.engine.set_resolution(w, h);
         self.output = output;
@@ -432,6 +442,12 @@ pub fn classify(type_id: &str) -> Option<Class> {
         // threads; offline each frame waits for its own result.
         return Some(Waits);
     }
+    if type_id.starts_with(atd_ops_pnt::project::TYPE_PREFIX) {
+        // Project kernel operators (`kernels/*.atk`): compiled on a worker
+        // thread, the file read once; a Points kernel's state lives on the
+        // wire.
+        return Some(Waits);
+    }
     if type_id.starts_with("py.") {
         // Python operators (`docs/python-ops.md`): cooked on the Python
         // operator worker; offline each frame waits for its own result.
@@ -475,6 +491,8 @@ pub fn classify(type_id: &str) -> Option<Class> {
             Pure
         }
         "img.movie_in" | "img.text" | "img.wgsl" | "sig.audio_file_in" => Waits,
+        // Waits for its compile (and its file).
+        "img.kernel" => Waits,
         // Waits for its compile (and its file); its state lives on the wire.
         "pnt.kernel" => Waits,
         // Compile; persistent `state` images and buffers also make it stateful.
@@ -767,6 +785,25 @@ mod tests {
             "{:?}",
             a.engine.status(shapes)
         );
+    }
+
+    /// The kernel examples (project kernel operators from `kernels/*.atk`,
+    /// `img.kernel` and `pnt.kernel` inline) render to the same frames
+    /// twice, and animate.
+    #[test]
+    fn kernel_operators_render_deterministically() {
+        let Some(mut a) = renderer() else { return };
+        let mut b = renderer().unwrap();
+        assert_eq!(classify("kernel.curl"), Some(Class::Waits));
+        assert_eq!(classify("img.kernel"), Some(Class::Waits));
+        for name in ["kernel-particles", "kernel-pixels"] {
+            let dir = example(name);
+            a.load(&dir, &opts(0..12)).unwrap();
+            b.load(&dir, &opts(0..12)).unwrap();
+            let (fa, fb) = (render(&mut a, 0..12), render(&mut b, 0..12));
+            assert_eq!(fa, fb, "{name}");
+            assert_ne!(fa[0].1, fa[11].1, "{name} animates");
+        }
     }
 
     /// The Python operators example (`docs/python-ops.md`) renders to the
