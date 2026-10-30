@@ -1,6 +1,6 @@
 # M2 foundations: review sheet for Mark
 
-Written 2026-10-19 after an overnight run. **Status: built ahead of the milestone order, at Mark's instruction; nothing here is ratified.** CI is green on all jobs at commit `68d9453` (Windows, macOS, Linux, FFmpeg, app smoke, AI Host, cargo deny). Locally: 512 tests pass, 0 fail, 10 ignored (benches and manual timing tests); fmt, clippy `-D warnings` and `docs --check` are clean; every example (34) and every shipped Pack (7) cooks. Since then (2026-10-22): 8 more Packs, so 15 shipped Packs and 42 examples, all of which cook (`packs.md`).
+Written 2026-10-19 after an overnight run. **Status: built ahead of the milestone order, at Mark's instruction; decisions answered 2026-10-30, see "Decisions I need from you".** CI is green on all jobs at commit `68d9453` (Windows, macOS, Linux, FFmpeg, app smoke, AI Host, cargo deny). Locally: 512 tests pass, 0 fail, 10 ignored (benches and manual timing tests); fmt, clippy `-D warnings` and `docs --check` are clean; every example (34) and every shipped Pack (7) cooks. Since then (2026-10-22): 8 more Packs, so 15 shipped Packs and 42 examples, all of which cook (`packs.md`).
 
 M1 is still open: it needs your hardware checks (see "Hand checks for Mark" in `../M1.md`).
 
@@ -17,7 +17,7 @@ Each area has its own notes file (what was built, evidence actually run, open qu
 | Packs (FR-P4) | Nested networks, promoted parameters, versions, lock/unlock, update in place, folder format, 15 shipped Packs (the ≥15 the Palette needs) | `packs.md`, `../../packs.md` | flattened before the cook; fuzzed; Pack examples render identically |
 | NCA + compute (FR-K5) | `img.nca` (hand-built weights only) and `img.compute` (`#bind`, tile, iterations) | `nca-compute.md`, `../../compute.md`, `../../nca.md` | NCA 1.2 ms/frame at 640x360, 8 steps; CPU-reference matches |
 | Python operators | `@atidarla.op` operators in a project's `ops/`, schema without running code, opt-in trust gate, hot reload that keeps state | `python-ops.md`, `../../python-ops.md` | nothing in `ops/` runs until allowed |
-| Kernel DSL (A12, **Proposed**) | Compiler crate only (parser, typed IR, WGSL, CPU reference), isolated and removable | `kernel-dsl.md`, `../../kernel-dsl.md` | GPU results match the CPU reference; not wired to the engine |
+| Kernel DSL (A12, ratified 2026-10-30) | Compiler crate only (parser, typed IR, WGSL, CPU reference), isolated and removable | `kernel-dsl.md`, `../../kernel-dsl.md` | GPU results match the CPU reference; not wired to the engine |
 | Offline render (FR-H1) | `atidarla render`: fixed-step PNG sequence, byte-identical across runs | `../../render.md` | CI compares two renders on Windows and macOS |
 
 Operator counts now: IMG 45, SIG 29, PNT 34, MSH 26, MAT 6.
@@ -37,7 +37,7 @@ cargo run -p atd-cli --release -- render examples/pnt-solver.atidarla --out .scr
 
 ## Decisions I need from you
 
-All of these are listed with their context in the notes files. Proposed decision-log rows are in each file; their IDs collide (Packs and NCA both propose A26/A27), so number them when you accept.
+All of these are listed with their context in the notes files. Proposed decision-log rows are in each file; their IDs collided (Packs and NCA both proposed A26/A27); they were renumbered A26-A43 when accepted.
 
 1. **A12, the Kernel DSL**: ratify, amend or reject. Only the kernel acceptance criteria wait on it, and the crate is removable.
 2. **A25** (engine extension points: offline cook mode, `GpuOp` hooks, Hide fallback; already in the PRD log as pending review) and **A24** (Windows defaults to DX12).
@@ -49,6 +49,8 @@ All of these are listed with their context in the notes files. Proposed decision
 8. **Conventions** (MAT/render): counter-clockwise front faces, Y up, `uv` with v up, screen-door transparency without sorting.
 9. **`.mov` output** for `atidarla render`: HAP encoder or FFmpeg encoding.
 10. **The AC1 example** strobes to full white on loud beats (see `../M1.md`): calmer?
+
+**Answered 2026-10-30** (all recorded in PRD §0): 1 A12 ratified; 2 A25 and A24 ratified; 3 A46 (and A28); 4 A40, A41 (flatten before cook, `cmp.pack_<name>` IDs), A44 (engine owns the edited network and a flattened copy), A45 (`project.toml` does not list Packs); 5 A47; 6 A48; 7 A49; 8 A50 (and A39); 9 A51; 10 A52. The proposed rows from the notes files were accepted as A26-A43, and A9 was ratified too.
 
 ## Known gaps and honest caveats
 

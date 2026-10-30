@@ -89,10 +89,10 @@ Commands: `cargo test -p atd-ops-msh`; `cargo test -p atd-ops-msh --release --te
 4. **Welded primitives without `uv`** (consequence of design Q2, no vertex attributes): acceptable, or should primitives offer a "split seams with uv" option?
 5. **Render-thread allocations on change**: accept "none when unchanged, a few small ones per changed cook" for MSH nodes under rule 2, like the GEO bound?
 
-## Proposed PRD decision-log rows (IDs to be assigned at merge)
+## Decision-log rows: ratified 2026-10-30 (Mark accepted; IDs assigned, now in PRD §0)
 
 | ID | Decision | Rationale |
 |---|---|---|
-| MSH-1 | MSH operators are pure functions of (parameter snapshot, input meshes) run on a shared worker pool; live, a node shows its last finished result and cooks again until the newest is in (latest wins, one running and one waiting, cancellation by flag); offline, a node flushes the frame's GPU work, reads back, and waits. | Rule 1 and FR-H1 together: renders are byte-identical (four examples, 120/120 frames) while the live render thread never waits. |
-| MSH-2 | The worker uploads MSH results (point attributes and header) itself; topology stays on the CPU until a GPU consumer needs it. | `Queue::write_buffer` from a worker works (S3); the render thread only swaps a value, so a 1M-point result costs it nothing. |
-| MSH-3 | Mesh file readers are written in-crate and bounded: counts checked against the bytes left before allocating, files over 512 MiB refused, fuzzed with a 64 MiB per-allocation cap. | Mesh files are untrusted input (same policy as the media fuzz tests); no new dependency licences to vet. |
+| A34 (was MSH-1) | MSH operators are pure functions of (parameter snapshot, input meshes) run on a shared worker pool; live, a node shows its last finished result and cooks again until the newest is in (latest wins, one running and one waiting, cancellation by flag); offline, a node flushes the frame's GPU work, reads back, and waits. | Rule 1 and FR-H1 together: renders are byte-identical (four examples, 120/120 frames) while the live render thread never waits. |
+| A35 (was MSH-2) | The worker uploads MSH results (point attributes and header) itself; topology stays on the CPU until a GPU consumer needs it. | `Queue::write_buffer` from a worker works (S3); the render thread only swaps a value, so a 1M-point result costs it nothing. |
+| A36 (was MSH-3) | Mesh file readers are written in-crate and bounded: counts checked against the bytes left before allocating, files over 512 MiB refused, fuzzed with a 64 MiB per-allocation cap. | Mesh files are untrusted input (same policy as the media fuzz tests); no new dependency licences to vet. |

@@ -65,18 +65,18 @@ Two other agents were compiling and running GPU work on the same machine through
 
 ## Questions for Mark
 
-1. **MAT contract** (rows MAT-1, MAT-2 below): accept materials as CPU plain data with a fixed uniform block, textures looked up by source node, and one shared `shade()` over model IDs?
+1. **MAT contract** (rows A37, A38 below): accept materials as CPU plain data with a fixed uniform block, textures looked up by source node, and one shared `shade()` over model IDs?
 2. **The six MATs** are the PRD's PBR, Unlit, Matcap, Toon, Line and Point Sprite, with "Textured", "Vertex-colour" and "Emissive" as parameters of Unlit and PBR rather than operators. Agreed?
 3. **Camera and lights as parameters** until CMP lands; then Render gains `camera` and `light` CMP inputs that override them?
-4. **Conventions** (row MAT-3): counter-clockwise front faces, cull back by default, `uv` v up, Y-up right-handed world, no colour conversion?
+4. **Conventions** (row A39): counter-clockwise front faces, cull back by default, `uv` v up, Y-up right-handed world, no colour conversion?
 5. **Antialiasing and transparency:** 4× MSAA with coverage as a sample mask, screen-door alpha, no sorting: enough for M2?
 6. **`msh.platonic`:** keep it as an MSH operator (it is not in the PRD's MSH list) or retire it when the MSH primitives merge and move the examples to them?
 7. **Four slots per Render** (one depth buffer); more objects mean several Renders composited (no shared depth) until a CMP scene exists. Enough?
 
-## Proposed PRD decision-log rows (for Mark to accept, amend or reject; IDs to be assigned at merge)
+## Decision-log rows: ratified 2026-10-30 (Mark accepted; IDs assigned, now in PRD §0)
 
 | ID | Decision | Rationale |
 |---|---|---|
-| MAT-1 | A `MAT` value is CPU plain data: a shading-model ID, a fixed uniform block and at most one texture, which is the material operator's first IMG input and is looked up by source node when drawing; shading is one shared WGSL `shade()` over model IDs; a WGSL or Kernel material brings its own `shade()` with a pipeline per shader. | No GPU objects or allocation per material; every renderer shades alike; a material can never hold a recycled pooled texture. |
-| MAT-2 | Render IMG draws GEO through draw records built on the GPU from CSR topology (polygon fans with edge flags, polyline segments; integer scan and binary search, no atomics) with vertex pulling, depth "less", draws in slot and primitive order, and MSAA whose coverage is a fixed sample mask (no blending). Topology sizes are validated on the CPU; bad indices and non-finite positions are dropped on the GPU. | Byte-identical offline renders (FR-H1) and no GPU fault from hostile geometry; measured 120/120 identical frames on three examples. |
-| MAT-3 | Geometry conventions for rendering: right-handed Y-up world, camera looking down −Z, counter-clockwise front faces, `uv` with v up, `N` point normal else faceted, `Cd` point else prim, colours not converted. | MSH, PNT, importers and the renderer must agree; these match glTF's winding and OpenGL/Houdini's uv (glTF importers flip v). |
+| A37 (was MAT-1) | A `MAT` value is CPU plain data: a shading-model ID, a fixed uniform block and at most one texture, which is the material operator's first IMG input and is looked up by source node when drawing; shading is one shared WGSL `shade()` over model IDs; a WGSL or Kernel material brings its own `shade()` with a pipeline per shader. | No GPU objects or allocation per material; every renderer shades alike; a material can never hold a recycled pooled texture. |
+| A38 (was MAT-2) | Render IMG draws GEO through draw records built on the GPU from CSR topology (polygon fans with edge flags, polyline segments; integer scan and binary search, no atomics) with vertex pulling, depth "less", draws in slot and primitive order, and MSAA whose coverage is a fixed sample mask (no blending). Topology sizes are validated on the CPU; bad indices and non-finite positions are dropped on the GPU. | Byte-identical offline renders (FR-H1) and no GPU fault from hostile geometry; measured 120/120 identical frames on three examples. |
+| A39 (was MAT-3) | Geometry conventions for rendering: right-handed Y-up world, camera looking down −Z, counter-clockwise front faces, `uv` with v up, `N` point normal else faceted, `Cd` point else prim, colours not converted. | MSH, PNT, importers and the renderer must agree; these match glTF's winding and OpenGL/Houdini's uv (glTF importers flip v). |

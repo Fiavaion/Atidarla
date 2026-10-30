@@ -126,14 +126,14 @@ the top-level loop's result; Piece and Randomize keyed by piece.
 5. **Render Points lines** (one-pixel polylines): keep in Render Points, or move to the 3D
    render operator the MAT area is building?
 
-## Proposed PRD decision-log rows (IDs at merge)
+## Decision-log rows: ratified 2026-10-30 (Mark accepted; IDs assigned, now in PRD §0)
 
 | ID | Decision | Rationale |
 |---|---|---|
-| PNT-1 | PNT operators that change the point count (Delete, Subset, Age, Merge, Copy, Emitter) give GPU-counted results when any count is only on the GPU, and never read a count back. | Rule 1; compaction by an integer scan keeps order and determinism (GEO-4). |
-| PNT-2 | The Solver Block is a Pack around `pnt.solver` (init + feedback); sub-steps, if built, unroll at flatten time. | State stays on the wire (D6); no container type in the engine. |
-| PNT-3 | For-Each in M2 is a `piece` attribute (Piece) and operators keyed by an attribute (Randomize, Group, Delete, Sort, Colour); per-piece parameters wait for the Kernel DSL. | Design §3.2 "once over all elements with the piece index as an attribute"; one dispatch per operator. |
-| PNT-4 | Operators that write a new header each frame bind a fixed header of their own and copy it to the pooled output header. | Bind-group caches keyed by pooled headers thrash when many operators rotate headers (measured: 6 bind groups a frame before, 0 after). |
+| A30 (was PNT-1) | PNT operators that change the point count (Delete, Subset, Age, Merge, Copy, Emitter) give GPU-counted results when any count is only on the GPU, and never read a count back. | Rule 1; compaction by an integer scan keeps order and determinism (A29, was GEO-4). |
+| A31 (was PNT-2) | The Solver Block is a Pack around `pnt.solver` (init + feedback); sub-steps, if built, unroll at flatten time. | State stays on the wire (D6); no container type in the engine. |
+| A32 (was PNT-3) | For-Each in M2 is a `piece` attribute (Piece) and operators keyed by an attribute (Randomize, Group, Delete, Sort, Colour); per-piece parameters wait for the Kernel DSL. | Design §3.2 "once over all elements with the piece index as an attribute"; one dispatch per operator. |
+| A33 (was PNT-4) | Operators that write a new header each frame bind a fixed header of their own and copy it to the pooled output header. | Bind-group caches keyed by pooled headers thrash when many operators rotate headers (measured: 6 bind groups a frame before, 0 after). |
 
 ## For the other areas
 

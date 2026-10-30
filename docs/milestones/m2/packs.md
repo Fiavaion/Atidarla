@@ -133,12 +133,12 @@ page); Packs in `atidarla bench` (FR-H4).
 8. **Library location** for installed builds (the repo's `packs/` in development): beside the
    executable, or a user folder (both)? Needed for the Palette.
 
-## Proposed decision-log rows (for Mark to accept, amend or reject)
+## Decision-log rows: ratified 2026-10-30 (Mark accepted; IDs assigned, now in PRD §0)
 
 | # | Decision | Status | Notes |
 |---|---|---|---|
-| A26 | **Packs (FR-P4):** a Pack is a network with promoted parameters, sockets by wire type, a semantic version, help and a lock flag; an instance is an operator `cmp.pack_<name>` whose parameters are the promoted ones; a nested network is an unlocked Pack; the engine cooks a network **flattened** on load and edit (inner IDs derived from the instance path), never a Pack as a unit | Proposed 2026-10-18 | `docs/packs.md`, this file |
-| A27 | **Pack files:** `packs/<name>/pack.toml` + `network.toml` + `help.md`, in projects (each project carries its own copies) and in libraries (`name@version/` for older versions); updating a project's Pack is explicit and reports interface changes and the keep/clamp/reset of each instance's values | Proposed 2026-10-18 | A11, rule 8 |
+| A40 (was A26) | **Packs (FR-P4):** a Pack is a network with promoted parameters, sockets by wire type, a semantic version, help and a lock flag; an instance is an operator `cmp.pack_<name>` whose parameters are the promoted ones; a nested network is an unlocked Pack; the engine cooks a network **flattened** on load and edit (inner IDs derived from the instance path), never a Pack as a unit | Ratified 2026-10-30 | `docs/packs.md`, this file |
+| A41 (was A27) | **Pack files:** `packs/<name>/pack.toml` + `network.toml` + `help.md`, in projects (each project carries its own copies) and in libraries (`name@version/` for older versions); updating a project's Pack is explicit and reports interface changes and the keep/clamp/reset of each instance's values | Ratified 2026-10-30 | A11, rule 8 |
 
 ## For the other areas
 
