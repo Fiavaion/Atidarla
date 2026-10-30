@@ -170,35 +170,6 @@ impl SigOp for Timer {
     }
 }
 
-#[derive(Default)]
-struct Beat {
-    beats: f64,
-}
-impl SigOp for Beat {
-    fn cook(&mut self, ctx: &mut SigCtx<'_>) -> Result<(), String> {
-        let p = ctx.params;
-        if p.bool("reset") {
-            self.beats = 0.0;
-        } else {
-            // Integrating keeps the phase continuous when the tempo changes.
-            self.beats += ctx.dt * f64::from(p.f32("bpm")) / 60.0;
-        }
-        let per_bar = p.i64("beats_per_bar").max(1) as f64;
-        let beat = self.beats.floor();
-        let bar = (self.beats / per_bar).floor();
-        ctx.output.set_single(
-            &["beat", "beat_phase", "bar", "bar_phase"],
-            &[
-                beat as f32,
-                (self.beats - beat) as f32,
-                bar as f32,
-                ((self.beats / per_bar) - bar) as f32,
-            ],
-        );
-        Ok(())
-    }
-}
-
 struct Math;
 impl SigOp for Math {
     fn cook(&mut self, ctx: &mut SigCtx<'_>) -> Result<(), String> {
@@ -450,26 +421,6 @@ pub static DEFS: &[Def] = &[
             )
         },
         create: || Box::<Timer>::default(),
-    },
-    Def {
-        schema: || {
-            sig(
-                "beat",
-                "Beat",
-                "A tempo clock: `beat` count, `beat_phase` 0–1 within the beat, `bar` count and `bar_phase`.",
-                &[],
-                vec![
-                    ParamSchema::float("bpm", "BPM", 120.0, Some(0.0), Some(999.0))
-                        .help("Tempo in beats per minute; changes keep the phase continuous."),
-                    ParamSchema::int("beats_per_bar", "Beats per Bar", 4, Some(1), Some(64))
-                        .help("Beats in one bar."),
-                    ParamSchema::toggle("reset", "Reset", false)
-                        .help("While on, holds the clock at beat zero."),
-                ],
-                true,
-            )
-        },
-        create: || Box::<Beat>::default(),
     },
     Def {
         schema: || {
@@ -868,38 +819,6 @@ mod tests {
             h.run(op.as_mut(), n, &[], 0.0, 0.1).value("seconds"),
             Some(0.0)
         );
-    }
-
-    #[test]
-    fn beat_counts_and_keeps_phase_across_tempo_changes() {
-        let mut h = Harness::new();
-        let n = h.node("beat", &[("bpm", json!(120.0))]);
-        let mut op = create("beat");
-        let mut out = Channels::default();
-        for _ in 0..5 {
-            out = h.run(op.as_mut(), n, &[], 0.0, 0.25); // 1.25 s at 2 beats/s
-        }
-        assert!(
-            approx(out.value("beat").unwrap(), 2.0)
-                && approx(out.value("beat_phase").unwrap(), 0.5)
-        );
-        h.net
-            .apply(
-                &h.reg,
-                Edit::SetParam {
-                    node: n,
-                    param: "bpm".into(),
-                    value: Some(Param::constant(json!(60.0))),
-                },
-            )
-            .unwrap();
-        out = h.run(op.as_mut(), n, &[], 0.0, 0.25);
-        assert!(
-            approx(out.value("beat_phase").unwrap(), 0.75),
-            "phase continues: {:?}",
-            out.value("beat_phase")
-        );
-        assert!(approx(out.value("bar_phase").unwrap(), 2.75 / 4.0));
     }
 
     #[test]

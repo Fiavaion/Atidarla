@@ -13,6 +13,7 @@
 
 mod audio;
 mod audio_out;
+mod clock;
 mod dmx;
 mod input;
 mod midi;
@@ -25,6 +26,7 @@ use atd_core::registry::Registry;
 use atd_gpu::engine::OpLibrary;
 
 pub use audio_out::DEFS6;
+pub use clock::DEFS9;
 pub use dmx::DEFS4;
 pub use input::DEFS8;
 pub use midi::DEFS3;
@@ -43,6 +45,7 @@ pub fn defs() -> impl Iterator<Item = &'static Def> {
         .chain(DEFS6)
         .chain(DEFS7)
         .chain(DEFS8)
+        .chain(DEFS9)
 }
 
 /// A SIG operator definition: schema plus implementation factory.

@@ -9,6 +9,16 @@
 
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Instant;
+
+/// Microseconds on a process-wide monotonic clock. Real-time messages
+/// carry their arrival time on it, so the beat clock can extrapolate to
+/// the cook's "now" (driver timestamps have a different origin on every
+/// platform).
+pub fn now_micros() -> u64 {
+    static EPOCH: OnceLock<Instant> = OnceLock::new();
+    EPOCH.get_or_init(Instant::now).elapsed().as_micros() as u64
+}
 
 /// A channel-voice message; channels are 1–16.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,12 +64,52 @@ pub enum Message {
         frames: u8,
         rate: u8,
     },
+    /// Timing clock (`F8`), 24 per quarter note. `micros` is the arrival
+    /// time on [`now_micros`]'s clock.
+    Clock {
+        micros: u64,
+    },
+    /// Start (`FA`): play from the beginning at the next clock.
+    Start {
+        micros: u64,
+    },
+    /// Continue (`FB`): play from the song position at the next clock.
+    Continue {
+        micros: u64,
+    },
+    /// Stop (`FC`).
+    Stop {
+        micros: u64,
+    },
+    /// Song Position Pointer (`F2`) in MIDI beats (sixteenth notes).
+    SongPosition {
+        sixteenths: u16,
+    },
 }
 
-/// Parses one complete MIDI message (as delivered by `midir`). System and
-/// unknown messages give `None`. Note-on with velocity 0 is a note-off.
+/// Parses one complete MIDI message (as delivered by `midir`). Other
+/// system and unknown messages give `None`. Note-on with velocity 0 is a
+/// note-off. Real-time messages get `micros` 0; see [`parse_at`].
 pub fn parse(bytes: &[u8]) -> Option<Message> {
+    parse_at(bytes, 0)
+}
+
+/// [`parse`], stamping real-time messages with their arrival time.
+pub fn parse_at(bytes: &[u8], micros: u64) -> Option<Message> {
     let status = *bytes.first()?;
+    match status {
+        0xF8 => return Some(Message::Clock { micros }),
+        0xFA => return Some(Message::Start { micros }),
+        0xFB => return Some(Message::Continue { micros }),
+        0xFC => return Some(Message::Stop { micros }),
+        0xF2 => {
+            let (lsb, msb) = (*bytes.get(1)?, *bytes.get(2)?);
+            return (lsb < 0x80 && msb < 0x80).then_some(Message::SongPosition {
+                sixteenths: (u16::from(msb) << 7) | u16::from(lsb),
+            });
+        }
+        _ => {}
+    }
     if status == 0xF1 {
         let d = *bytes.get(1)?;
         return (d < 0x80).then_some(Message::QuarterFrame {
@@ -237,7 +287,7 @@ fn run_in(device: &str, shared: &Arc<InShared>, stop: &Receiver<()>) -> Result<(
             &ports[index],
             "atidarla-in",
             move |_, bytes, _| {
-                if let Some(msg) = parse(bytes) {
+                if let Some(msg) = parse_at(bytes, now_micros()) {
                     callback_shared.push(msg);
                 }
             },
@@ -250,26 +300,73 @@ fn run_in(device: &str, shared: &Arc<InShared>, stop: &Receiver<()>) -> Result<(
     Ok(())
 }
 
+/// A short message on its way out: up to three bytes.
+#[derive(Debug, Clone, Copy)]
+struct Raw {
+    bytes: [u8; 3],
+    len: u8,
+}
+
+impl Raw {
+    fn new(bytes: &[u8]) -> Self {
+        let len = bytes.len().min(3);
+        let mut b = [0; 3];
+        b[..len].copy_from_slice(&bytes[..len]);
+        Self {
+            bytes: b,
+            len: len as u8,
+        }
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        &self.bytes[..usize::from(self.len)]
+    }
+}
+
 #[derive(Debug, Default)]
 struct OutShared {
     port: OnceLock<String>,
     error: OnceLock<String>,
-    /// Detached outputs record what they would have sent.
-    sent: Mutex<Vec<[u8; 3]>>,
+    /// Detached outputs record what they would have sent, and when.
+    sent: Mutex<Vec<(Raw, Instant)>>,
+}
+
+/// Where a [`MidiOut`]'s messages go; cloneable, so a timing thread (the
+/// clock) can send on the same port as the cook.
+#[derive(Debug, Clone)]
+pub struct OutHandle {
+    shared: Arc<OutShared>,
+    tx: Option<Sender<Raw>>,
+}
+
+impl OutHandle {
+    /// Queues up to three bytes (a short message) for sending; never blocks.
+    pub fn send_raw(&self, bytes: &[u8]) {
+        let msg = Raw::new(bytes);
+        match &self.tx {
+            Some(tx) => {
+                let _ = tx.send(msg);
+            }
+            None => {
+                if let Ok(mut s) = self.shared.sent.lock() {
+                    s.push((msg, Instant::now()));
+                }
+            }
+        }
+    }
 }
 
 /// A MIDI output port.
 #[derive(Debug)]
 pub struct MidiOut {
-    shared: Arc<OutShared>,
-    tx: Option<Sender<[u8; 3]>>,
+    handle: OutHandle,
 }
 
 impl MidiOut {
     /// Opens the output whose name contains `device` ("" for the first).
     pub fn open(device: &str) -> Self {
         let shared = Arc::new(OutShared::default());
-        let (tx, rx) = channel::<[u8; 3]>();
+        let (tx, rx) = channel::<Raw>();
         let thread_shared = shared.clone();
         let device = device.to_owned();
         let spawned = std::thread::Builder::new()
@@ -284,8 +381,10 @@ impl MidiOut {
             let _ = shared.error.set(format!("cannot start MIDI thread: {e}"));
         }
         Self {
-            shared,
-            tx: Some(tx),
+            handle: OutHandle {
+                shared,
+                tx: Some(tx),
+            },
         }
     }
 
@@ -293,26 +392,47 @@ impl MidiOut {
     pub fn detached() -> Self {
         let shared = Arc::new(OutShared::default());
         let _ = shared.port.set("detached".into());
-        Self { shared, tx: None }
+        Self {
+            handle: OutHandle { shared, tx: None },
+        }
     }
 
     /// Queues a message for sending; never blocks.
     pub fn send(&self, msg: [u8; 3]) {
-        match &self.tx {
-            Some(tx) => {
-                let _ = tx.send(msg);
-            }
-            None => {
-                if let Ok(mut s) = self.shared.sent.lock() {
-                    s.push(msg);
-                }
-            }
-        }
+        self.handle.send_raw(&msg);
     }
 
-    /// Messages a detached output has recorded (drained).
+    /// Queues up to three bytes (real-time and Song Position messages are
+    /// shorter than a channel message); never blocks.
+    pub fn send_raw(&self, bytes: &[u8]) {
+        self.handle.send_raw(bytes);
+    }
+
+    /// A cloneable sender onto this port, for a timing thread.
+    pub fn handle(&self) -> OutHandle {
+        self.handle.clone()
+    }
+
+    /// Messages a detached output has recorded (drained), short ones padded
+    /// with zeros.
     pub fn sent(&self) -> Vec<[u8; 3]> {
-        self.shared
+        self.drain_sent()
+            .into_iter()
+            .map(|(m, _)| m.bytes)
+            .collect()
+    }
+
+    /// [`Self::sent`] with each message's exact bytes and when it was sent.
+    pub fn sent_raw(&self) -> Vec<(Vec<u8>, Instant)> {
+        self.drain_sent()
+            .into_iter()
+            .map(|(m, t)| (m.as_slice().to_vec(), t))
+            .collect()
+    }
+
+    fn drain_sent(&self) -> Vec<(Raw, Instant)> {
+        self.handle
+            .shared
             .sent
             .lock()
             .map(|mut s| std::mem::take(&mut *s))
@@ -320,15 +440,15 @@ impl MidiOut {
     }
 
     pub fn port(&self) -> Option<&str> {
-        self.shared.port.get().map(String::as_str)
+        self.handle.shared.port.get().map(String::as_str)
     }
 
     pub fn error(&self) -> Option<&str> {
-        self.shared.error.get().map(String::as_str)
+        self.handle.shared.error.get().map(String::as_str)
     }
 }
 
-fn run_out(device: &str, shared: &OutShared, rx: &Receiver<[u8; 3]>) -> Result<(), String> {
+fn run_out(device: &str, shared: &OutShared, rx: &Receiver<Raw>) -> Result<(), String> {
     let output = midir::MidiOutput::new("Atidarla").map_err(|e| e.to_string())?;
     let ports = output.ports();
     let names: Vec<String> = ports
@@ -346,9 +466,9 @@ fn run_out(device: &str, shared: &OutShared, rx: &Receiver<[u8; 3]>) -> Result<(
         .connect(&ports[index], "atidarla-out")
         .map_err(|e| e.to_string())?;
     let _ = shared.port.set(names[index].clone());
-    // Ends when the handle (and its sender) drops.
+    // Ends when the last sender (the handle and any clones) drops.
     while let Ok(msg) = rx.recv() {
-        if let Err(e) = connection.send(&msg) {
+        if let Err(e) = connection.send(msg.as_slice()) {
             log::warn!("MIDI out: {e}");
         }
     }
@@ -420,7 +540,16 @@ mod tests {
                 value: 8191
             })
         );
-        assert_eq!(parse(&[0xF8]), None, "clock is not a channel message");
+        assert_eq!(parse(&[0xFE]), None, "active sensing is ignored");
+        assert_eq!(parse_at(&[0xF8], 42), Some(Message::Clock { micros: 42 }));
+        assert_eq!(parse(&[0xFA]), Some(Message::Start { micros: 0 }));
+        assert_eq!(parse(&[0xFB]), Some(Message::Continue { micros: 0 }));
+        assert_eq!(parse(&[0xFC]), Some(Message::Stop { micros: 0 }));
+        assert_eq!(
+            parse(&[0xF2, 0x01, 0x02]),
+            Some(Message::SongPosition { sixteenths: 257 })
+        );
+        assert_eq!(parse(&[0xF2, 0x01]), None, "truncated");
         assert_eq!(
             parse(&[0xF1, 0x35]),
             Some(Message::QuarterFrame { piece: 3, value: 5 })
@@ -470,7 +599,10 @@ mod tests {
         assert!(out.is_empty());
         let output = MidiOut::detached();
         output.send([0xB0, 1, 2]);
-        assert_eq!(output.sent(), [[0xB0, 1, 2]]);
+        output.send_raw(&[0xF8]);
+        assert_eq!(output.sent(), [[0xB0, 1, 2], [0xF8, 0, 0]]);
+        output.send_raw(&[0xFA]);
+        assert_eq!(output.sent_raw()[0].0, [0xFA], "exact length is kept");
     }
 
     #[test]
