@@ -17,7 +17,7 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use atd_ai::link::{FrameParams, Link, LinkConfig, LinkState, ModelSpec, PVal};
+use atd_ai::link::{FrameParams, Link, LinkConfig, LinkState, ModelSpec, NoResult, PVal};
 use atd_ai::router::Route;
 use atd_ai::supervisor::Supervisor;
 use atd_gpu::capture::Capture;
@@ -512,20 +512,33 @@ impl GpuOp for AiOp {
             };
             match (offline, self.offline_sent) {
                 (true, Some(seq)) => {
-                    if !link.wait_result(seq, OFFLINE_WAIT, &mut up) {
+                    match link.wait_result(seq, OFFLINE_WAIT, &mut up) {
+                        Ok(()) => self.seen = link.result_seq(),
                         // Refused by policy (Sovereign mode, spend cap):
                         // the render goes on with the passthrough picture.
-                        if link.with_status(|s| s.blocked) {
+                        Err(NoResult::Blocked) => {
                             self.offline_sent = None;
                             return self.govern_blocked(ctx);
                         }
-                        let why = link.with_status(|s| match &s.state {
-                            LinkState::Waiting(w) => w.clone(),
-                            _ => "no result".into(),
-                        });
-                        return Err(format!("the AI host gave no result: {why}"));
+                        Err(NoResult::Unreachable(why)) => {
+                            return Err(format!(
+                                "no AI host can run this node ({why}). Start or configure an \
+                                 AI host for route `{}` (the AI Hosts window, `[[ai.hosts]]` \
+                                 in the project, or `ATD_AI_HOST_CMD` for the local host), or \
+                                 change the node's route",
+                                self.applied.route
+                            ));
+                        }
+                        Err(NoResult::Lost(why)) => {
+                            return Err(format!(
+                                "the AI host was lost before it answered this frame ({why}); \
+                                 render again once it is back"
+                            ));
+                        }
+                        Err(NoResult::TimedOut(why)) => {
+                            return Err(format!("the AI host gave no result: {why}"));
+                        }
                     }
-                    self.seen = link.result_seq();
                 }
                 (true, None) => {}
                 (false, _) => {

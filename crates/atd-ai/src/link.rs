@@ -23,10 +23,28 @@ use crate::client::{ClientError, FramePath, HostClient, Pending};
 use crate::protocol::{FrameSubmit, ModelLoad, codes};
 use crate::ring::RingLayout;
 use crate::router::{self, Need, Route, Skip, Target};
-use crate::supervisor::Supervisor;
+use crate::supervisor::{HostState, Supervisor};
 
-/// Offline, how long a node may wait with no host able to run it.
+/// Offline, how long a node may wait with no host able to run it while one
+/// may still come (starting, restarting).
 const OFFLINE_GIVE_UP: Duration = Duration::from_secs(30);
+
+/// Why an offline wait ended without the frame's result.
+#[derive(Debug, Clone, PartialEq)]
+pub enum NoResult {
+    /// Every target on the route is refused by policy (Sovereign mode, the
+    /// spend cap): the render goes on without the node's result.
+    Blocked,
+    /// No host on the route can run the node: none is configured, none can
+    /// be started or reached, or the model will not load. Waiting will not
+    /// help.
+    Unreachable(String),
+    /// The host running the frame was lost (it exited, closed its
+    /// connection, the session was replaced) before it answered.
+    Lost(String),
+    /// Out of time, or no host became able to run the node.
+    TimedOut(String),
+}
 
 /// One parameter value sent with a frame.
 #[derive(Debug, Clone, PartialEq)]
@@ -174,6 +192,10 @@ pub struct LinkStatus {
     /// Every target on the route is refused by policy (Sovereign mode or
     /// the spend cap): waiting will not help.
     pub blocked: bool,
+    /// No target on the route can run the node and none is on its way: not
+    /// configured, failed to start or refused the connection, cannot run
+    /// the model, or refused by policy. Cleared when a host connects.
+    pub unreachable: bool,
     pub error: Option<String>,
 }
 
@@ -192,6 +214,7 @@ impl Default for LinkStatus {
             vram_mb: None,
             cost_usd: 0.0,
             blocked: false,
+            unreachable: false,
             error: None,
         }
     }
@@ -225,6 +248,9 @@ struct Shared {
     wake: Condvar,
     output: Mutex<OutSlot>,
     out_seq: AtomicU64,
+    /// The newest input sent to a session that was then lost: a result
+    /// for it or an older frame will never come.
+    lost_seq: AtomicU64,
     status: Mutex<LinkStatus>,
     config: Mutex<(u64, LinkConfig)>,
     stop: AtomicBool,
@@ -249,6 +275,7 @@ impl Link {
             wake: Condvar::new(),
             output: Mutex::default(),
             out_seq: AtomicU64::new(0),
+            lost_seq: AtomicU64::new(0),
             status: Mutex::default(),
             config: Mutex::new((1, config)),
             stop: AtomicBool::new(false),
@@ -331,25 +358,53 @@ impl Link {
     }
 
     /// Waits until the result for input `seq` (or a later one) has arrived,
-    /// then calls `f` with it (offline render only). False on timeout or
-    /// when the newest result answers an older frame and nothing newer comes.
-    pub fn wait_result(&self, seq: u64, timeout: Duration, f: impl FnOnce(&OutSlot)) -> bool {
+    /// then calls `f` with it (offline render only).
+    ///
+    /// Waits patiently (up to `timeout`) only while a host is connected or
+    /// on its way (starting, restarting, loading the model), so a slow host
+    /// still answers frame `i` with frame `i`'s result. Ends at once when no
+    /// host on the route can run the node ([`NoResult::Unreachable`]) or
+    /// the session that had the frame was lost ([`NoResult::Lost`]).
+    pub fn wait_result(
+        &self,
+        seq: u64,
+        timeout: Duration,
+        f: impl FnOnce(&OutSlot),
+    ) -> Result<(), NoResult> {
         let deadline = Instant::now() + timeout;
-        // Waiting with no host able to run the node (none ready, the model
-        // will not load) for this long ends the wait early.
+        // Waiting with no host able to run the node yet, though one may
+        // come, for this long ends the wait early.
         let mut waiting_since: Option<Instant> = None;
         loop {
             {
                 let out = self.shared.output.lock().expect("output");
                 if out.seq >= seq {
                     f(&out);
-                    return true;
+                    return Ok(());
                 }
             }
-            let (blocked, waiting) = {
-                let st = self.shared.status.lock().expect("status");
-                (st.blocked, matches!(st.state, LinkState::Waiting(_)))
+            if self.shared.lost_seq.load(Ordering::Acquire) >= seq {
+                let why = self.with_status(|s| s.error.clone());
+                return Err(NoResult::Lost(
+                    why.unwrap_or_else(|| "the session was closed".into()),
+                ));
+            }
+            let (blocked, unreachable, waiting) = self.with_status(|st| {
+                let waiting = matches!(st.state, LinkState::Waiting(_));
+                (st.blocked, st.unreachable, waiting)
+            });
+            let why = || {
+                self.with_status(|st| match &st.state {
+                    LinkState::Waiting(why) => why.clone(),
+                    _ => format!("no result within {timeout:?}"),
+                })
             };
+            if blocked {
+                return Err(NoResult::Blocked);
+            }
+            if unreachable {
+                return Err(NoResult::Unreachable(why()));
+            }
             let now = Instant::now();
             waiting_since = if waiting {
                 waiting_since.or(Some(now))
@@ -358,10 +413,9 @@ impl Link {
             };
             if now > deadline
                 || self.shared.stop.load(Ordering::Acquire)
-                || blocked
                 || waiting_since.is_some_and(|t| now.duration_since(t) > OFFLINE_GIVE_UP)
             {
-                return false;
+                return Err(NoResult::TimedOut(why()));
             }
             std::thread::sleep(Duration::from_millis(1));
         }
@@ -424,6 +478,9 @@ struct Worker {
     sent_seq: u64,
     /// Targets passed over for a while (failed, over budget), with until when.
     excluded: Vec<(Target, Instant)>,
+    /// Targets whose host refused to load the model (until it loads there
+    /// or the configuration changes).
+    no_model: Vec<Target>,
     over_budget_since: Option<Instant>,
     last_result: Option<Instant>,
     /// Inline frames are copied out of the mailbox before sending.
@@ -441,6 +498,7 @@ impl Worker {
             flight: VecDeque::new(),
             sent_seq: 0,
             excluded: Vec::new(),
+            no_model: Vec::new(),
             over_budget_since: None,
             last_result: None,
             scratch: Vec::new(),
@@ -453,6 +511,10 @@ impl Worker {
 
     fn drop_session(&mut self, why: Option<String>) {
         if self.session.take().is_some() {
+            // Frames sent to it and not answered are gone with it.
+            self.shared
+                .lost_seq
+                .fetch_max(self.sent_seq, Ordering::AcqRel);
             self.status(|s| {
                 s.reconnects += 1;
                 s.error = why.clone();
@@ -469,6 +531,7 @@ impl Worker {
                     self.config_gen = c.0;
                     self.config = Some(c.1.clone());
                     drop(c);
+                    self.no_model.clear();
                     self.drop_session(None);
                 }
             }
@@ -512,16 +575,19 @@ impl Worker {
                 let blocked = skipped
                     .iter()
                     .all(|(_, s)| matches!(s, Skip::Sovereign | Skip::SpendCap));
+                let unreachable = self.out_of_reach(&cfg);
                 self.status(|s| {
                     s.state = LinkState::Waiting(why.clone());
                     s.target = None;
                     s.blocked = blocked;
+                    s.unreachable = unreachable;
                 });
                 return false;
             }
         };
         self.status(|s| {
             s.blocked = false;
+            s.unreachable = false;
             s.state = LinkState::Loading;
             s.target = Some(choice.target.clone());
             s.realtime = choice.realtime;
@@ -547,9 +613,16 @@ impl Worker {
             options: cfg.model.options.clone(),
         };
         if let Err(e) = client.load_model(&load) {
+            // The host answered and will not load it (not busy, not gone).
+            if matches!(&e, ClientError::Rpc(r) if r.code != codes::BUSY)
+                && !self.no_model.contains(&choice.target)
+            {
+                self.no_model.push(choice.target.clone());
+            }
             self.exclude(&choice.target, Duration::from_secs(5), e.to_string());
             return false;
         }
+        self.no_model.retain(|t| *t != choice.target);
         let vram = self
             .supervisor
             .host(&host)
@@ -572,10 +645,39 @@ impl Worker {
         if self.config.as_ref().is_some_and(|c| c.route.0.len() > 1) {
             self.excluded.push((t.clone(), Instant::now() + d));
         }
+        let unreachable = self.config.as_ref().is_some_and(|c| self.out_of_reach(c));
         self.status(|s| {
             s.state = LinkState::Waiting(why.clone());
             s.error = Some(why);
+            s.unreachable = unreachable;
         });
+    }
+
+    /// Whether no target on the route can run the node and none is on its
+    /// way: each is refused by policy, not configured, failed to start or
+    /// to connect, cannot run the adapter, or refused to load the model. A
+    /// host that is idle, starting, restarting or ready may still serve.
+    fn out_of_reach(&self, cfg: &LinkConfig) -> bool {
+        let hosts = self.supervisor.snapshot();
+        cfg.route.0.iter().all(|t| {
+            if self.no_model.contains(t)
+                || t.is_cloud() && (crate::egress::sovereign() || router::spend().cap_reached())
+            {
+                return true;
+            }
+            let name = t.host_name();
+            match hosts.iter().find(|h| h.name == name) {
+                None => true,
+                Some(h) => match &h.state {
+                    HostState::Failed(_) => true,
+                    HostState::Ready => h
+                        .caps
+                        .as_ref()
+                        .is_none_or(|c| !c.adapters.contains(&cfg.model.adapter)),
+                    HostState::Idle | HostState::Starting | HostState::Restarting(_) => false,
+                },
+            }
+        })
     }
 
     /// Submits new input while there is room, and collects results.

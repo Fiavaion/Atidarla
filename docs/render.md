@@ -176,7 +176,12 @@ settings an operator cooks under (project folder, expressions), so every context
    the frame's batch, so the next frame always has every result. That wait is bounded too
    (`atd_py::expr::OFFLINE_TIMEOUT`, 10 s): expressions still running after it fail on their
    nodes, so the render stops with a message instead of hanging. Python operators wait on their
-   own slot for this frame's result (bounded by their timeout, `docs/python-ops.md`).
+   own slot for this frame's result (bounded by their timeout, `docs/python-ops.md`). Hosted AI
+   nodes wait for their host's answer to the previous frame (`Link::wait_result`, at most 120 s)
+   only while a host on the route is connected or still starting, so a slow host still answers
+   frame `i - 1` on frame `i`. When no host on the route can run the node (none configured, it
+   failed to start or refused the connection, it cannot load the model) or the host is lost
+   before it answers, the node errors at once with what to do.
 3. **Fixed latency for readbacks.** Analyze reads back on the GPU asynchronously. Offline it waits
    (`device.poll(wait)`) for the previous frame's readback before reading it, so its channels are
    always the measurement of the frame before: exactly one frame late, as Python expressions.

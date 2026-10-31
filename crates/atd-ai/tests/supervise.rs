@@ -6,7 +6,7 @@ mod support;
 
 use std::time::{Duration, Instant};
 
-use atd_ai::link::{FrameParams, Link, LinkConfig, LinkState, ModelSpec};
+use atd_ai::link::{FrameParams, Link, LinkConfig, LinkState, ModelSpec, NoResult};
 use atd_ai::router::{Route, Target};
 use atd_ai::supervisor::{HostKind, HostSpec, HostState, Supervisor};
 use support::{fill, inverted, listen};
@@ -137,6 +137,141 @@ fn a_realtime_node_routes_to_the_nvidia_lan_host() {
         s.frames >= frames + 10 && s.target == Some(Target::Local)
     });
     assert!(!link.status().realtime);
+}
+
+/// The fail-fast bound for an offline wait with no host: strict on quiet
+/// hardware (`ATD_TIMING_STRICT=1`), slack for a shared CI runner.
+fn fail_fast_bound() -> Duration {
+    if std::env::var("ATD_TIMING_STRICT").is_ok_and(|v| v == "1") {
+        Duration::from_millis(250)
+    } else {
+        Duration::from_secs(2)
+    }
+}
+
+/// Offers frame `seq` the way an offline render does.
+fn offer_offline(link: &Link, seq: u64) -> (u64, Vec<u8>) {
+    let mut frame = vec![0u8; 32 * 16 * 4];
+    fill(&mut frame, seq);
+    let n = link.offer_blocking(32, 16, seq * 33_333, &FrameParams::default(), |px| {
+        px.copy_from_slice(&frame)
+    });
+    (n, frame)
+}
+
+/// Offline with no AI host at all, the wait ends at once and says so,
+/// instead of waiting out the 30 s give-up per frame.
+#[test]
+fn offline_with_no_host_fails_fast() {
+    let sup = leak(Supervisor::new());
+    let link = Link::new(sup, config("local", None));
+    for i in 1..=3 {
+        let (seq, _) = offer_offline(&link, i);
+        let t0 = Instant::now();
+        let r = link.wait_result(seq, Duration::from_secs(120), |_| {});
+        let took = t0.elapsed();
+        println!("no host, frame {i}: {r:?} after {took:?}");
+        match r {
+            Err(NoResult::Unreachable(why)) => assert!(why.contains("not configured"), "{why}"),
+            other => panic!("want Unreachable, got {other:?}"),
+        }
+        assert!(took < fail_fast_bound(), "took {took:?}");
+    }
+    assert!(link.status().unreachable);
+}
+
+/// A remote host that refuses the connection (nothing listens) is out of
+/// reach too; a route with every target out fails fast.
+#[test]
+fn offline_with_only_refusing_hosts_fails_fast() {
+    // A port nothing listens on: bind, note it, close.
+    let addr = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        l.local_addr().unwrap().to_string()
+    };
+    let sup = leak(Supervisor::new());
+    sup.set(HostSpec {
+        name: "lan:gone".into(),
+        kind: HostKind::Remote { addr, token: None },
+    });
+    let link = Link::new(sup, config("lan:gone → lan:never", None));
+    let (seq, _) = offer_offline(&link, 1);
+    let t0 = Instant::now();
+    let r = link.wait_result(seq, Duration::from_secs(120), |_| {});
+    let took = t0.elapsed();
+    println!("refusing host: {r:?} after {took:?}");
+    assert!(matches!(r, Err(NoResult::Unreachable(_))), "{r:?}");
+    assert!(took < fail_fast_bound(), "took {took:?}");
+}
+
+/// Offline, a host that is up but slow is waited for: every frame gets its
+/// own result (determinism), not an error and not an older frame's result.
+#[test]
+fn offline_waits_for_a_slow_host() {
+    let slow = listen(&support::ref_host(), &["--delay-ms", "400"]);
+    let sup = leak(Supervisor::new());
+    sup.set(HostSpec {
+        name: "lan:slow".into(),
+        kind: HostKind::Remote {
+            addr: slow.addr.clone(),
+            token: None,
+        },
+    });
+    let mut cfg = config("lan:slow", None);
+    cfg.in_flight = 1;
+    let link = Link::new(sup, cfg);
+    for i in 1..=3 {
+        let (seq, frame) = offer_offline(&link, i);
+        let t0 = Instant::now();
+        let mut got = None;
+        let r = link.wait_result(seq, Duration::from_secs(120), |out| {
+            got = Some((out.seq, out.pixels.clone()));
+        });
+        let took = t0.elapsed();
+        println!("slow host, frame {i}: {r:?} after {took:?}");
+        assert_eq!(r, Ok(()));
+        let (got_seq, pixels) = got.unwrap();
+        assert_eq!(got_seq, seq);
+        assert_eq!(pixels, inverted(&frame), "result for frame {i}");
+        assert!(took >= Duration::from_millis(350), "did not wait: {took:?}");
+    }
+}
+
+/// A host that dies while a frame is with it ends the wait with an error,
+/// instead of hanging to the full timeout.
+#[test]
+fn a_host_that_dies_mid_wait_ends_the_offline_wait() {
+    let mut cmd = support::ref_host();
+    cmd.args = vec!["--delay-ms".into(), "20000".into()];
+    let sup = leak(Supervisor::new());
+    sup.set(HostSpec {
+        name: "local".into(),
+        kind: HostKind::Local(cmd),
+    });
+    let mut cfg = config("local", None);
+    cfg.in_flight = 1;
+    let link = Link::new(sup, cfg);
+    let t0 = Instant::now();
+    while link.status().state != LinkState::Running {
+        assert!(
+            t0.elapsed() < Duration::from_secs(20),
+            "{:?}",
+            link.status()
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let (seq, _) = offer_offline(&link, 1);
+    let pid = sup.host("local").unwrap().pid.expect("local host pid");
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(300));
+        kill(pid);
+    });
+    let t0 = Instant::now();
+    let r = link.wait_result(seq, Duration::from_secs(120), |_| {});
+    let took = t0.elapsed();
+    println!("host killed mid-wait: {r:?} after {took:?}");
+    assert!(matches!(r, Err(NoResult::Lost(_))), "{r:?}");
+    assert!(took < Duration::from_secs(5), "took {took:?}");
 }
 
 fn kill(pid: u32) {
