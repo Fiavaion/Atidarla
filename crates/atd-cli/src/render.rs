@@ -776,12 +776,15 @@ pub fn classify(type_id: &str) -> Option<Class> {
         | "pnt.subset" | "pnt.taper" | "pnt.transform" | "pnt.turbulence" | "pnt.twist"
         | "pnt.vortex" | "pnt.wave" | "pnt.wind" => Pure,
         "pnt.emitter" | "pnt.solver" => Stateful,
+        // Reads its file on a worker thread; offline the cook waits for it.
+        "pnt.splat_in" => Waits,
         "pnt.particles" => Stateful,
         "img.render" | "msh.platonic" => Pure,
         // Maps its input into the output image; the native window is the
         // app's, so a render (and `check`) produces the mapped image.
         "cmp.window" => Pure,
-        "mat.line" | "mat.matcap" | "mat.pbr" | "mat.point_sprite" | "mat.toon" | "mat.unlit" => {
+        "mat.line" | "mat.matcap" | "mat.pbr" | "mat.point_sprite" | "mat.splat" | "mat.toon"
+        | "mat.unlit" => {
             Pure
         }
         "img.movie_in" | "img.text" | "img.wgsl" | "sig.audio_file_in" => Waits,

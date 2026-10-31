@@ -21,6 +21,10 @@
 //!   MSAA, with line, sprite-edge and alpha coverage turned into a fixed
 //!   sample mask (no blending, so no order dependence; alpha below 1 is
 //!   screen-door transparency).
+//! - **Splats:** a geometry with a Splat material ([`crate::splat`]) is
+//!   drawn after every opaque one, blended back to front in an order a
+//!   stable GPU sort fixes (so it too repeats exactly), tested against the
+//!   opaque depth without writing it. Splat slots are drawn in slot order.
 
 use atd_core::geo::{AttrClass, AttrType, header, names};
 use atd_core::registry::{OpFamily, OperatorSchema, ParamSchema, SocketSchema, WireType};
@@ -29,12 +33,13 @@ use atd_gpu::geo::kernels::{BindGroupCache, Packer};
 use atd_gpu::mat::{Material, Model};
 
 use crate::camera::{Camera, direction};
+use crate::splat::SplatDraw;
 use crate::triangulate::Triangulator;
 
 /// Geometry and material pairs.
 pub const SLOTS: usize = 4;
 const SAMPLES: u32 = 4;
-const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+pub(crate) const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const GLOBALS: usize = 272;
 const DRAW: usize = 144;
 
@@ -127,7 +132,8 @@ pub fn schema() -> OperatorSchema {
     }
 }
 
-const SOURCE: &str = r#"
+/// The camera block every `img.render` shader (and the splat passes) reads.
+pub(crate) const GLOBALS_WGSL: &str = r#"
 struct Globals {
     view_proj: mat4x4f,
     view: mat4x4f,
@@ -146,6 +152,9 @@ struct Globals {
     // x antialiasing on
     opts: vec4u,
 };
+"#;
+
+const SOURCE: &str = r#"
 struct Draw {
     m: Material,
     // has N, point Cd, prim Cd, uv
@@ -455,6 +464,8 @@ pub struct Render {
     targets: Option<Targets>,
     msaa_ok: bool,
     status: Option<String>,
+    /// Splat drawing per slot, made when a slot first has a Splat material.
+    splats: Vec<Option<SplatDraw>>,
 }
 
 impl std::fmt::Debug for Render {
@@ -498,7 +509,11 @@ fn storage_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
 
 impl Render {
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
-        let source = format!("{}{}{SOURCE}", atd_gpu::mat::WGSL, atd_gpu::mat::SHADE);
+        let source = format!(
+            "{}{}{GLOBALS_WGSL}{SOURCE}",
+            atd_gpu::mat::WGSL,
+            atd_gpu::mat::SHADE
+        );
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("img.render"),
             source: wgpu::ShaderSource::Wgsl(source.into()),
@@ -584,6 +599,7 @@ impl Render {
             msaa_ok,
             status: (!msaa_ok)
                 .then(|| "antialiasing is not available for this image format".to_owned()),
+            splats: (0..SLOTS).map(|_| None).collect(),
         }
     }
 
@@ -849,6 +865,7 @@ impl GpuOp for Render {
         // Before the render pass: triangulation (compute), uniforms,
         // uploads of CPU-only attributes and texture bind groups.
         let mut prepared: [Option<Prepared<'_>>; SLOTS] = Default::default();
+        let mut splat_slots = [false; SLOTS];
         let mut first_error = None;
         for (k, slot_out) in prepared.iter_mut().enumerate() {
             let geo_inputs = ctx.geo_inputs;
@@ -866,6 +883,27 @@ impl GpuOp for Render {
             };
             let mat_inputs = ctx.mat_inputs;
             let material = mat_inputs.get(2 * k + 1).cloned().unwrap_or_default();
+            if material.model == Model::Splat {
+                let format = self.format;
+                let draw = self.splats[k]
+                    .get_or_insert_with(|| SplatDraw::new(ctx.device, format, GLOBALS_WGSL));
+                match draw.prepare(
+                    ctx.device,
+                    ctx.queue,
+                    ctx.encoder,
+                    ctx.buffers,
+                    &self.globals,
+                    geo,
+                    &material,
+                    samples,
+                ) {
+                    Ok(()) => splat_slots[k] = true,
+                    Err(e) => {
+                        first_error.get_or_insert_with(|| format!("`{}`: {e}", slot_sockets(k).0));
+                    }
+                }
+                continue;
+            }
             let points = material.model == Model::Sprite || geo.prims() == 0;
             if !points
                 && let Err(e) =
@@ -923,6 +961,7 @@ impl GpuOp for Render {
             dummy,
             binds,
             layout,
+            splats,
             ..
         } = self;
         let bg = p.vec4("background");
@@ -1001,6 +1040,12 @@ impl GpuOp for Render {
                 pass.set_pipeline(&pipes.seg);
                 pass.set_bind_group(0, &group, &[]);
                 pass.draw_indirect(rec.seg_header, header::DRAW_OFFSET);
+            }
+        }
+        // Splats after every opaque geometry: they blend over it.
+        for (draw, on) in splats.iter().zip(splat_slots) {
+            if let (Some(draw), true) = (draw, on) {
+                draw.draw(&mut pass, samples);
             }
         }
         drop(pass);
