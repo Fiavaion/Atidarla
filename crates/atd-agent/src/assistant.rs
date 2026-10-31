@@ -588,13 +588,20 @@ fn build_planned(
                 .split("name '")
                 .nth(1)
                 .and_then(|r| r.split('\'').next())
-                .filter(|n| names.iter().any(|x| x == n))
                 .map(str::to_owned)
             {
-                let _ = write!(
-                    p,
-                    " (`{name}` is a node: read its channel as op('{name}')['<channel>'], or a parameter as op('{name}').par.<param>)"
-                );
+                if names.contains(&name) {
+                    let _ = write!(
+                        p,
+                        " (`{name}` is a node: read its channel as op('{name}')['<channel>'], or a parameter as op('{name}').par.<param>)"
+                    );
+                } else {
+                    let _ = write!(
+                        p,
+                        " (there is no node `{name}`; add it to the network or use one of: {})",
+                        names.join(", ")
+                    );
+                }
             }
         }
         if trace {

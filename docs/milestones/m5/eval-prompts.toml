@@ -3,7 +3,9 @@
 # A run is valid when, after the assistant stops, the network has at least
 # `min_nodes` nodes, every node cooks without an error, and for each entry
 # of `require` some node's type starts with it (a full type id such as
-# `img.feedback`, or a family prefix such as `sig.`).
+# `img.feedback`, or a family prefix such as `sig.`). `animated = true`: also
+# something must move (an expression, a channel binding, or a SIG node wired
+# into another node).
 
 [[prompt]]
 id = "noise-blur"
@@ -16,6 +18,7 @@ id = "gradient-colour"
 text = "Create a colour gradient and shift its hue slowly over time."
 require = ["img.ramp", "img.hsv_adjust"]
 min_nodes = 2
+animated = true
 
 [[prompt]]
 id = "feedback-trails"
@@ -34,6 +37,7 @@ id = "lfo-brightness"
 text = "Use an LFO to pulse the brightness of a constant colour."
 require = ["sig.lfo", "img.level"]
 min_nodes = 3
+animated = true
 
 [[prompt]]
 id = "edges"
@@ -52,6 +56,7 @@ id = "two-sources-blend"
 text = "Crossfade between a noise pattern and a gradient, with the mix driven by a slow sine wave."
 require = ["img.blend"]
 min_nodes = 3
+animated = true
 
 [[prompt]]
 id = "threshold"
@@ -62,8 +67,9 @@ min_nodes = 3
 [[prompt]]
 id = "shape-spin"
 text = "Draw a shape and spin it around the centre continuously."
-require = ["img.shape", "img.transform"]
-min_nodes = 2
+require = ["img.shape"]  # Shape rotates itself; Transform is one way, not the only one
+min_nodes = 1
+animated = true
 
 [[prompt]]
 id = "bloom-glow"
@@ -94,6 +100,7 @@ id = "math-channels"
 text = "Generate an LFO, scale it with a math node to the range 0.5 to 2, and use it to drive the scale of a transformed noise image."
 require = ["sig.lfo", "sig.math", "img.transform"]
 min_nodes = 4
+animated = true
 
 [[prompt]]
 id = "colour-grade"
@@ -122,5 +129,5 @@ min_nodes = 2
 [[prompt]]
 id = "text-overlay"
 text = "Put the text 'ATIDARLA' over animated noise."
-require = ["img.text"]
-min_nodes = 3
+require = ["img.text", "img.noise"]  # Text composites over its `in` image
+min_nodes = 2

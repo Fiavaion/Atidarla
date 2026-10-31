@@ -87,6 +87,10 @@ struct Prompt {
     require: Vec<String>,
     #[serde(default = "one")]
     min_nodes: usize,
+    /// Something must move: a parameter with an expression or a channel
+    /// binding, or a SIG node wired into another node.
+    #[serde(default)]
+    animated: bool,
 }
 
 fn one() -> usize {
@@ -168,6 +172,17 @@ fn eval(path: &Path, out: Option<&Path>, only: Option<&str>, m: &ModelArgs) -> R
         if !errors.is_empty() {
             why.push(format!("{} node error(s): {}", errors.len(), errors[0].1));
         }
+        let moves = net.nodes().any(|n| {
+            n.params
+                .values()
+                .any(|p| p.expr.is_some() || p.bind.is_some())
+        }) || net.wires().any(|w| {
+            net.node(w.from.node)
+                .is_some_and(|n| n.type_id.starts_with("sig."))
+        });
+        if p.animated && !moves {
+            why.push("nothing is animated".into());
+        }
         if let Some(e) = &run.llm_error {
             why.push(format!("model error: {e}"));
         }
@@ -201,7 +216,7 @@ fn eval(path: &Path, out: Option<&Path>, only: Option<&str>, m: &ModelArgs) -> R
     let _ = std::fs::remove_dir_all(&tmp);
     let pct = 100.0 * valid as f64 / total.max(1) as f64;
     let report = format!(
-        "# Network-generation eval\n\n**Model:** `{}` · **Prompts:** `{}` · **Valid:** {valid}/{total} (**{pct:.0}%**) · **Time:** {:.0} s · **Max turns:** {}\n\nValid = at least `min_nodes` nodes, every required type present, every node cooks without an error (judged on a fresh cook after the assistant stops).\n\n| Prompt | Result | Nodes | Types | Refused calls / calls | Time | Why |\n|---|---|---|---|---|---|---|\n{rows}",
+        "# Network-generation eval\n\n**Model:** `{}` · **Prompts:** `{}` · **Valid:** {valid}/{total} (**{pct:.0}%**) · **Time:** {:.0} s · **Max turns:** {}\n\nValid = at least `min_nodes` nodes, every required type present, every node cooks without an error (judged on a fresh cook after the assistant stops), and for prompts marked animated something moves (an expression, a channel binding, or a SIG node wired in).\n\n| Prompt | Result | Nodes | Types | Refused calls / calls | Time | Why |\n|---|---|---|---|---|---|---|\n{rows}",
         llm.name(),
         path.display(),
         start.elapsed().as_secs_f64(),

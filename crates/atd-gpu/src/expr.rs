@@ -301,11 +301,21 @@ impl Ctx<'_> {
                     e.value.set(None);
                     if e.last_error.get() != Some(err) {
                         e.last_error.set(Some(err));
-                        e.error.replace(Some(format!(
-                            "expression for `{}`: {}",
-                            e.param,
-                            err.message(expr)
-                        )));
+                        let mut message = err.message(expr);
+                        // Name the channels there are (formatted only when
+                        // the error changes, never per frame).
+                        if let EvalError::NoChannel(i) = err
+                            && let Some(c) = refs
+                                .get(i)
+                                .copied()
+                                .flatten()
+                                .and_then(|id| self.sig.get(&id))
+                        {
+                            let names: Vec<&str> = c.names().collect();
+                            message.push_str(&format!("; it has: {}", names.join(", ")));
+                        }
+                        e.error
+                            .replace(Some(format!("expression for `{}`: {message}", e.param)));
                     }
                 }
             }
