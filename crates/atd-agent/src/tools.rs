@@ -23,6 +23,9 @@ use crate::cues::{self, CueContext, CueQueue, Move, Quantum};
 use crate::lock::{Refusal, Scope, ShowLock};
 use crate::workspace::Workspace;
 
+/// The Script DAT (`atd_py::script::TYPE_ID`): its `code` is Python.
+const SCRIPT_TYPE: &str = "dat.script";
+
 /// A tool as offered to a model: name, description, argument schema.
 #[derive(Debug, Clone)]
 pub struct ToolSpec {
@@ -451,6 +454,7 @@ impl Agent {
                             ignored.push(p.clone());
                             continue;
                         }
+                        self.python_gate_script(&op.type_id, p)?;
                         edits.push(Edit::SetParam {
                             node: id,
                             param: p.clone(),
@@ -717,6 +721,12 @@ impl Agent {
         }
         if let Some(e) = a.get("expression").and_then(Value::as_str) {
             p.expr = (!e.trim().is_empty()).then(|| e.to_owned());
+            if let Some(e) = &p.expr {
+                self.python_gate_expr(&node.name, param, e)?;
+            }
+        }
+        if a.get("value").is_some() {
+            self.python_gate_script(&node.type_id, param)?;
         }
         if let Some(b) = a.get("bind").and_then(Value::as_object) {
             let src = find(
@@ -754,6 +764,33 @@ impl Agent {
         }
         self.stage(ws, net, vec![edit], note)?;
         Ok(Output::Json(json!({"staged": true})))
+    }
+
+    /// Rule 9: an expression outside the native subset is Python (PRD A22),
+    /// arbitrary code once the project's Python runs. Only a session with
+    /// `python.exec` may write one.
+    fn python_gate_expr(&self, node: &str, param: &str, expr: &str) -> Result<(), String> {
+        if self.scopes.contains(&Scope::PythonExec) || atd_core::expr::Expr::parse(expr).is_ok() {
+            return Ok(());
+        }
+        Err(format!(
+            "{node}.{param}: `{expr}` is a Python expression (outside the native subset); \
+             writing Python needs the `python.exec` scope, which this session does not have. \
+             Use the native subset: numbers, + - * / % **, comparisons, `a if c else b`, math \
+             functions (sin, cos, floor, …), clamp, lerp, time, frame, me.digits, \
+             op('node').par.name and op('node')['channel']"
+        ))
+    }
+
+    /// Rule 9: a Script DAT's code is Python; only with `python.exec`.
+    fn python_gate_script(&self, type_id: &str, param: &str) -> Result<(), String> {
+        if type_id == SCRIPT_TYPE && param == "code" && !self.scopes.contains(&Scope::PythonExec) {
+            return Err(format!(
+                "a Script node's `code` is Python, so writing it needs `python.exec`: {}",
+                Refusal::Scope("python.exec")
+            ));
+        }
+        Ok(())
     }
 
     /// `create_pack`: Make Pack (`atd_core::pack::make_pack`) on the preview,

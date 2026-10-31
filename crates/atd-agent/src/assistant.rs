@@ -209,7 +209,7 @@ Rules:\n\
 - Build with ONE build_network call holding every node, its parameters and every wire; use only the operator types, parameter names and input names listed (call get_schema for any other type first).\n\
 - Wires connect an output to an input of the same wire type (IMG to IMG, SIG to SIG, GEO to GEO). Most image nodes take their image on input `in`; check the schema.\n\
 - Changes are staged. When the network is built, call accept_changes, then read the errors it returns and fix them (set_param, connect, delete_node) and accept again, until there are no errors.\n\
-- Animate with expressions such as `0.5 + 0.5 * sin(time)` in set_param, or bind a parameter to a SIG node's channel. Vectors and colours (a transform's scale, a colour) animate the same way: the one number drives every component.\n\
+- Animate with expressions such as `0.5 + 0.5 * sin(time)` in set_param, or bind a parameter to a SIG node's channel. Expressions must stay in the native subset (numbers, arithmetic, comparisons, `a if c else b`, math functions, clamp, lerp, time, frame, me.digits, op('node').par.name, op('node')['channel']): anything else is Python, refused without the python.exec scope. Vectors and colours (a transform's scale, a colour) animate the same way: the one number drives every component.\n\
 - Do not explain; act with tools. Stop when the network is accepted with no errors.\n\nOperators (type — summary):\n",
     );
     // Image and channel operators first: a small model copies the prefix
@@ -484,7 +484,7 @@ Rules:\n\
 - Include every node the request names or implies: an effect (blur, mirror, kaleidoscope, level …) needs a source node (noise, ramp, constant, shape …) wired into its image input.\n\
 - Wire every node: `from` is `<source node>.<output>` (usually `.out`), `to` is `<destination node>.<input>` with an input the destination operator lists; wire types must match (IMG to IMG, SIG to SIG, GEO to GEO).\n\
 - To drive a number parameter from a SIG node, wire the SIG node to the parameter by name: {\"from\": \"lfo1.out\", \"to\": \"blend1.mix\"} (a channel binding). SIG outputs never go into image inputs.\n\
-- Use only the parameter names listed for each operator. Animate a number parameter with an expression string such as `0.5 + 0.5 * sin(time)`; read a SIG node's channel in an expression as `op('lfo1')['lfo']`, using the channel names its description gives (an LFO's channel is `lfo`); or wire a SIG node into an operator's SIG input.\n\
+- Use only the parameter names listed for each operator. Animate a number parameter with an expression string such as `0.5 + 0.5 * sin(time)` (native subset only: no lists, strings or Python built-ins); read a SIG node's channel in an expression as `op('lfo1')['lfo']`, using the channel names its description gives (an LFO's channel is `lfo`); or wire a SIG node into an operator's SIG input.\n\
 - Names are short identifiers (noise1, blur1). Do not explain.\n";
 
 /// A plan's `params` lists (`[{name, value}]`) as the objects

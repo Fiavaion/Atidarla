@@ -3,7 +3,12 @@
 Atidarla offers its patch to agents through **typed tools** (FR-G1). Any MCP client (Claude Code,
 other editors and agents), the in-app assistant and the command line all use the same tools and
 the same rules. There is no arbitrary code execution: `python_exec` exists only in a session the
-user granted `python.exec` (CLAUDE.md rule 9).
+user granted `python.exec` (CLAUDE.md rule 9). The same scope is needed to write any other Python:
+an expression outside the native subset (a Python-tier expression, PRD A22: lists, strings,
+Python built-ins, …) or a Script node's `code`. Without it `set_param`, `create_node` and
+`build_network` refuse them and say so; native expressions (`0.5 + 0.5 * sin(time)`,
+`op('lfo1')['lfo']`) are always allowed. Even with the scope, Python in the network runs only once
+the project's Python is allowed ([`python-ops.md`](python-ops.md)).
 
 ## Tools
 
