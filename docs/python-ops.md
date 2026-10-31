@@ -177,7 +177,16 @@ allow them:
   `agent eval` run a project's Python (operators, Script nodes and Python expressions) only with
   `--allow-python-ops` (for that run; nothing is remembered). Without it, `check` reports the
   nodes and expressions it did not run and still passes, `render` fails if the rendered image
-  needs one, and `serve` cooks the show without them.
+  needs one, and `serve` cooks the show without them. `atidarla run --allow-python-ops` (an
+  unattended show, which cannot answer the Allow dialog) passes the flag on to the app
+  (`atidarla-app <project> --allow-python-ops`), which then allows the opened project's Python
+  after every restart without asking.
+- **Merge and paste:** merging into the open project (the Merge window) or pasting nodes from the
+  clipboard can bring in Script nodes or Python expressions nobody allowed. When they do, the
+  allowance is withdrawn and the dialog asks again, listing them; until then the network's
+  Python stops (operators in `ops/` are not affected).
+- **Agents** need the `python.exec` scope to write Python expressions or Script code
+  ([`agent.md`](agent.md)).
 
 **Threat model.** In scope: a project file from someone else running code when you open it.
 Out of scope: anything that can already write to your disk (it can change Atidarla itself);
