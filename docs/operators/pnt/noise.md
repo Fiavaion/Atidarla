@@ -34,6 +34,7 @@ All platforms.
 ## Examples
 
 - [Scatter to Iso Surface](../../../examples/mesh-scatter-iso.atidarla/) — `wobble`
+- [Mesh Shaping](../../../examples/mesh-shaping.atidarla/) — `bumps`
 - [Particles](../../../examples/particles.atidarla/) — `flow`
 - [PNT Constellation](../../../examples/pnt-constellation.atidarla/) — `flow`
 - [Points](../../../examples/points.atidarla/) — `swirl`, `ripple`
