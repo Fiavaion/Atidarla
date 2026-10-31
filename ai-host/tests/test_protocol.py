@@ -1,4 +1,5 @@
 import importlib.util
+import time
 
 import pytest
 from conftest import Client, InProcessHost, RpcFailure, SlowAdapter, open_inline, open_shm, pixels
@@ -121,16 +122,20 @@ def test_cancel_drops_a_queued_frame_and_busy_bounds_the_queue(host):
     open_inline(c)
     c.call("model.load", {"model_id": "slow", "adapter": "test.slow"})
 
-    def frame(seq, ms):
+    def frame(seq, ms, tag=None):
         return c.send(
             "frame.submit",
-            {"seq": seq, "model_id": "slow", "width": 1, "height": 1, "params": {"sleep_ms": ms}},
+            {"seq": seq, "model_id": "slow", "width": 1, "height": 1, "params": {"sleep_ms": ms, "tag": tag}},
             b"rgba",
         )
 
-    running = frame(0, 400)
-    while c.call("host.health")["queue_depth"] == 0:
-        pass
+    # Wait until frame 0 is running, not merely queued (queue_depth counts
+    # both, and a slow runner may not have started it yet).
+    running = frame(0, 400, tag="busy-running")
+    deadline = time.monotonic() + 10
+    while "busy-running" not in SlowAdapter.started:
+        assert time.monotonic() < deadline, "frame 0 never started"
+        time.sleep(0.001)
     queued = [frame(seq, 1) for seq in range(1, MAX_QUEUED + 1)]
     assert error_code(c, frame(99, 1)) == BUSY
     assert c.call("frame.cancel", {"seq": 2}) is None

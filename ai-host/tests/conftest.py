@@ -25,6 +25,8 @@ class SlowAdapter(Adapter):
     kind = "test.slow"
     weight_options = ()
     order: ClassVar[list] = []
+    # Tags of frames that have begun running (before their sleep).
+    started: ClassVar[list] = []
 
     def __init__(self, model_id, path, options, progress):
         super().__init__(model_id, path, options, progress)
@@ -32,6 +34,7 @@ class SlowAdapter(Adapter):
         progress("ready", 1.0)
 
     def process(self, state, frame, params):
+        SlowAdapter.started.append(params.get("tag"))
         time.sleep(params.get("sleep_ms", 0) / 1000)
         SlowAdapter.order.append(params.get("tag"))
         return Frame(frame.width, frame.height, bytes(frame.data)), False
