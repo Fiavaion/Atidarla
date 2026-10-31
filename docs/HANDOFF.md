@@ -1,10 +1,11 @@
 # Handoff: continuing M1 locally
 
 > **2026-10-31 (newest; read this first):** M5 finished and M6 built on the M5 Pro Mac, overnight.
-> - **M5:** AC1 eval 18/20 (90%) on two of three runs and 17/20 (85%) on the third, strict criteria, qwen2.5-coder 7B (plan-then-build with Ollama structured output); cloud-model row needs an `ANTHROPIC_API_KEY`. In-app Assistant panel, in-show cues (A62), `create_pack`, Speech to Text and LLM Chat. See `docs/milestones/M5.md`.
+> - **M5:** AC1 eval met: 19/20, 18/20, 19/20 over three runs, strict criteria, qwen2.5-coder 7B (plan-then-build with Ollama structured output); cloud-model row needs an `ANTHROPIC_API_KEY`. In-app Assistant panel, in-show cues (A62), `create_pack`, Speech to Text and LLM Chat. See `docs/milestones/M5.md`.
 > - **M6:** registry at 211 operators (MSH modelling and construction, VAT In, PNT capture/attributes/neighbours, Sensor In, point caches, Splat In + Splat MAT with GPU sort, DAT routing and 13 DAT ops, To Channels / Pixel Out / Resample); `atidarla soak` (60-min PT-10 pass here); accessibility pass; installer scripts (DMG built unsigned; MSI never built); user manual. See `docs/milestones/M6.md`.
-> - Proposed decisions for Mark: A62 (cues), A63 (point caches, Sensor In), A64 (DAT values, Script gating), A65 (GEO→SIG readback), and the eval-criteria changes in the M5 log.
-> - Gate at `6d27ac1`: `cargo test --workspace --no-fail-fast` 1065 passed, 0 failed; clippy, fmt, `docs --check`, `cargo deny` clean. A Windows-only splat shader failure (FXC) was fixed in `eee0146`.
+> - Later the same night: vector and colour parameters can be animated (A66); this lifted AC1 to 95/90/95% over three runs. Python-tier expressions and Script code now run only from a content allow-list (A67), which closes the "opening an untrusted project runs its Python" gap. It passed three security review rounds.
+> - Proposed decisions for Mark: A62 (cues), A63 (point caches, Sensor In), A64 (DAT values, Script gating), A65 (GEO→SIG readback), A66 (animated vectors), A67 (network Python trust), and the eval-criteria changes in the M5 log.
+> - Gate at `11fdb55`: `cargo test --workspace --no-fail-fast` 1085 passed, 0 failed; clippy, fmt, `docs --check`, `cargo deny` clean; `check --gpu` 69/69 examples.
 > - This Mac after a restart: Homebrew's rustup puts no `cargo` on PATH; use `export PATH="$HOME/.rustup/toolchains/1.97.0-aarch64-apple-darwin/bin:$PATH"` and `PYO3_PYTHON=$(brew --prefix python@3.13)/bin/python3.13`, or the binary links the system Python 3.9 and fails to start.
 
 > **2026-10-30:** a day on an Apple M5 Pro Mac (macOS 26.6, Metal). Mark ratified A9, A12, A24, A25 and the M2 proposals (A26–A52); A53–A56 were decided while building and are marked for review in `PRD.md` §0.
