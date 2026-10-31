@@ -253,6 +253,22 @@ impl Llm for Reporting {
     fn name(&self) -> String {
         self.inner.name()
     }
+
+    fn json(&mut self, messages: &[Value], schema: &Value) -> Option<Result<Value, String>> {
+        if self.stop.load(Ordering::Acquire) {
+            return Some(Err("stopped".into()));
+        }
+        self.step += 1;
+        let _ = self.tx.send(Progress::Step(self.step));
+        let reply = self.inner.json(messages, schema)?;
+        if let Ok(plan) = &reply {
+            let _ = self.tx.send(Progress::Tool {
+                name: "build_network".into(),
+                args: plan.to_string(),
+            });
+        }
+        Some(reply)
+    }
 }
 
 /// Runs `request` against a copy of `base` and stages the result.

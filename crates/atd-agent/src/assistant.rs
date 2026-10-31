@@ -23,6 +23,11 @@ pub trait Llm {
     /// for `messages` (OpenAI-style roles: system, user, assistant, tool).
     fn chat(&mut self, messages: &[Value], tools: &[Value]) -> Result<Value, String>;
     fn name(&self) -> String;
+    /// A reply constrained to the JSON `schema`, for models that support
+    /// structured output (`None`: not supported; [`build`] then uses tools).
+    fn json(&mut self, _messages: &[Value], _schema: &Value) -> Option<Result<Value, String>> {
+        None
+    }
 }
 
 /// Ollama's `/api/chat` with tools.
@@ -103,6 +108,27 @@ impl Llm for Ollama {
 
     fn name(&self) -> String {
         format!("ollama:{}", self.model)
+    }
+
+    fn json(&mut self, messages: &[Value], schema: &Value) -> Option<Result<Value, String>> {
+        let body = json!({
+            "model": self.model,
+            "messages": messages,
+            "format": schema,
+            "stream": false,
+            "options": {"temperature": 0.2, "num_ctx": 32768, "num_predict": 4096},
+        });
+        Some((|| {
+            let r = post_json(&format!("{}/api/chat", self.base), &[], &body)?;
+            if let Some(e) = r.get("error") {
+                return Err(format!("Ollama: {e}"));
+            }
+            let text = r["message"]["content"].as_str().unwrap_or_default();
+            serde_json::from_str(text).map_err(|e| {
+                let tail = text.floor_char_boundary(text.len().saturating_sub(300));
+                format!("Ollama: not JSON ({e}): …{}", &text[tail..])
+            })
+        })())
     }
 }
 
@@ -343,9 +369,23 @@ pub fn relevant_ops(ws: &dyn Workspace, request: &str) -> String {
                 .collect::<Vec<_>>()
                 .join(", ")
         };
-        let params: Vec<String> = op
+        // A numbered series (`opacity0`, `opacity1` …) is listed once as
+        // `opacity0..7`, and long lists are cut: a small model otherwise
+        // copies every one into its answer.
+        let series = |name: &str| {
+            let stem = name.trim_end_matches(|c: char| c.is_ascii_digit());
+            (stem.len() < name.len()).then_some(stem.to_owned())
+        };
+        let mut seen = std::collections::BTreeSet::new();
+        let mut params: Vec<String> = op
             .params
             .iter()
+            .filter_map(|p| {
+                let Some(stem) = series(&p.name) else {
+                    return Some(p);
+                };
+                seen.insert(stem).then_some(p)
+            })
             .map(|p| {
                 let kind = match &p.kind {
                     ParamKind::Float { min, max, .. } => {
@@ -359,16 +399,32 @@ pub fn relevant_ops(ws: &dyn Workspace, request: &str) -> String {
                     ParamKind::Menu { options, .. } => format!("menu({})", options.join("|")),
                     k => format!("{k:?}").to_ascii_lowercase(),
                 };
-                format!("{} {kind}={}", p.name, p.default)
+                let name = match series(&p.name) {
+                    Some(stem) => {
+                        let last = op
+                            .params
+                            .iter()
+                            .filter(|q| series(&q.name).as_deref() == Some(stem.as_str()))
+                            .count();
+                        format!("{}..{}", p.name, last.saturating_sub(1))
+                    }
+                    None => p.name.clone(),
+                };
+                format!("{name} {kind}={}", p.default)
             })
             .collect();
+        if params.len() > 14 {
+            params.truncate(14);
+            params.push("… (get_schema lists the rest)".into());
+        }
         let _ = writeln!(
             out,
-            "{}: {} -> {}; {}",
+            "{}: {} -> {}; {} — {}",
             op.type_id,
             sockets(&op.inputs),
             sockets(&op.outputs),
-            params.join(", ")
+            params.join(", "),
+            op.summary.trim()
         );
     }
     out
@@ -391,8 +447,193 @@ pub struct Run {
     pub llm_error: Option<String>,
 }
 
-/// Runs one request to completion (or `max_steps` model turns).
+/// The JSON a planning model answers with: the whole network, operator
+/// types limited to the registry's.
+fn plan_schema(ws: &dyn Workspace) -> Value {
+    let types: Vec<&str> = ws
+        .registry()
+        .iter()
+        .map(|o| o.type_id.as_str())
+        .filter(|t| !t.starts_with(atd_core::pack::TYPE_PREFIX))
+        .collect();
+    json!({
+        "type": "object",
+        "properties": {
+            "nodes": {"type": "array", "items": {"type": "object", "properties": {
+                "name": {"type": "string"},
+                "type": {"type": "string", "enum": types},
+                // A bounded list (grammars enforce maxItems, not
+                // maxProperties), so a looping model cannot run on forever.
+                "params": {"type": "array", "maxItems": 8, "items": {"type": "object", "properties": {
+                    "name": {"type": "string", "maxLength": 40},
+                    "value": {"anyOf": [
+                        {"type": "number"}, {"type": "string", "maxLength": 200}, {"type": "boolean"},
+                        {"type": "array", "items": {"type": "number"}, "maxItems": 4}
+                    ]}
+                }, "required": ["name", "value"]}}
+            }, "required": ["name", "type", "params"]}, "maxItems": 24},
+            "wires": {"type": "array", "items": {"type": "object", "properties": {
+                "from": {"type": "string"}, "output": {"type": "string"},
+                "to": {"type": "string"}, "input": {"type": "string"}
+            }, "required": ["from", "output", "to", "input"]}, "maxItems": 48}
+        },
+        "required": ["nodes", "wires"]
+    })
+}
+
+const PLAN_RULES: &str = "You design node networks (patches) in Atidarla, a real-time visual instrument. \
+Answer with the WHOLE network as JSON: {\"nodes\": [{\"name\", \"type\", \"params\": [{\"name\", \"value\"}]}], \"wires\": [{\"from\", \"output\", \"to\", \"input\"}]}. Give only the parameters that differ from their defaults.\n\
+Rules:\n\
+- Include every node the request names or implies: an effect (blur, mirror, kaleidoscope, level …) needs a source node (noise, ramp, constant, shape …) wired into its image input.\n\
+- Wire every node: `from`/`to` are node names from your list; `output` is usually `out`; `input` must be one the operator lists, and wire types must match (IMG to IMG, SIG to SIG, GEO to GEO).\n\
+- Use only the parameter names listed for each operator. Animate a number parameter with an expression string such as `0.5 + 0.5 * sin(time)`; read a SIG node's channel in an expression as `op('lfo1')['lfo']`, using the channel names its description gives (an LFO's channel is `lfo`); or wire a SIG node into an operator's SIG input.\n\
+- Names are short identifiers (noise1, blur1). Do not explain.\n";
+
+/// A plan's `params` lists (`[{name, value}]`) as the objects
+/// `build_network` takes.
+fn plan_to_network(plan: &Value) -> Value {
+    let mut net = plan.clone();
+    for n in net["nodes"].as_array_mut().into_iter().flatten() {
+        if let Some(list) = n["params"].as_array() {
+            let obj: serde_json::Map<String, Value> = list
+                .iter()
+                .filter_map(|p| Some((p["name"].as_str()?.to_owned(), p["value"].clone())))
+                .collect();
+            n["params"] = Value::Object(obj);
+        }
+    }
+    net
+}
+
+/// Plan-then-build for a model with structured output: the model writes the
+/// whole network as JSON, it is staged afresh (so failed rounds never pile
+/// up nodes), and the errors go back for a corrected plan.
+fn build_planned(
+    llm: &mut dyn Llm,
+    agent: &mut Agent,
+    ws: &mut dyn Workspace,
+    request: &str,
+    rounds: u32,
+    trace: bool,
+) -> Option<Run> {
+    let schema = plan_schema(ws);
+    let base = ws.network();
+    let existing = if base.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\nThe project already has these nodes (keep their names to change them): {}\n",
+            base.nodes()
+                .map(|n| format!("{} ({})", n.name, n.type_id))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    let system = format!("{PLAN_RULES}{existing}{}", relevant_ops(ws, request));
+    let mut messages = vec![
+        json!({"role": "system", "content": system}),
+        json!({"role": "user", "content": request}),
+    ];
+    let mut run = Run::default();
+    let accept = agent.scopes.contains(&crate::lock::Scope::Accept);
+    while run.steps < rounds {
+        run.steps += 1;
+        // A degenerate reply (cut off, not JSON) is asked for once more.
+        let plan = match llm.json(&messages, &schema)? {
+            Ok(p) => p,
+            Err(e) if e.contains("not JSON") => match llm.json(&messages, &schema)? {
+                Ok(p) => p,
+                Err(e) => {
+                    run.llm_error = Some(e);
+                    break;
+                }
+            },
+            Err(e) => {
+                run.llm_error = Some(e);
+                break;
+            }
+        };
+        if trace {
+            eprintln!("[{}] plan {plan}", run.steps);
+        }
+        // Each round restages the whole plan on the network as accepted so far.
+        agent.call(ws, "discard_changes", &json!({}));
+        let out = agent.call(ws, "build_network", &plan_to_network(&plan));
+        run.tool_calls += 1;
+        let mut problems: Vec<String> = match &out {
+            Output::Json(v) => v["errors"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|e| e.as_str().map(str::to_owned))
+                .collect(),
+            other => vec![output_text(other)],
+        };
+        run.tool_errors += problems.len() as u32;
+        if accept && !agent.staged().is_empty() {
+            match agent.accept(ws, "Assistant") {
+                Ok(errors) => {
+                    run.accepted = true;
+                    let net = ws.network();
+                    run.errors = errors
+                        .iter()
+                        .map(|(id, e)| {
+                            format!("{}: {e}", net.node(*id).map_or("?", |n| n.name.as_str()))
+                        })
+                        .collect();
+                    problems.extend(run.errors.iter().map(|e| format!("node error {e}")));
+                }
+                Err(e) => problems.push(e),
+            }
+        }
+        // A node name used as a bare variable in an expression.
+        let names: Vec<String> = ws.network().nodes().map(|n| n.name.clone()).collect();
+        for p in &mut problems {
+            if let Some(name) = p
+                .split("name '")
+                .nth(1)
+                .and_then(|r| r.split('\'').next())
+                .filter(|n| names.iter().any(|x| x == n))
+                .map(str::to_owned)
+            {
+                let _ = write!(
+                    p,
+                    " (`{name}` is a node: read its channel as op('{name}')['<channel>'], or a parameter as op('{name}').par.<param>)"
+                );
+            }
+        }
+        if trace {
+            eprintln!("[{}] problems {problems:?}", run.steps);
+        }
+        if problems.is_empty() {
+            break;
+        }
+        messages.push(json!({"role": "assistant", "content": plan.to_string()}));
+        messages.push(json!({"role": "user", "content": format!(
+            "That network has problems:\n{}\nAnswer with the corrected WHOLE network as JSON (same names for nodes you keep).",
+            problems.join("\n"))}));
+    }
+    Some(run)
+}
+
+/// Runs one request to completion (or `max_steps` model turns). A model
+/// with structured output plans the network as JSON ([`build_planned`]);
+/// any other calls the tools turn by turn.
 pub fn build(
+    llm: &mut dyn Llm,
+    agent: &mut Agent,
+    ws: &mut dyn Workspace,
+    request: &str,
+    max_steps: u32,
+) -> Run {
+    let trace = std::env::var("ATD_AGENT_TRACE").is_ok_and(|v| v == "1");
+    if let Some(run) = build_planned(llm, agent, ws, request, max_steps.min(4), trace) {
+        return run;
+    }
+    build_tools(llm, agent, ws, request, max_steps)
+}
+
+fn build_tools(
     llm: &mut dyn Llm,
     agent: &mut Agent,
     ws: &mut dyn Workspace,
@@ -609,6 +850,65 @@ mod tests {
         assert_eq!(calls[1]["name"], "connect");
         assert_eq!(calls[1]["arguments"]["to"], "b");
         assert!(calls_in_text("done, the network is built", &tools, |_| false).is_empty());
+    }
+
+    /// A structured-output model: replays plans.
+    struct Planner(Vec<Value>, usize);
+
+    impl Llm for Planner {
+        fn chat(&mut self, _: &[Value], _: &[Value]) -> Result<Value, String> {
+            Err("tools are not used with a planner".into())
+        }
+        fn name(&self) -> String {
+            "planner".into()
+        }
+        fn json(&mut self, messages: &[Value], schema: &Value) -> Option<Result<Value, String>> {
+            assert!(
+                schema["properties"]["nodes"]["items"]["properties"]["type"]["enum"]
+                    .as_array()
+                    .is_some_and(|e| e.iter().any(|t| t == "img.noise"))
+            );
+            self.1 = messages.len();
+            Some(if self.0.is_empty() {
+                Err("no more plans".into())
+            } else {
+                Ok(self.0.remove(0))
+            })
+        }
+    }
+
+    #[test]
+    fn a_planning_model_is_restaged_each_round_and_told_its_errors() {
+        let mut reg = atd_core::Registry::default();
+        atd_ops_img::register(&mut reg);
+        let mut ws = NetworkWorkspace::new(reg);
+        let scopes = Scope::defaults()
+            .into_iter()
+            .chain([Scope::Accept])
+            .collect();
+        let mut agent = Agent::new(scopes, ShowLock::default());
+        let mut llm = Planner(
+            vec![
+                // Round 1: a wrong input name; the blur is left unwired.
+                json!({"nodes": [{"name": "noise1", "type": "img.noise", "params": []},
+                                 {"name": "blur1", "type": "img.blur", "params": [{"name": "size", "value": 3}]}],
+                       "wires": [{"from": "noise1", "output": "out", "to": "blur1", "input": "image"}]}),
+                // Round 2: fixed.
+                json!({"nodes": [{"name": "noise1", "type": "img.noise", "params": []},
+                                 {"name": "blur1", "type": "img.blur", "params": [{"name": "size", "value": 3}]}],
+                       "wires": [{"from": "noise1", "output": "out", "to": "blur1", "input": "in"}]}),
+            ],
+            0,
+        );
+        let run = build(&mut llm, &mut agent, &mut ws, "noise, blurred", 40);
+        assert_eq!(run.steps, 2, "{run:?}");
+        assert!(run.llm_error.is_none(), "{run:?}");
+        assert!(
+            llm.1 >= 4,
+            "the second round saw the first plan and its errors"
+        );
+        assert_eq!(ws.network.len(), 2, "rebuilt by name, not duplicated");
+        assert_eq!(ws.network.wires().count(), 1);
     }
 
     #[test]
