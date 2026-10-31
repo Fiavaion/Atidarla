@@ -467,20 +467,22 @@ fn plan_schema(ws: &dyn Workspace) -> Value {
                     ]}
                 }, "required": ["name", "value"]}}
             }, "required": ["name", "type", "params"]}, "maxItems": 24},
+            // Dotted endpoints: separate `output`/`input` fields were read
+            // the wrong way round by small models.
             "wires": {"type": "array", "items": {"type": "object", "properties": {
-                "from": {"type": "string"}, "output": {"type": "string"},
-                "to": {"type": "string"}, "input": {"type": "string"}
-            }, "required": ["from", "output", "to", "input"]}, "maxItems": 48}
+                "from": {"type": "string", "description": "source node.output, e.g. noise1.out"},
+                "to": {"type": "string", "description": "destination node.input, e.g. blur1.in"}
+            }, "required": ["from", "to"]}, "maxItems": 48}
         },
         "required": ["nodes", "wires"]
     })
 }
 
 const PLAN_RULES: &str = "You design node networks (patches) in Atidarla, a real-time visual instrument. \
-Answer with the WHOLE network as JSON: {\"nodes\": [{\"name\", \"type\", \"params\": [{\"name\", \"value\"}]}], \"wires\": [{\"from\", \"output\", \"to\", \"input\"}]}. Give only the parameters that differ from their defaults.\n\
+Answer with the WHOLE network as JSON: {\"nodes\": [{\"name\", \"type\", \"params\": [{\"name\", \"value\"}]}], \"wires\": [{\"from\": \"node.output\", \"to\": \"node.input\"}]}, e.g. {\"from\": \"noise1.out\", \"to\": \"blur1.in\"}. Give only the parameters that differ from their defaults.\n\
 Rules:\n\
 - Include every node the request names or implies: an effect (blur, mirror, kaleidoscope, level …) needs a source node (noise, ramp, constant, shape …) wired into its image input.\n\
-- Wire every node: `from`/`to` are node names from your list; `output` is usually `out`; `input` must be one the operator lists, and wire types must match (IMG to IMG, SIG to SIG, GEO to GEO).\n\
+- Wire every node: `from` is `<source node>.<output>` (usually `.out`), `to` is `<destination node>.<input>` with an input the destination operator lists; wire types must match (IMG to IMG, SIG to SIG, GEO to GEO).\n\
 - Use only the parameter names listed for each operator. Animate a number parameter with an expression string such as `0.5 + 0.5 * sin(time)`; read a SIG node's channel in an expression as `op('lfo1')['lfo']`, using the channel names its description gives (an LFO's channel is `lfo`); or wire a SIG node into an operator's SIG input.\n\
 - Names are short identifiers (noise1, blur1). Do not explain.\n";
 
@@ -488,6 +490,28 @@ Rules:\n\
 /// `build_network` takes.
 fn plan_to_network(plan: &Value) -> Value {
     let mut net = plan.clone();
+    // `noise1.out` → from noise1, output out; `blur1` alone → input `in`.
+    for w in net["wires"].as_array_mut().into_iter().flatten() {
+        let split = |end: &Value, default: &str| {
+            let s = end.as_str().unwrap_or_default();
+            match s.rsplit_once('.') {
+                Some((node, socket)) if !node.is_empty() && !socket.is_empty() => {
+                    (node.to_owned(), socket.to_owned())
+                }
+                _ => (s.to_owned(), default.to_owned()),
+            }
+        };
+        if w.get("output").is_none() {
+            let (node, output) = split(&w["from"], "out");
+            w["from"] = json!(node);
+            w["output"] = json!(output);
+        }
+        if w.get("input").is_none() {
+            let (node, input) = split(&w["to"], "in");
+            w["to"] = json!(node);
+            w["input"] = json!(input);
+        }
+    }
     for n in net["nodes"].as_array_mut().into_iter().flatten() {
         if let Some(list) = n["params"].as_array() {
             let obj: serde_json::Map<String, Value> = list
@@ -935,11 +959,11 @@ mod tests {
                 // Round 1: a wrong input name; the blur is left unwired.
                 json!({"nodes": [{"name": "noise1", "type": "img.noise", "params": []},
                                  {"name": "blur1", "type": "img.blur", "params": [{"name": "size", "value": 3}]}],
-                       "wires": [{"from": "noise1", "output": "out", "to": "blur1", "input": "image"}]}),
+                       "wires": [{"from": "noise1.out", "to": "blur1.image"}]}),
                 // Round 2: fixed.
                 json!({"nodes": [{"name": "noise1", "type": "img.noise", "params": []},
                                  {"name": "blur1", "type": "img.blur", "params": [{"name": "size", "value": 3}]}],
-                       "wires": [{"from": "noise1", "output": "out", "to": "blur1", "input": "in"}]}),
+                       "wires": [{"from": "noise1.out", "to": "blur1.in"}]}),
             ],
             0,
         );

@@ -998,7 +998,8 @@ impl Agent {
                 }
             }
             made.push(name.to_owned());
-            let kinds: Vec<(String, bool)> = self.reg(ws).get(t).map_or(Vec::new(), |op| {
+            // (name, takes text, is a vector or colour)
+            let kinds: Vec<(String, bool, bool)> = self.reg(ws).get(t).map_or(Vec::new(), |op| {
                 op.params
                     .iter()
                     .map(|p| {
@@ -1006,12 +1007,23 @@ impl Agent {
                             p.kind,
                             ParamKind::String | ParamKind::Menu { .. } | ParamKind::Path
                         );
-                        (p.name.clone(), text)
+                        let vector = matches!(p.kind, ParamKind::Vec { .. } | ParamKind::Colour);
+                        (p.name.clone(), text, vector)
                     })
                     .collect()
             });
             for (p, v) in n["params"].as_object().into_iter().flatten() {
-                let text = kinds.iter().find(|k| &k.0 == p).is_some_and(|k| k.1);
+                let kind = kinds.iter().find(|k| &k.0 == p);
+                let text = kind.is_some_and(|k| k.1);
+                if kind.is_some_and(|k| k.2)
+                    && v.as_str()
+                        .is_some_and(|e| serde_json::from_str::<Value>(e.trim()).is_err())
+                {
+                    errors.push(format!(
+                        "{name}.{p}: `{p}` is a vector or colour: give a list of numbers such as [1, 1]; expressions animate single-number parameters only (animate another number parameter, or bind the vector to a SIG node's channels)"
+                    ));
+                    continue;
+                }
                 let expression = v
                     .as_str()
                     .filter(|e| !text && serde_json::from_str::<Value>(e.trim()).is_err());
