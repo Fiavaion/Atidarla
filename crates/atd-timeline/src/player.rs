@@ -17,9 +17,9 @@ use crate::eval::{OpKind, Signals, Timeline};
 use crate::transport::{ClockSource, Motion, PlayState, Transport};
 
 /// The engine's signals: SIG channels from the last cook, parameter values
-/// from the network, a vector's or colour's components as its binding or
-/// expression drove them on the last cook (PRD A66; live values left out:
-/// they are the timeline's own output).
+/// as their bindings and expressions drove them on the last cook, else
+/// stored (a number, a vector's or colour's components: PRD A66; live
+/// values left out: they are the timeline's own output).
 #[derive(Debug, Clone, Copy)]
 pub struct EngineSignals<'a>(pub &'a Engine);
 
@@ -29,21 +29,10 @@ impl Signals for EngineSignals<'_> {
     }
 
     fn param(&self, node: NodeId, param: &str, index: Option<usize>) -> Option<f64> {
-        if let Some(i) = index
-            && let Some(v) = self.0.param_component(node, param, i, false)
-        {
-            return Some(v);
+        match index {
+            Some(i) => self.0.param_component(node, param, i, false),
+            None => self.0.param_number(node, param, false),
         }
-        let v = self
-            .0
-            .network()
-            .param_value(self.0.registry(), node, param)?;
-        let v = match index {
-            Some(i) => v.get(i)?,
-            None => v,
-        };
-        v.as_f64()
-            .or_else(|| v.as_bool().map(|b| f64::from(u8::from(b))))
     }
 }
 

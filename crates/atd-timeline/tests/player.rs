@@ -268,3 +268,42 @@ fn the_document_sets_the_clock_and_stage_mode() {
         "offline drives the Stage"
     );
 }
+
+/// Conditions read numbers as their expression or binding drives them,
+/// as they read a vector's components; live values are left out.
+#[test]
+fn conditions_read_driven_numbers() {
+    use atd_timeline::{EngineSignals, Signals};
+    let Some(mut e) = engine() else {
+        return;
+    };
+    let level = add(&mut e, "img.level");
+    let colour = add(&mut e, "img.constant");
+    for (node, param, value) in [
+        (level, "brightness", json!(1.0)),
+        (colour, "colour", json!([0.0, 0.0, 0.0, 1.0])),
+    ] {
+        e.edit(
+            "expr",
+            [Edit::SetParam {
+                node,
+                param: param.into(),
+                value: Some(Param {
+                    value,
+                    expr: Some("0.25 + 0.5".into()),
+                    bind: None,
+                }),
+            }],
+        )
+        .unwrap();
+    }
+    e.cook_frame(Some(level), 0.0).unwrap();
+    e.cook_frame(Some(colour), 0.0).unwrap();
+    e.set_live(level, "brightness", Some(&json!(0.125)));
+    let s = EngineSignals(&e);
+    assert_eq!(s.param(level, "brightness", None), Some(0.75), "driven");
+    assert_eq!(s.param(colour, "colour", Some(1)), Some(0.75), "driven");
+    assert_eq!(s.param(colour, "colour", Some(3)), Some(1.0), "stored");
+    assert_eq!(s.param(colour, "colour", None), None, "not a number");
+    assert_eq!(s.param(level, "gamma", None), Some(1.0), "stored");
+}

@@ -104,15 +104,19 @@ impl Control {
     /// drives any more (deleted or retargeted) gets its live value cleared,
     /// unless another writer has set it since.
     fn apply(&mut self, engine: &mut Engine, maps: &Mappings) {
-        self.rt.update(maps, |n, p| {
-            mapping::resolve(
-                engine.network(),
-                engine.registry(),
-                n,
-                p,
-                engine.live_values().get(n, p),
-            )
-        });
+        self.rt.update(
+            maps,
+            |n, p| {
+                mapping::resolve(
+                    engine.network(),
+                    engine.registry(),
+                    n,
+                    p,
+                    engine.live_values().get(n, p),
+                )
+            },
+            |n, p, i| engine.driven_component(n, p, i),
+        );
         for (n, p, v) in self.rt.released() {
             engine.clear_live_if(n, p, v);
         }

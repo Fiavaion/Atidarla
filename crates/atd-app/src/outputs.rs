@@ -146,13 +146,11 @@ impl OutputsPanel {
                     .unwrap_or("")
                     .to_owned()
             };
+            // As the node reads it: live, else bound or expression-driven
+            // (PRD A66), else stored.
             let vec2p = |name, d: [f32; 2]| {
-                param(engine, id, name)
-                    .and_then(Value::as_array)
-                    .map_or(d, |a| {
-                        let f = |i: usize| a.get(i).and_then(Value::as_f64).map(|v| v as f32);
-                        [f(0).unwrap_or(d[0]), f(1).unwrap_or(d[1])]
-                    })
+                let f = |i: usize| engine.param_component(id, name, i, true).map(|v| v as f32);
+                [f(0).unwrap_or(d[0]), f(1).unwrap_or(d[1])]
             };
             let fullscreen = param(engine, id, "fullscreen")
                 .and_then(Value::as_bool)
