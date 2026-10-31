@@ -565,4 +565,13 @@ fn share_out_and_in_steady_state_allocations() {
         "{per_node:.1} allocations per node-cook (bound {})",
         2.0 * BOUND
     );
+    // The workers stop their Syphon or Spout objects once the nodes are
+    // gone, and the last one tears the device down; exiting before they
+    // finish trapped on the macOS runner. Usually under 0.1 s, but up to
+    // 16 s measured with four test binaries sharing the GPU.
+    drop(e);
+    assert!(
+        atd_ops_img::share_wait_for_workers(std::time::Duration::from_secs(60)),
+        "the Share workers did not finish"
+    );
 }

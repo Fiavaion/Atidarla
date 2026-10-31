@@ -102,10 +102,7 @@ fn spawn<M: Send + 'static, R: Send + 'static>(
 ) -> Result<Link<M, R>, String> {
     let (tx, worker_rx) = sync_channel(4);
     let (worker_tx, rx) = sync_channel(2);
-    std::thread::Builder::new()
-        .name(name.into())
-        .spawn(move || f(worker_rx, worker_tx))
-        .map_err(|e| format!("cannot start the {name} thread: {e}"))?;
+    super::spawn_worker(name, move || f(worker_rx, worker_tx))?;
     Ok((tx, rx))
 }
 

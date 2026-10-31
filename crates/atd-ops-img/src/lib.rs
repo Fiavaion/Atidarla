@@ -35,7 +35,10 @@ use atd_gpu::fullscreen::{FullscreenPass, MAX_PARAM_VEC4};
 pub use ops::DEFS;
 pub use ops2::DEFS2;
 pub use pixel_map::Senders as DmxSenders;
-pub use share::{SENDERS_KEY as SHARE_SENDERS_KEY, senders as share_senders};
+pub use share::{
+    SENDERS_KEY as SHARE_SENDERS_KEY, senders as share_senders,
+    wait_for_workers as share_wait_for_workers,
+};
 pub use stateful::STATEFUL;
 
 /// Every declarative (single-pass) operator definition.
