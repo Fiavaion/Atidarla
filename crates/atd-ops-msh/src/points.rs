@@ -133,13 +133,17 @@ pub const SHAPES: &[&str] = &["points", "sphere", "box", "torus", "gyroid"];
 /// Most cells along an axis.
 pub const MAX_RESOLUTION: i64 = 256;
 
+/// Most grid nodes the spheres of a points-mode Iso Surface may visit in
+/// total (points x nodes each sphere reaches). Past it the cook is refused.
+pub const MAX_SPLAT_VISITS: u64 = 200_000_000;
+
 pub fn iso_params() -> Vec<ParamSchema> {
     vec![
         ParamSchema::menu("source", "Source", SHAPES, "points").help(
             "points: a sphere around every input point, blended together; the others: an analytic shape (no input needed).",
         ),
         ParamSchema::float("radius", "Radius", 0.1, Some(0.0), None).help(
-            "points: each sphere's radius (times the point's `pscale`); sphere and torus: the radius.",
+            "points: each sphere's radius (times the point's `pscale`); sphere and torus: the radius. Points mode refuses a cook whose spheres together visit over 200 million grid nodes (lower Radius, Resolution or the point count).",
         ),
         ParamSchema::float("blend", "Blend", 0.05, Some(0.0), None)
             .help("points: how far neighbouring spheres melt into each other (a smooth union)."),
@@ -243,12 +247,35 @@ pub fn iso_surface(s: &Snap, inputs: &[Option<Mesh>], job: &Job) -> Result<Mesh,
     let shift = offset as f32;
     if source == "points" {
         let k = s.f32("blend").max(0.0);
-        for (n, &(p, pr)) in pts.iter().enumerate() {
-            job.every(n)?;
+        let range = |p: V3, pr: f64| {
             let reach = pr + f64::from(k) + offset.abs() + 2.0 * h;
             let lo_i = [0, 1, 2].map(|a| (((p[a] - reach - lo[a]) / h).floor().max(0.0)) as usize);
             let hi_i =
                 [0, 1, 2].map(|a| (((p[a] + reach - lo[a]) / h).ceil() as usize).min(dims[a] - 1));
+            (lo_i, hi_i)
+        };
+        // Every sphere visits the nodes of its box: points x nodes reached.
+        // Count first (cheap) and refuse a cook that would run for minutes.
+        let mut visits = 0u64;
+        for (n, &(p, pr)) in pts.iter().enumerate() {
+            job.every(n)?;
+            let (lo_i, hi_i) = range(p, pr);
+            visits = visits.saturating_add(
+                [0, 1, 2]
+                    .map(|a| (hi_i[a] + 1).saturating_sub(lo_i[a]) as u64)
+                    .iter()
+                    .product::<u64>(),
+            );
+        }
+        if visits > MAX_SPLAT_VISITS {
+            return Err(format!(
+                "too much work: {} points reach about {visits} grid nodes in total (limit {MAX_SPLAT_VISITS}); lower Radius, lower Resolution, or use fewer points",
+                pts.len()
+            ));
+        }
+        for (n, &(p, pr)) in pts.iter().enumerate() {
+            job.every(n)?;
+            let (lo_i, hi_i) = range(p, pr);
             for kk in lo_i[2]..=hi_i[2] {
                 for jj in lo_i[1]..=hi_i[1] {
                     for ii in lo_i[0]..=hi_i[0] {

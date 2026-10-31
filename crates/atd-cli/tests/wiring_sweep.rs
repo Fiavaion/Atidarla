@@ -118,13 +118,6 @@ const SKIPPED: [(&str, &str); 0] = [];
 /// reason). Each is reported, not asserted.
 const KNOWN_FAILURES: [(&str, &str); 0] = [];
 
-/// Operators whose parameters the random networks leave at their defaults,
-/// with the reason (a cost cliff, not a crash: reported, not fixed here).
-const DEFAULT_PARAMS_ONLY: [(&str, &str); 1] = [(
-    "msh.iso_surface",
-    "points mode costs points x grid nodes each sphere reaches; a random Radius spanning the grid over thousands of points cooks for minutes, and offline the frame waits for it",
-)];
-
 struct Rng(u64);
 impl Rng {
     fn next(&mut self, n: u64) -> u64 {
@@ -825,7 +818,7 @@ fn one_network(
         ids.push(id);
         let params = reg.get(ty).unwrap().params.clone();
         for p in &params {
-            if rng.next(3) != 0 || DEFAULT_PARAMS_ONLY.iter().any(|(t, _)| t == ty) {
+            if rng.next(3) != 0 {
                 continue;
             }
             if let Some(v) = random_value(&p.kind, rng) {

@@ -424,6 +424,30 @@ fn iso_surfaces_are_closed() {
 }
 
 #[test]
+fn iso_surface_refuses_work_past_its_cap() {
+    // 3000 points whose spheres each span the whole grid: ~800 million
+    // node visits, refused up front with what to lower.
+    let s = make("msh.sphere", &[]);
+    let p = on(
+        "msh.scatter",
+        &[("count", json!(3000)), ("pscale", json!(1.0))],
+        &s,
+    );
+    let t = std::time::Instant::now();
+    let err = atd_ops_msh::run(
+        "msh.iso_surface",
+        &[("radius", json!(50.0)), ("resolution", json!(64))],
+        &[Some(p)],
+    )
+    .expect_err("past the cap");
+    assert!(t.elapsed().as_secs_f64() < 1.0, "refused quickly");
+    assert!(
+        err.contains("Radius") && err.contains("Resolution") && err.contains("limit"),
+        "{err}"
+    );
+}
+
+#[test]
 fn colour_modes() {
     let b = make("msh.box", &[]);
     let c = on(
