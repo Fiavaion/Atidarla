@@ -73,6 +73,10 @@ pub struct AtidarlaApp {
     title: String,
     /// The user confirmed quitting with unsaved changes.
     quitting: bool,
+    /// UI scale and wire labels, per user (docs/accessibility.md).
+    settings: crate::settings::UiSettings,
+    /// View > Accessibility.
+    accessibility: bool,
 }
 
 /// Everything the tabs render, split from the dock so both can be borrowed.
@@ -201,6 +205,14 @@ impl AtidarlaApp {
             }
         }
 
+        // Smoke runs use the defaults and leave the user's settings alone.
+        let settings = if smoke.is_some() {
+            crate::settings::UiSettings::default()
+        } else {
+            crate::settings::UiSettings::user()
+        };
+        cc.egui_ctx.set_zoom_factor(settings.scale);
+
         let mut dock = DockState::new(
             vec![Tab::Operators, Tab::Platform],
             vec![Tab::Viewer, Tab::Parameters],
@@ -247,6 +259,8 @@ impl AtidarlaApp {
             project,
             title: String::new(),
             quitting: false,
+            settings,
+            accessibility: false,
         }
     }
 }
@@ -389,6 +403,15 @@ impl eframe::App for AtidarlaApp {
                             }
                         }
                         ui.separator();
+                        if ui
+                            .button("Accessibility")
+                            .on_hover_text(
+                                "Interface scale, wire labels, wire legend and keyboard keys",
+                            )
+                            .clicked()
+                        {
+                            self.accessibility = true;
+                        }
                         if ui.button("Mappings").clicked() {
                             self.panels.control.open = true;
                         }
@@ -485,6 +508,7 @@ impl eframe::App for AtidarlaApp {
             });
         }
         self.panels.image_rect = None;
+        self.panels.patch.wire_labels = self.settings.wire_labels;
         if self.shell.kiosk {
             egui::CentralPanel::default().show(ui, |ui| self.panels.viewer_ui(ui));
         } else {
@@ -520,6 +544,9 @@ impl eframe::App for AtidarlaApp {
             );
         }
         self.learn_frame(ui.ctx());
+        crate::accessibility::window(ui.ctx(), &mut self.accessibility, &mut self.settings);
+        // Ctrl/Cmd +, - and 0 change the zoom at the end of a frame; keep it.
+        self.settings.follow_zoom(ui.ctx().zoom_factor());
         let p = &mut self.panels;
         let beat = match &p.engine {
             Some(engine) if p.assistant.wants_beat() => {
@@ -843,7 +870,22 @@ impl AtidarlaApp {
     }
 
     fn shortcuts(&mut self, ui: &Ui) {
-        if self.panels.engine.is_none() || ui.ctx().egui_wants_keyboard_input() {
+        // F6 / Shift+F6: keyboard focus to the next / previous panel.
+        let f6 = ui.input_mut(|i| {
+            if i.consume_key(Modifiers::SHIFT, Key::F6) {
+                Some(false)
+            } else if i.consume_key(Modifiers::NONE, Key::F6) {
+                Some(true)
+            } else {
+                None
+            }
+        });
+        if let Some(forward) = f6 {
+            self.dock.focus_next_area(ui.ctx(), forward);
+        }
+        // A focused text field keeps its own undo and Ctrl/Cmd keys; any
+        // other focused control (a button, the canvas) does not take them.
+        if self.panels.engine.is_none() || ui.ctx().text_edit_focused() {
             return;
         }
         // Longer shortcuts first: Cmd+Shift+S also matches Cmd+S.

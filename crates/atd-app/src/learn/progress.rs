@@ -50,21 +50,7 @@ impl Progress {
 
     /// The per-user file: next to the other per-user settings.
     pub fn user_file() -> Option<PathBuf> {
-        let var = |k: &str| {
-            std::env::var_os(k)
-                .filter(|v| !v.is_empty())
-                .map(PathBuf::from)
-        };
-        let dir = if cfg!(windows) {
-            var("APPDATA")?.join("Atidarla")
-        } else if cfg!(target_os = "macos") {
-            var("HOME")?.join("Library/Application Support/Atidarla")
-        } else {
-            var("XDG_CONFIG_HOME")
-                .or_else(|| var("HOME").map(|h| h.join(".config")))?
-                .join("atidarla")
-        };
-        Some(dir.join(FILE))
+        Some(crate::settings::config_dir()?.join(FILE))
     }
 
     /// Steps finished in quest `id`.

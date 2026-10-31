@@ -53,6 +53,10 @@ struct Move {
 pub struct DockState<Tab> {
     areas: [Vec<Tab>; 4],
     active: [usize; 4],
+    /// The active tab button of each area last frame, for F6.
+    tab_ids: [Option<Id>; 4],
+    /// The area F6 moved focus to last.
+    key_area: usize,
 }
 
 impl<Tab> DockState<Tab> {
@@ -60,6 +64,8 @@ impl<Tab> DockState<Tab> {
         Self {
             areas: [left, right, bottom, center],
             active: [0; 4],
+            tab_ids: [None; 4],
+            key_area: Area::Center.index(),
         }
     }
 
@@ -136,9 +142,30 @@ impl<Tab> DockState<Tab> {
         }
     }
 
+    /// Moves keyboard focus to the active tab of the next (or previous)
+    /// area that has tabs (F6 / Shift+F6); Tab then walks into the panel.
+    pub fn focus_next_area(&mut self, ctx: &egui::Context, forward: bool) {
+        let n = Area::ALL.len();
+        for step in 1..=n {
+            let i = if forward {
+                (self.key_area + step) % n
+            } else {
+                (self.key_area + n - step) % n
+            };
+            if !self.areas[i].is_empty()
+                && let Some(id) = self.tab_ids[i]
+            {
+                self.key_area = i;
+                ctx.memory_mut(|m| m.request_focus(id));
+                return;
+            }
+        }
+    }
+
     /// Lays out all areas into `ui` (normally the window's root `Ui`).
     pub fn show(&mut self, ui: &mut Ui, viewer: &mut impl TabViewer<Tab = Tab>) {
         let mut pending: Option<Move> = None;
+        self.tab_ids = [None; 4];
         let dragging = egui::DragAndDrop::has_payload_of_type::<TabRef>(ui.ctx());
 
         for area in Area::ALL {
@@ -206,6 +233,9 @@ impl<Tab> DockState<Tab> {
                 }
                 if response.clicked() {
                     self.active[area.index()] = index;
+                }
+                if selected {
+                    self.tab_ids[area.index()] = Some(response.id);
                 }
                 if let Some(from) = response.dnd_release_payload::<TabRef>() {
                     pending = Some(Move {
