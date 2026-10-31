@@ -60,6 +60,7 @@ every IMG and SIG operator (CLAUDE.md rule 7); each operator's page in
 | [pnt-fields](pnt-fields.atidarla/) | Falloff Field, Attribute Noise and Attribute from Channels on a grid; Attribute Transfer and Proximity from wandering brushes; Neighbours counting a swarm (M6) |
 | [pnt-motion](pnt-motion.atidarla/) | A Lattice deforming a ball by a drifting cage (and the cage drawn), boids (Flock) in a Solver loop kept centred by Attribute Promote and drawn as Trails, points shrink-wrapped onto a mesh by Ray Intersect (M6) |
 | [pnt-capture](pnt-capture.atidarla/) | Points from Image and from Depth, Attribute from Image, Point File In (CSV, PLY and a CSV sequence) and Sensor In's test scene with body tracking (M6, [`docs/point-caches.md`](../docs/point-caches.md)) |
+| [pnt-outputs](pnt-outputs.atidarla/) | Resample evens out a ring; To Channels reads point positions back as channels; Pixel Out lights a 60-pixel DMX strip with the points' colours (PRD A65, [`docs/dmx.md`](../docs/dmx.md)) |
 | [pnt-solver](pnt-solver.atidarla/) | A Solver loop (Attract, Turbulence, Drag, Integrate, Age) over pieces coloured per piece (M2) |
 | [pnt-foreach](pnt-foreach.atidarla/) | For-Each blocks: six counted copies of a column, and a strip coloured band by band (pieces) (M2) |
 | [kernel-particles](kernel-particles.atidarla/) | A ten-line Kernel DSL particle simulation: `kernels/curl.atk` as the project's own operator, its `ch()` parameters as controls, plus an inline Kernel ([`docs/kernel-dsl.md`](../docs/kernel-dsl.md)) (M2) |

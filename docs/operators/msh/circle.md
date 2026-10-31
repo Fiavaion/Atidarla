@@ -34,3 +34,4 @@ All platforms.
 - [Mesh Files](../../../examples/mesh-files.atidarla/) — `ring0`, `ring1`, `ring2`, `ring3`
 - [Mesh Primitives](../../../examples/mesh-primitives.atidarla/) — `outline`
 - [Scatter to Iso Surface](../../../examples/mesh-scatter-iso.atidarla/) — `path`, `square`
+- [PNT Outputs](../../../examples/pnt-outputs.atidarla/) — `ring`

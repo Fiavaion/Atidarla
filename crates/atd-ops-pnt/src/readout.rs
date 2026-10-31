@@ -65,7 +65,7 @@ pub fn to_channels_schema() -> OperatorSchema {
             ParamSchema::string("attr", "Attribute", "P")
                 .help("The point attribute to read (`P`, `Cd`, `v`, `age`, any float or integer attribute)."),
             ParamSchema::menu("layout", "Layout", &["points", "samples"], "points")
-                .help("`points`: one channel per point and component, `<attr><i>_<c>` (`P0_x`; `age3` for one component), at control rate. `samples`: one channel per component, `<attr>_<c>` (`P_x`; `age`), each with one sample per point in point order, like a Pattern."),
+                .help("`points`: one channel per point and component, `<attr><i>_<c>` (`P0_x`; `age3` for one component), at control rate. `samples`: one channel per component, `<attr>_<c>` (`P_x`; `age`), each with one sample per point in point order, like a Pattern. Components are `x y z w`, or `r g b a` for `Cd`."),
             ParamSchema::int("max", "Max Points", 64, Some(1), Some(MAX_POINTS))
                 .help("Reads the first `max` points (of a simulation, the first `max` live ones). Caps the channel count at `max` × 4."),
         ],

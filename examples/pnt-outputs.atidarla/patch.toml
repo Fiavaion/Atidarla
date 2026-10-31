@@ -1,0 +1,11 @@
+# DMX patch for Pixel Out (docs/dmx.md): point i drives pixel i, in file order.
+# Pixel Out ignores the region; it is there so Pixel Map can use the same patch.
+
+# 60 RGB pixels: universe 1, slots 1-180.
+[[fixture]]
+id = "ring"
+type = "pixel-rgb"
+universe = 1
+address = 1
+count = 60
+line = [[0.0, 0.5], [1.0, 0.5]]

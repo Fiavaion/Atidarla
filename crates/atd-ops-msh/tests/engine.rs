@@ -203,6 +203,45 @@ fn offline_waits_for_worker_and_gpu_inputs() {
     assert_eq!(floats(&e, noise, "P").len(), 8);
 }
 
+/// PNT Resample (cooked here, PNT by type ID) between an MSH curve and a
+/// GPU→SIG readback: offline, each frame's curve is resampled and read
+/// back in the same frame.
+#[test]
+fn resample_respaces_a_curve_and_feeds_to_channels_offline() {
+    let _g = GPU.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(mut e) = engine() else { return };
+    e.set_mode(CookMode::Offline { fps: 30.0 });
+    let mut b = Build::new(&mut e);
+    let line = b.node(
+        "msh.line",
+        &[("end", json!([2.0, 0.0, 0.0])), ("points", json!(2))],
+    );
+    let tr = b.node("msh.transform", &[]);
+    b.expr(tr, "uniform", "1 + frame");
+    let rs = b.node(
+        "pnt.resample",
+        &[("mode", json!("count")), ("count", json!(5))],
+    );
+    let ch = b.node("pnt.to_channels", &[("layout", json!("samples"))]);
+    b.wire(line, tr, "in");
+    b.wire(tr, rs, "in");
+    b.wire(rs, ch, "in");
+    b.done();
+    for frame in 0..3u32 {
+        e.cook(&[ch], f64::from(frame) / 30.0).unwrap();
+        assert_eq!(e.error(rs), None);
+        assert_eq!(e.error(ch), None);
+        let g = e.geometry(rs).unwrap();
+        assert_eq!((g.points(), g.prims()), (5, 1));
+        let c = e.channels(ch).unwrap();
+        assert_eq!(c.name(0), "P_x");
+        let length = 2.0 * (1.0 + frame as f32);
+        let want: Vec<f32> = (0..5).map(|k| length * k as f32 / 4.0).collect();
+        assert_eq!(c.channel(0), want.as_slice(), "frame {frame}");
+        assert!(c.channel(1).iter().all(|&y| y == 0.0));
+    }
+}
+
 #[test]
 fn gpu_inputs_are_read_back_live() {
     let _g = GPU.lock().unwrap_or_else(|e| e.into_inner());

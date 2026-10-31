@@ -801,6 +801,13 @@ pub fn classify(type_id: &str) -> Option<Class> {
         // Reads its file on a worker thread; offline the cook waits for it.
         "pnt.splat_in" => Waits,
         "pnt.particles" => Stateful,
+        // Topology on a worker thread (an MSH-style cook): offline it waits.
+        "pnt.resample" => Waits,
+        // GPU readback (PRD A65): offline the cook waits for its own copy,
+        // so frame i outputs frame i's points.
+        "pnt.to_channels" => Waits,
+        // Sends nothing offline; its channels are frame i's points, waited for.
+        "pnt.pixel_out" => Sink,
         "img.render" | "msh.platonic" => Pure,
         // Maps its input into the output image; the native window is the
         // app's, so a render (and `check`) produces the mapped image.

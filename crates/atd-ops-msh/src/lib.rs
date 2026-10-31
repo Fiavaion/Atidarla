@@ -11,6 +11,9 @@
 //! (the render-thread part: snapshot and hand-over; the worker time shows
 //! in the node's status line), a generated docs page (`atidarla docs`), an
 //! example project, a unit test and an offline-render class (`Waits`).
+//!
+//! PNT Resample (`pnt.resample`) is cooked here too: it changes topology,
+//! so it uses the same worker-thread cook under its PNT type ID (PRD A65).
 
 // Mesh code walks several parallel per-element arrays by index.
 #![allow(clippy::needless_range_loop)]
@@ -35,6 +38,7 @@ pub mod points;
 pub mod prims;
 pub mod reduce;
 pub mod remesh;
+pub mod resample;
 pub mod revolve;
 pub mod smooth;
 pub mod sweep;
@@ -386,7 +390,32 @@ fn defs() -> Vec<Def> {
             params: measure::params,
             run: measure::run,
         },
+        Def {
+            id: "resample",
+            label: "Resample",
+            summary: "Rebuilds every polyline with evenly spaced points, about a spacing apart or a fixed count per curve (closed primitives too, as outlines, when asked). Point attributes are interpolated; curve ends stay where they were.",
+            inputs: &["in"],
+            params: resample::params,
+            run: resample::run,
+        },
     ]
+}
+
+/// Operators cooked here that belong to the PNT family by their type ID
+/// (PRD §6 lists them there): they change topology, so they run on a
+/// worker thread like the MSH operators.
+const PNT_FAMILY: &[&str] = &["resample"];
+
+fn family(d: &Def) -> OpFamily {
+    if PNT_FAMILY.contains(&d.id) {
+        OpFamily::Pnt
+    } else {
+        OpFamily::Msh
+    }
+}
+
+fn type_id(d: &Def) -> String {
+    format!("{}.{}", family(d).prefix(), d.id)
 }
 
 fn schema(d: &Def) -> OperatorSchema {
@@ -397,8 +426,8 @@ fn schema(d: &Def) -> OperatorSchema {
         feedback: false,
     };
     OperatorSchema {
-        type_id: format!("msh.{}", d.id),
-        family: OpFamily::Msh,
+        type_id: type_id(d),
+        family: family(d),
         label: d.label.into(),
         summary: d.summary.into(),
         version: 1,
@@ -445,7 +474,7 @@ pub fn run(
 ) -> Result<Mesh, String> {
     let d = defs()
         .into_iter()
-        .find(|d| format!("msh.{}", d.id) == type_id)
+        .find(|d| self::type_id(d) == type_id)
         .ok_or_else(|| format!("no MSH operator `{type_id}`"))?;
     let snap = Snap::from_values(&schema(&d), params);
     let out = (d.run)(&snap, inputs, &Job::new())?;
