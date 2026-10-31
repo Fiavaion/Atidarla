@@ -120,6 +120,9 @@ fn main() -> ExitCode {
             )))
         }),
     );
+    // Share workers stop Syphon/Spout and release the GPU on their own
+    // threads; exiting under them can trap on macOS, so give them a moment.
+    atd_ops_img::share_wait_for_workers(std::time::Duration::from_secs(2));
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {

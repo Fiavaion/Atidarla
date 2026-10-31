@@ -81,8 +81,28 @@ fn engine_on(
 
 static SERIAL: Mutex<()> = Mutex::new(());
 
-fn serial() -> MutexGuard<'static, ()> {
-    SERIAL.lock().unwrap_or_else(|e| e.into_inner())
+/// Held for a whole test and dropped last (it is the first local), after
+/// the test's engines: it waits for the Share workers to finish tearing
+/// down, so the process never exits under them (macOS traps at exit).
+struct Serial {
+    _lock: MutexGuard<'static, ()>,
+}
+
+impl Drop for Serial {
+    fn drop(&mut self) {
+        let done = atd_ops_img::share_wait_for_workers(std::time::Duration::from_secs(60));
+        // A failing test is already unwinding; a second panic would abort.
+        assert!(
+            done || std::thread::panicking(),
+            "Share workers still running 60 s after the test"
+        );
+    }
+}
+
+fn serial() -> Serial {
+    Serial {
+        _lock: SERIAL.lock().unwrap_or_else(|e| e.into_inner()),
+    }
 }
 
 macro_rules! device_or_skip {
