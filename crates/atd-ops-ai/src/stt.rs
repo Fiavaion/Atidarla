@@ -6,8 +6,9 @@
 //! a quarter second of pre-roll so the first syllable is kept), and once
 //! the speaker pauses for `Hang` the utterance is handed to the
 //! [`SttLink`] worker, which sends it to the host. Transcripts come back
-//! asynchronously; the node publishes each one under its `Publish As` name
-//! ([`crate::text`]) and pulses `new_text`. Every buffer is sized when the
+//! asynchronously; the node puts each one on its DAT `text` output, also
+//! publishes it under its `Publish As` name ([`crate::text`]) and pulses
+//! `new_text`. Every buffer is sized when the
 //! node is created for the longest utterance, so the cook allocates nothing
 //! after that (rule 2) and never waits for the host (rule 1).
 
@@ -16,7 +17,7 @@ use atd_ai::router::Route;
 use atd_ai::speech::{SttConfig, SttLink};
 use atd_ai::supervisor::Supervisor;
 use atd_core::registry::{OpFamily, OperatorSchema, ParamSchema, SocketSchema, WireType};
-use atd_gpu::engine::{Params, SigCtx, SigOp};
+use atd_gpu::engine::{Dat, Params, SigCtx, SigOp};
 
 use crate::text;
 
@@ -33,7 +34,7 @@ pub fn schema() -> OperatorSchema {
         type_id: "ai.stt".into(),
         family: OpFamily::Ai,
         label: "Speech to Text".into(),
-        summary: "Transcribes speech from an audio input with Whisper (faster-whisper) on an AI Host. The input is gated by level: what is said is sent once the speaker pauses, and the transcript arrives asynchronously, published under `Publish As` for LLM Chat's `Prompt From` and the app (DAT text out when the engine routes DAT). Channels: `active` while speech is heard, `busy` while transcribing, `new_text` for one frame when a transcript arrives, `count`, `level` and `ready` (a host has the model loaded). Needs a Whisper model from the model manager and the host's `stt` extra; `builtin.stt_echo` runs anywhere for testing.".into(),
+        summary: "Transcribes speech from an audio input with Whisper (faster-whisper) on an AI Host. The input is gated by level: what is said is sent once the speaker pauses, and the transcript arrives asynchronously on the DAT `text` output (wire it into LLM Chat's `prompt` input or a Prompt Template); it is also published under `Publish As` for `Prompt From`. Channels: `active` while speech is heard, `busy` while transcribing, `new_text` for one frame when a transcript arrives, `count`, `level` and `ready` (a host has the model loaded). Needs a Whisper model from the model manager and the host's `stt` extra; `builtin.stt_echo` runs anywhere for testing.".into(),
         version: 1,
         params: vec![
             ParamSchema::string("route", "Route", "local").help(
@@ -63,7 +64,7 @@ pub fn schema() -> OperatorSchema {
                 "Longest utterance in seconds: longer speech is sent in pieces of this length.",
             ),
             ParamSchema::string("publish", "Publish As", "speech").help(
-                "The name each transcript is published under, for LLM Chat's `Prompt From` and the app. Empty: not published.",
+                "The name each transcript is also published under, for LLM Chat's `Prompt From`. Empty: not published (the `text` output still has it).",
             ),
         ],
         inputs: vec![SocketSchema {
@@ -343,9 +344,16 @@ impl SigOp for SttOp {
         }
         let mut new_text = false;
         let publish = p.str("publish");
+        let out = ctx.dat.output.as_deref_mut();
         link.take(&mut self.seen, |heard| {
-            if !heard.text.trim().is_empty() {
-                text::publish(publish, heard.text.trim());
+            let said = heard.text.trim();
+            if !said.is_empty() {
+                text::publish(publish, said);
+                if let Some(out) = out {
+                    // A new value per transcript (allocates only then):
+                    // the same words said twice still reach the chat.
+                    *out = Dat::text(said);
+                }
                 new_text = true;
             }
         });

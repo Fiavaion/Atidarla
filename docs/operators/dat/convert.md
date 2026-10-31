@@ -32,3 +32,4 @@ All platforms.
 ## Examples
 
 - [DAT tables](../../../examples/dat-tables.atidarla/) — `as_json`, `csv_table`
+- [Speech and chat](../../../examples/speech-chat.atidarla/) — `answer`

@@ -3,10 +3,11 @@ format = 1
 name = "Speech and chat"
 description = '''
 Speech to Text and LLM Chat (FR-A13). Audio In feeds Speech to Text, which sends what is said to
-Whisper on the local AI Host once the speaker pauses and publishes each transcript as `speech`.
-LLM Chat follows `speech` (its Prompt From): every new transcript goes to Ollama on this machine
-with the instruction in its Prompt, and the reply is published as `reply`. The bars show Speech
-to Text's channels (active, busy, new_text, count, level, ready).
+Whisper on the local AI Host once the speaker pauses and puts each transcript on its DAT `text`
+output. That is wired into LLM Chat's `prompt` input: every new transcript goes to Ollama on this
+machine with the instruction in its Prompt, and the reply comes out of its DAT `reply` output,
+shown as text by `answer` (view it). The bars show Speech to Text's channels (active, busy,
+new_text, count, level, ready).
 
 Needs: `whisper-base` from the model manager (MIT) and the AI Host's `stt` extra
 (`uv sync --extra stt`); Ollama running with `ollama pull qwen2.5-coder:7b`. Both run on this
@@ -14,6 +15,7 @@ machine, so Sovereign mode stays on. Switch LLM Chat's Provider to `anthropic` t
 mode refuse it.
 
 Try: pick your microphone in Audio In's Device menu (the test tone never pauses), watch `level`
-while you speak and set Speech to Text's Threshold between the room and your voice.
+while you speak and set Speech to Text's Threshold between the room and your voice. Put a Prompt
+Template between the two to wrap each transcript in a longer prompt.
 '''
 resolution = [1280, 720]

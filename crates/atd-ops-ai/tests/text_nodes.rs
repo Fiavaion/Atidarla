@@ -16,7 +16,9 @@ use atd_ai::refhost::{RefHostOptions, serve};
 use atd_ai::supervisor::{HostKind, HostSpec, Supervisor};
 use atd_core::graph::{Edit, Network, Node, NodeId, Param};
 use atd_core::registry::Registry;
-use atd_gpu::engine::{Channels, CookMode, Params, SigCtx, SigInputs, SigOp};
+use atd_gpu::engine::{
+    Channels, CookMode, Dat, DatInputs, DatIo, Params, SigCtx, SigInputs, SigOp,
+};
 use atd_ops_ai::{chat, stt, text};
 use serde_json::{Value, json};
 
@@ -82,6 +84,9 @@ struct Rig {
     sig: HashMap<NodeId, Channels>,
     /// The node wired into input 0 (a stand-in source holding `sig`).
     src: NodeId,
+    /// The node's DAT output, and the value on its DAT input (if any).
+    dat_out: Dat,
+    dat_in: HashMap<NodeId, Dat>,
 }
 
 impl Rig {
@@ -109,6 +114,8 @@ impl Rig {
             out: Channels::default(),
             sig: HashMap::new(),
             src: NodeId(999),
+            dat_out: Dat::default(),
+            dat_in: HashMap::new(),
         };
         for (p, v) in params {
             rig.set(p, v.clone());
@@ -144,8 +151,14 @@ impl Rig {
             }
         }
         let sources = [input.map(|_| self.src)];
+        // LLM Chat's DAT `prompt` is input 1.
+        let dat_src = NodeId(998);
+        let dat_sources = [None, self.dat_in.contains_key(&dat_src).then_some(dat_src)];
         let mut ctx = SigCtx {
-            dat: atd_gpu::engine::DatIo::none(),
+            dat: DatIo {
+                inputs: DatInputs::new(&dat_sources, &self.dat_in),
+                output: Some(&mut self.dat_out),
+            },
             inputs: SigInputs::new(&sources, &self.sig),
             output: &mut self.out,
             params: Params::new(&self.net, &self.reg, &self.sig, self.id).with_mode(mode),
@@ -154,6 +167,14 @@ impl Rig {
             frame: 0,
         };
         self.op.cook(&mut ctx)
+    }
+
+    /// Puts `value` on the DAT input (`None` unwires it).
+    fn wire_dat(&mut self, value: Option<Dat>) {
+        match value {
+            Some(v) => self.dat_in.insert(NodeId(998), v),
+            None => self.dat_in.remove(&NodeId(998)),
+        };
     }
 
     fn value(&self, name: &str) -> f32 {
@@ -218,6 +239,7 @@ fn speech_is_sent_after_a_pause_and_published() {
     assert_eq!((rig.value("count"), rig.value("active")), (1.0, 0.0));
     assert_eq!(rig.value("ready"), 1.0);
     let (_, heard) = text::get("test-speech").expect("published");
+    assert_eq!(rig.dat_out.as_text(), heard, "the DAT output has it too");
     // 5 frames of pre-roll room tone (0.25 s cap: all of it), 20 frames of
     // speech and the 100 ms hang in whole frames, at 16 kHz: 1333 + 5333 +
     // 1600 to 1867.
@@ -364,6 +386,52 @@ fn transcripts_chain_into_chat_and_replies_are_published() {
     assert_eq!(rig.value("replies"), 3.0);
     // Waiting frames allocate nothing.
     rig.set("send", json!(false));
+    rig.cook(None).unwrap();
+    let n = allocations(|| {
+        for _ in 0..60 {
+            rig.cook(None).unwrap();
+        }
+    });
+    assert_eq!(n, 0, "waiting frames allocated");
+}
+
+#[test]
+fn a_dat_wire_chains_transcripts_into_chat() {
+    let (url, seen) = fake_ollama();
+    let mut rig = Rig::new(
+        "ai.llm_chat",
+        &[
+            ("endpoint", json!(url)),
+            ("prompt", json!("Paint:")),
+            // Ignored while the DAT input is wired.
+            ("prompt_from", json!("test-wired-unused")),
+            ("publish", json!("")),
+        ],
+    );
+    // The value already on the wire is not sent.
+    rig.wire_dat(Some(Dat::text("old words")));
+    for _ in 0..5 {
+        rig.cook(None).unwrap();
+    }
+    text::publish("test-wired-unused", "by name");
+    for _ in 0..5 {
+        rig.cook(None).unwrap();
+    }
+    assert!(seen.lock().unwrap().is_empty(), "sent without a new value");
+    // A new value is; the reply comes out on the DAT output.
+    rig.wire_dat(Some(Dat::text("a heron at dawn")));
+    wait_reply(&mut rig, None).unwrap();
+    assert_eq!(
+        seen.lock().unwrap().as_slice(),
+        ["Paint:\n\na heron at dawn"]
+    );
+    assert_eq!(rig.dat_out.as_text(), "echo: Paint:\n\na heron at dawn");
+    assert!(text::get("").is_none(), "nothing published by name");
+    // Equal words again, as a new value (said twice): sent again.
+    rig.wire_dat(Some(Dat::text("a heron at dawn")));
+    wait_reply(&mut rig, None).unwrap();
+    assert_eq!(seen.lock().unwrap().len(), 2);
+    // Waiting frames on a wired text allocate nothing.
     rig.cook(None).unwrap();
     let n = allocations(|| {
         for _ in 0..60 {
