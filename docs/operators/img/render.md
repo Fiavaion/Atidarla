@@ -60,3 +60,4 @@ All platforms.
 - [Render Solids](../../../examples/render-solids.atidarla/) — `render`
 - [Render Textures](../../../examples/render-textures.atidarla/) — `render`
 - [Render Wire and Toon](../../../examples/render-wire-toon.atidarla/) — `render`
+- [Gaussian Splats](../../../examples/splats.atidarla/) — `render`

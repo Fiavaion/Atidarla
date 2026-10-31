@@ -14,15 +14,19 @@ atd-core.workspace = true
 atd-gpu.workspace = true
 atd-kernel.workspace = true
 atd-ops-img.workspace = true
+flate2.workspace = true
+image-webp.workspace = true
 log.workspace = true
 pollster.workspace = true
+ruzstd.workspace = true
+serde_json.workspace = true
 wgpu.workspace = true
+zip.workspace = true
 
 [dev-dependencies]
 atd-format.workspace = true
 atd-interop.workspace = true
 naga.workspace = true
-serde_json.workspace = true
 
 [lints]
 workspace = true

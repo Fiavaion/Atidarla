@@ -34,3 +34,4 @@ All platforms.
 ## Examples
 
 - [Render Solids](../../../examples/render-solids.atidarla/) — `glossy`, `glow`
+- [Gaussian Splats](../../../examples/splats.atidarla/) — `ring_mat`
