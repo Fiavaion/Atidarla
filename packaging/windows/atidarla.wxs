@@ -5,6 +5,15 @@
     -d Version=1.2.3    numeric MSI version
     -d BinDir=...       folder with atidarla-app.exe and atidarla.exe
     -d Root=...         repository root (licences, examples)
+    -d PythonDir=...    the bundled CPython runtime (python-build-standalone,
+                        PRD A68), installed as INSTALLFOLDER\python
+    -d PythonDll=...    its DLL (python313.dll), also installed beside the
+                        executables, which load it at start-up
+
+  The Microsoft Visual C++ runtime is not in this MSI: the setup bundle
+  (bundle.wxs, Atidarla-<version>-windows-x64-setup.exe) installs it first.
+  Deploying the bare MSI (Intune, SCCM, GPO) needs the VC++ 2015-2022 x64
+  redistributable deployed before it.
 
   Per-machine install into "C:\Program Files\Atidarla". Public properties for
   silent installs (docs/install.md):
@@ -33,6 +42,7 @@
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="Atidarla">
         <Directory Id="EXAMPLESFOLDER" Name="examples" />
+        <Directory Id="PYTHONFOLDER" Name="python" />
       </Directory>
     </StandardDirectory>
     <StandardDirectory Id="ProgramMenuFolder" />
@@ -56,6 +66,14 @@
       <Component>
         <File Source="$(Root)\LICENSE-APACHE" KeyPath="yes" />
       </Component>
+      <!-- The executables load python313.dll at start-up, so it sits beside
+           them; the rest of the runtime is in python\ (atd-core::runtime). -->
+      <Component>
+        <File Id="PythonDllBesideApp" Source="$(PythonDir)\$(PythonDll)" KeyPath="yes" />
+      </Component>
+      <Component>
+        <File Id="PythonLicence" Source="$(PythonDir)\LICENSE.txt" Name="Python-License.txt" KeyPath="yes" />
+      </Component>
       <Component Id="SystemPath" Condition="ADDTOPATH = 1">
         <Environment Id="PathEntry" Name="PATH" Value="[INSTALLFOLDER]" Part="last"
                      Action="set" System="yes" Permanent="no" />
@@ -76,9 +94,14 @@
       </Files>
     </ComponentGroup>
 
+    <ComponentGroup Id="Python" Directory="PYTHONFOLDER">
+      <Files Include="$(PythonDir)\**" />
+    </ComponentGroup>
+
     <Feature Id="Main" Title="Atidarla" Level="1">
       <ComponentGroupRef Id="Program" />
       <ComponentGroupRef Id="Examples" />
+      <ComponentGroupRef Id="Python" />
     </Feature>
   </Package>
 </Wix>

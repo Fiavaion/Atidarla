@@ -1,7 +1,9 @@
 #!/bin/sh
 # Builds an AppImage of Atidarla (FR-H5, Linux best-effort). Bundles the app,
-# the CLI and the examples; system libraries (Vulkan driver, ALSA, X11 or
-# Wayland, Python 3.13) come from the host. Never installs anything.
+# the CLI, the examples and CPython (the pinned python-build-standalone
+# runtime, packaging/python-runtime.env, in usr/lib/atidarla/python; PRD
+# A68); system libraries (Vulkan driver, ALSA, X11 or Wayland) come from the
+# host. Never installs anything.
 #
 #   packaging/linux/build-appimage.sh
 #
@@ -21,17 +23,26 @@ DIST=${ATD_DIST:-$ROOT/dist}
 VERSION=${ATD_VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)}
 ARCH=$(uname -m)
 
+PY_HOME=$(packaging/fetch-python.sh "$ARCH-unknown-linux-gnu" "$DIST/tools")
 if [ "${ATD_SKIP_BUILD:-}" != "1" ]; then
-    cargo build --release -p atd-app -p atd-cli
+    # Linked against the bundled runtime, found through the rpath below.
+    PYO3_CONFIG_FILE="$PY_HOME/../pyo3-config.txt" \
+        RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Wl,-rpath,\$ORIGIN/../lib/atidarla/python/lib" \
+        cargo build --release -p atd-app -p atd-cli
 fi
 REL="$TARGET/release"
 
 APPDIR="$DIST/stage-linux/Atidarla.AppDir"
 rm -rf "$DIST/stage-linux"
-mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/atidarla"
+mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/atidarla" "$APPDIR/usr/lib/atidarla"
 cp "$REL/atidarla-app" "$REL/atidarla" "$APPDIR/usr/bin/"
 cp -R examples "$APPDIR/usr/share/atidarla/examples"
 cp LICENSE-MIT LICENSE-APACHE "$APPDIR/usr/share/atidarla/"
+cp -R "$PY_HOME" "$APPDIR/usr/lib/atidarla/python"
+cp "$PY_HOME"/lib/python3.*/LICENSE.txt "$APPDIR/usr/share/atidarla/Python-License.txt"
+# The AppImage is read-only: precompile so imports do not recompile each run.
+"$APPDIR/usr/lib/atidarla/python/bin/python3" -I -B -m compileall -f -q -j 0 \
+    --invalidation-mode unchecked-hash "$APPDIR"/usr/lib/atidarla/python/lib/python3.* > /dev/null
 cp packaging/icons/atidarla.svg "$APPDIR/atidarla.svg"
 cat > "$APPDIR/atidarla.desktop" <<EOF
 [Desktop Entry]

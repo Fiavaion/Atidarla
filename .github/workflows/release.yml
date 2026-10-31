@@ -1,7 +1,10 @@
 name: Release
 
-# FR-H5: installers for Windows (MSI), macOS (DMG) and Linux (AppImage,
-# best-effort). Runs only for a version tag (v1.2.3) or by hand; never on
+# FR-H5: installers for Windows (setup .exe and MSI), macOS (DMG) and Linux
+# (AppImage, best-effort). Each bundles CPython from python-build-standalone
+# (packaging/python-runtime.env, PRD A68), so no job installs a Python; the
+# Windows setup also carries the VC++ runtime.
+# Runs only for a version tag (v1.2.3) or by hand; never on
 # ordinary pushes. Started by hand it is a dry run: it builds the installers
 # and keeps them as workflow artefacts, without signing or publishing.
 #
@@ -34,9 +37,6 @@ jobs:
       HAS_CERT: ${{ secrets.MACOS_CERTIFICATE_P12 != '' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.97.0"
@@ -72,15 +72,12 @@ jobs:
           path: dist/*.dmg
 
   windows:
-    name: Windows MSI
+    name: Windows setup and MSI
     runs-on: windows-latest
     env:
       HAS_CERT: ${{ secrets.WINDOWS_CERTIFICATE_PFX != '' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.97.0"
@@ -109,7 +106,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: installer-windows
-          path: dist/*.msi
+          path: |
+            dist/*.msi
+            dist/*-setup.exe
 
   linux:
     name: Linux AppImage (best-effort)
@@ -117,9 +116,6 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.97.0"
