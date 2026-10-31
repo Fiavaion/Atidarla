@@ -78,6 +78,10 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 # pins the resolved address); to move to ureq 3 with the model downloads.
 ureq2 = { package = "ureq", version = "2.12", default-features = false }
 tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+# Serial ports (atd-ops-dat `dat.serial`): termios on Unix, the comm API on
+# Windows.
+libc = "0.2"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Devices_Communication"] }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

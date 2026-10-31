@@ -25,12 +25,15 @@
 //! | `dat.web_client` | an HTTP(S) response body, through the egress gate |
 //! | `dat.web_server` | requests received; serves its input on loopback |
 //! | `dat.websocket` | messages received; sends its input |
+//! | `dat.serial` | lines from a serial port; writes its input |
 
 pub mod delim;
 mod file;
 mod json;
 mod net;
 mod select;
+mod serial;
+mod serial_port;
 mod table;
 mod template;
 mod web;
@@ -110,6 +113,7 @@ fn ops() -> Vec<(OperatorSchema, Factory)> {
         (web::client_schema(), web::create_client),
         (web::server_schema(), web::create_server),
         (websocket::schema(), websocket::create),
+        (serial::schema(), serial::create),
     ]
 }
 

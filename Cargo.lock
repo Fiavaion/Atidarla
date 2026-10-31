@@ -454,9 +454,11 @@ dependencies = [
  "atd-ai",
  "atd-core",
  "atd-gpu",
+ "libc",
  "serde_json",
  "tungstenite",
  "ureq 3.5.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
