@@ -100,15 +100,6 @@ const LIVE_IO: [&str; 26] = [
     "ai.llm_chat",
 ];
 
-/// Hosted AI operators (`atd_ops_ai::schemas::HOSTED`) cook live in the
-/// sweep and only in the live random networks: offline an AI node waits
-/// for its host's answer (up to `OFFLINE_GIVE_UP`, 30 s, per frame in
-/// `atd-ai/src/link.rs`) and the sweep has no host; live it reports "no AI
-/// host" at once. Live they still reach nothing: the supervisor is empty.
-fn waits_for_a_host(type_id: &str) -> bool {
-    atd_ops_ai::schemas::kind(type_id).is_some()
-}
-
 /// Operators the sweep does not cook, with the reason. Empty: offline mode
 /// and a host-less AI supervisor keep every built-in operator inside the
 /// process.
@@ -519,11 +510,6 @@ fn sweep(families: &[OpFamily]) {
         if std::env::var_os("ATD_SWEEP_VERBOSE").is_some() {
             eprintln!("sweep: {type_id}");
         }
-        e.set_mode(if waits_for_a_host(type_id) {
-            CookMode::Live
-        } else {
-            mode
-        });
         let t0 = Instant::now();
         let before = panics.lock().unwrap().len();
         let outcome = catch_unwind(AssertUnwindSafe(|| {
@@ -800,13 +786,7 @@ fn one_network(
     let count = 24 + rng.next(16) as usize;
     let pool: Vec<&String> = types
         .iter()
-        .filter(|t| {
-            if live {
-                !LIVE_IO.contains(&t.as_str())
-            } else {
-                !waits_for_a_host(t)
-            }
-        })
+        .filter(|t| !live || !LIVE_IO.contains(&t.as_str()))
         .collect();
     let mut order: Vec<String> = core.iter().map(|s| (*s).to_owned()).collect();
     for _ in 0..count {

@@ -34,6 +34,10 @@ fn supervisor() -> &'static Supervisor {
 }
 
 fn engine() -> Option<Engine> {
+    engine_with(supervisor())
+}
+
+fn engine_with(sup: &'static Supervisor) -> Option<Engine> {
     let instance = atd_gpu::primary_instance();
     let adapter =
         pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
@@ -45,7 +49,7 @@ fn engine() -> Option<Engine> {
     atd_ops_ai::register(&mut reg);
     let mut lib = OpLibrary::default();
     atd_ops_img::library(&mut lib);
-    atd_ops_ai::library_with(&mut lib, supervisor());
+    atd_ops_ai::library_with(&mut lib, sup);
     let config = EngineConfig {
         width: W,
         height: H,
@@ -56,7 +60,10 @@ fn engine() -> Option<Engine> {
 
 macro_rules! engine_or_skip {
     () => {
-        match engine() {
+        engine_or_skip!(engine())
+    };
+    ($engine:expr) => {
+        match $engine {
             Some(e) => e,
             None => {
                 let required =
@@ -212,6 +219,34 @@ fn an_unserved_route_says_why() {
         }
         assert!(t0.elapsed() < Duration::from_secs(5), "{:?}", e.status(ai));
         std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// Offline with no AI host at all, the node error comes at once and says
+/// what to do, instead of each frame waiting out the 30 s give-up.
+#[test]
+fn offline_with_no_host_errors_fast() {
+    static EMPTY: OnceLock<&'static Supervisor> = OnceLock::new();
+    let sup = *EMPTY.get_or_init(|| Box::leak(Box::new(Supervisor::new())));
+    let mut e = engine_or_skip!(engine_with(sup));
+    e.set_mode(CookMode::Offline { fps: 30.0 });
+    let ai = inverting(&mut e, "blend");
+    e.cook(&[ai], 0.0).unwrap();
+    let bound = if std::env::var("ATD_TIMING_STRICT").is_ok_and(|v| v == "1") {
+        Duration::from_millis(250)
+    } else {
+        Duration::from_secs(2)
+    };
+    for i in 1..4 {
+        let t0 = Instant::now();
+        e.cook(&[ai], f64::from(i) / 30.0).unwrap();
+        let took = t0.elapsed();
+        let err = e.error(ai).expect("a node error").to_owned();
+        println!("frame {i}: {took:?}: {err}");
+        assert!(took < bound, "frame {i} took {took:?}");
+        assert!(err.contains("no AI host can run this node"), "{err}");
+        assert!(err.contains("local: not configured"), "{err}");
+        assert!(err.contains("Start or configure an AI host"), "{err}");
     }
 }
 
