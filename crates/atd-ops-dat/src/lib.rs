@@ -26,11 +26,13 @@
 //! | `dat.web_server` | requests received; serves its input on loopback |
 //! | `dat.websocket` | messages received; sends its input |
 //! | `dat.serial` | lines from a serial port; writes its input |
+//! | `dat.script` | what a Python `cook(inputs)` returns (implemented in `atd-py`) |
 
 pub mod delim;
 mod file;
 mod json;
 mod net;
+mod script;
 mod select;
 mod serial;
 mod serial_port;
@@ -119,8 +121,14 @@ fn ops() -> Vec<(OperatorSchema, Factory)> {
 
 /// Every schema this crate registers.
 pub fn schemas() -> Vec<OperatorSchema> {
-    ops().into_iter().map(|(s, _)| s).collect()
+    let mut all: Vec<OperatorSchema> = ops().into_iter().map(|(s, _)| s).collect();
+    all.push(script::schema());
+    all
 }
+
+/// Operators registered here whose implementation another crate adds:
+/// Script runs Python (`atd_py::script::library`).
+pub const IMPLEMENTED_ELSEWHERE: [&str; 1] = ["dat.script"];
 
 /// Registers this family's operator schemas.
 pub fn register(registry: &mut Registry) {
@@ -276,10 +284,15 @@ mod tests {
         register(&mut registry);
         let mut library = OpLibrary::default();
         super::library(&mut library);
-        assert_eq!(registry.iter().count(), ops().len());
+        assert_eq!(registry.iter().count(), ops().len() + 1);
         for op in registry.iter() {
             assert!(op.type_id.starts_with("dat."), "{}", op.type_id);
-            assert!(library.contains(&op.type_id), "{}", op.type_id);
+            assert_eq!(
+                library.contains(&op.type_id),
+                !IMPLEMENTED_ELSEWHERE.contains(&op.type_id.as_str()),
+                "{}",
+                op.type_id
+            );
             assert!(op.cook_budget_us > 0, "{}", op.type_id);
             assert!(!op.summary.is_empty(), "{}", op.type_id);
             assert_eq!(op.outputs[0].wire, WireType::Dat, "{}", op.type_id);

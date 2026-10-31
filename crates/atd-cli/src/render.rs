@@ -355,6 +355,8 @@ impl Renderer {
         if opts.allow_python_ops {
             python.allow();
         }
+        // Script DATs are project Python too: the same flag runs them.
+        atd_py::script::allow(opts.allow_python_ops);
         // Kernel files are read once, as they are when the render starts.
         let kernels = self
             .engine
@@ -789,6 +791,8 @@ pub fn classify(type_id: &str) -> Option<Class> {
         | "dat.prompt_template" => Pure,
         // Offline it reads its file on the cook, before the first frame.
         "dat.file_in" => Waits,
+        // Python on the Script worker: offline each frame waits for it.
+        "dat.script" => Waits,
         "dat.file_out" | "dat.web_server" | "dat.websocket" | "dat.serial" => Sink,
         // Reads the network: offline it sends no request and keeps its
         // (empty) value.

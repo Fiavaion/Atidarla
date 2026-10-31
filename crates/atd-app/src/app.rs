@@ -161,6 +161,7 @@ impl AtidarlaApp {
             atd_ops_pnt::library(&mut library);
             atd_ops_mat::library(&mut library);
             atd_ops_dat::library(&mut library);
+            atd_py::script::library(&mut library);
             atd_ops_msh::library(&mut library);
             atd_ops_cmp::library(&mut library);
             atd_ops_ai::library(&mut library);
@@ -766,12 +767,20 @@ impl AtidarlaApp {
         if !self.project.python_ask || self.smoke.is_some() {
             return;
         }
+        let scripts: Vec<String> = self.panels.engine.as_ref().map_or_else(Vec::new, |e| {
+            e.network()
+                .nodes()
+                .filter(|n| n.type_id == atd_py::script::TYPE_ID)
+                .map(|n| format!("Script node {}", n.name))
+                .collect()
+        });
         let Some(python) = &mut self.project.python else {
             return;
         };
         let files: Vec<String> = python
             .files()
             .map(|f| format!("{}/{}.py", atd_py::ops::OPS_DIR, f.stem))
+            .chain(scripts)
             .collect();
         let mut choice = None;
         let modal = egui::Modal::new(egui::Id::unique("allow_python_ops")).show(ctx, |ui| {
@@ -810,6 +819,9 @@ impl AtidarlaApp {
         let Some(remember) = choice else { return };
         self.project.python_ask = false;
         python.allow();
+        // Script DATs run only on this explicit choice, never from the
+        // remembered hash (it covers ops/ files, not the network's code).
+        atd_py::script::allow(true);
         if remember {
             let stored = atd_py::ops::TrustStore::user()
                 .ok_or_else(|| "no settings folder".to_owned())

@@ -1,0 +1,13 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "DAT script"
+description = '''
+Python on DAT wires. `shout` is a Script node running its default code: it upper-cases every cell
+of the `cast` table. `stats` counts the words of the `lyrics` text and returns a dict, which
+becomes name/value rows. Scripts are project code: they run only once you allow the project's
+Python (the app asks; `atidarla check --gpu --allow-python-ops` for the command line), and they
+run on a worker thread whenever their code or an input changes.
+
+Try: edit `lyrics` and watch `stats`; change `shout`'s code to return a single string.
+'''
+resolution = [1280, 720]

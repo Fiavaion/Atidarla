@@ -27,4 +27,5 @@ All platforms.
 
 ## Examples
 
+- [DAT script](../../../examples/dat-script.atidarla/) — `cast`
 - [DAT tables](../../../examples/dat-tables.atidarla/) — `cast`, `words`
