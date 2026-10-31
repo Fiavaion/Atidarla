@@ -178,7 +178,11 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
         for (var k = 0u; k < 4u; k++) {
             let f = s.counts.z + q * 4u + k;
             if (f < s.counts.y) {
-                rgb[f % 3u] += b[f / 3u] * v[k];
+                // A mask, not `rgb[f % 3u] +=`: D3D12's FXC cannot write
+                // through a dynamic vector index.
+                let ch = f % 3u;
+                let mask = vec3f(f32(ch == 0u), f32(ch == 1u), f32(ch == 2u));
+                rgb += mask * (b[f / 3u] * v[k]);
             }
         }
     }
