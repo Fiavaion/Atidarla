@@ -76,6 +76,12 @@ if (-not ((Test-Path $stamp) -and ((Get-Content $stamp) -eq $pySha))) {
     New-Item -ItemType Directory -Force $pyOut | Out-Null
     tar -xzf $pyArchive -C $pyOut   # bsdtar, part of Windows 10 and later
     if ($LASTEXITCODE) { throw "unpacking $pyName failed" }
+    # No Tk GUI toolkit (tkinter, IDLE, turtle and Tcl/Tk); pip and the C
+    # headers stay (Mark, 2026-10-31).
+    foreach ($p in 'tcl', 'Lib\tkinter', 'Lib\idlelib', 'Lib\turtledemo', 'Lib\turtle.py',
+                   'DLLs\_tkinter.pyd', 'DLLs\tcl*.dll', 'DLLs\tk*.dll') {
+        Remove-Item -Recurse -Force "$pyOut\python\$p" -ErrorAction SilentlyContinue
+    }
     Set-Content -Path $stamp -Value $pySha
 }
 $pyHome = "$pyOut\python"

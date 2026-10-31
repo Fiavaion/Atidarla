@@ -50,6 +50,15 @@ if [ "$(cat "$OUT/.sha256" 2> /dev/null || true)" != "$SHA" ]; then
     rm -rf "$OUT"
     mkdir -p "$OUT"
     tar -xzf "$ARCHIVE" -C "$OUT"
+    # No Tk GUI toolkit (tkinter, IDLE, turtle and the Tcl/Tk libraries):
+    # nothing in Atidarla uses it (Mark, 2026-10-31). pip and the C headers
+    # stay so native packages can still be built against this Python.
+    (
+        cd "$OUT/python"
+        rm -rf lib/tcl* lib/tk* lib/itcl* lib/thread* lib/libtcl* lib/libtk* \
+            lib/python3.*/tkinter lib/python3.*/idlelib lib/python3.*/turtledemo \
+            lib/python3.*/turtle.py lib/python3.*/lib-dynload/_tkinter* bin/idle3*
+    )
     printf '%s\n' "$SHA" > "$OUT/.sha256"
 fi
 [ -d "$OUT/python/lib" ] || { echo "error: $ARCHIVE did not unpack to python/" >&2; exit 1; }
