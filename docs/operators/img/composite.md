@@ -41,6 +41,7 @@ All platforms.
 - [Pack: Kaleidoscope Tunnel](../../../examples/pack-kaleido-tunnel.atidarla/) — `together`
 - [Pack: LFO Bank](../../../examples/pack-lfo-bank.atidarla/) — `stack`
 - [Pack: RGB Delay](../../../examples/pack-rgb-delay.atidarla/) — `shapes`
+- [PNT Capture](../../../examples/pnt-capture.atidarla/) — `stage`
 - [PNT Constellation](../../../examples/pnt-constellation.atidarla/) — `sky`
 - [Points](../../../examples/points.atidarla/) — `mix`
 - [Signal scope](../../../examples/signal-scope.atidarla/) — `scopes`, `all`

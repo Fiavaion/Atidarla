@@ -55,6 +55,9 @@ static GLOBAL: Counting = Counting;
 /// below what per-frame bind groups or buffers would add.
 const BOUND: f64 = 90.0;
 
+/// Nodes cooked per frame (all but the static Points source).
+const NODES: usize = 14;
+
 #[test]
 fn geo_chains_steady_state_allocations() {
     let instance = atd_gpu::primary_instance();
@@ -75,8 +78,10 @@ fn geo_chains_steady_state_allocations() {
     .unwrap();
     let mut reg = Registry::default();
     atd_ops_pnt::register(&mut reg);
+    atd_ops_img::register(&mut reg);
     let mut lib = OpLibrary::default();
     atd_ops_pnt::library(&mut lib);
+    atd_ops_img::library(&mut lib);
     let config = EngineConfig {
         width: 64,
         height: 32,
@@ -120,6 +125,20 @@ fn geo_chains_steady_state_allocations() {
     );
     let force = node(&mut e, "pnt.noise", &[("mode", json!("velocity"))]);
     let r2 = node(&mut e, "img.render_points", &[]);
+    // The M6 capture operators: an animated image read as points, as
+    // depth and as an attribute (texture bind groups cached), and Sensor
+    // In's test scene, merged and drawn.
+    let img = node(&mut e, "img.noise", &[]);
+    let pfi = node(&mut e, "pnt.points_from_image", &[("columns", json!(64))]);
+    let afi = node(
+        &mut e,
+        "pnt.attribute_from_image",
+        &[("lookup", json!("planar"))],
+    );
+    let pfd = node(&mut e, "pnt.points_from_depth", &[("columns", json!(64))]);
+    let sensor = node(&mut e, "pnt.sensor_in", &[("columns", json!(64))]);
+    let mix = node(&mut e, "pnt.merge", &[]);
+    let r3 = node(&mut e, "img.render_points", &[]);
     let wire = |from: NodeId, to: NodeId, socket: &str| Edit::Connect {
         wire: Wire::new(Endpoint::new(from, "out"), Endpoint::new(to, socket)),
     };
@@ -131,7 +150,24 @@ fn geo_chains_steady_state_allocations() {
         wire(ps, force, "in"),
         wire(force, ps, "prev"),
         wire(force, r2, "geo"),
+        wire(img, pfi, "image"),
+        wire(pfi, afi, "in"),
+        wire(img, afi, "image"),
+        wire(img, pfd, "depth"),
+        wire(afi, mix, "a"),
+        wire(pfd, mix, "b"),
+        wire(sensor, mix, "c"),
+        wire(mix, r3, "geo"),
     ]);
+    edits.push(Edit::SetParam {
+        node: img,
+        param: "z".into(),
+        value: Some(Param {
+            value: json!(0.0),
+            expr: Some("time * 0.3".into()),
+            bind: None,
+        }),
+    });
     for n in [n1, n2] {
         edits.push(Edit::SetParam {
             node: n,
@@ -144,7 +180,7 @@ fn geo_chains_steady_state_allocations() {
         });
     }
     e.edit("chain", edits).unwrap();
-    let out = [r1, r2];
+    let out = [r1, r2, r3];
     let mut t = 0.0;
     // Warm up until no GPU objects have been created for 30 frames: the
     // kernel compiles on a worker thread, which takes longer on a busy
@@ -171,7 +207,9 @@ fn geo_chains_steady_state_allocations() {
         stable >= 30,
         "GPU objects still being created after warm-up"
     );
-    for n in [pts, n1, n2, r1, ps, force, r2] {
+    for n in [
+        pts, n1, n2, r1, ps, force, r2, img, pfi, afi, pfd, sensor, mix, r3,
+    ] {
         assert_eq!(e.error(n), None);
     }
     let (buffers, binds, textures) = (
@@ -184,7 +222,7 @@ fn geo_chains_steady_state_allocations() {
     let before = allocs();
     for _ in 0..frames {
         let cooked = e.cook(&out, t).unwrap();
-        assert_eq!(cooked, 7, "everything but the static source cooks");
+        assert_eq!(cooked, NODES, "everything but the static source cooks");
         t += 1.0 / 60.0;
         // Pooled buffers come back when the GPU has finished with them; on
         // a GPU shared with other work more stay in flight and the pool
@@ -196,7 +234,7 @@ fn geo_chains_steady_state_allocations() {
     }
     let total = allocs() - before;
     COUNTING.with(|c| c.set(false));
-    let per_node = total as f64 / (frames * 7) as f64;
+    let per_node = total as f64 / (frames * NODES) as f64;
     eprintln!(
         "GEO steady state: {total} allocations over {frames} frames, {per_node:.1} per node-cook"
     );

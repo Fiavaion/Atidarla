@@ -32,4 +32,5 @@ All platforms.
 
 ## Examples
 
+- [PNT Capture](../../../examples/pnt-capture.atidarla/) — `dome_place`, `relief_place`, `spiral_place`, `sensor_place`, `lattice_place`, `pulse_place`, `joints_place`
 - [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `left`, `turn`

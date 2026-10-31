@@ -43,6 +43,7 @@ All platforms.
 - [Mesh Primitives](../../../examples/mesh-primitives.atidarla/) — `draw`
 - [Scatter to Iso Surface](../../../examples/mesh-scatter-iso.atidarla/) — `draw_blob`, `draw_seeds`, `draw_frame`
 - [Particles](../../../examples/particles.atidarla/) — `draw`
+- [PNT Capture](../../../examples/pnt-capture.atidarla/) — `draw`, `draw_body`
 - [PNT Constellation](../../../examples/pnt-constellation.atidarla/) — `draw`, `draw_stars`
 - [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `draw`
 - [PNT For-Each](../../../examples/pnt-foreach.atidarla/) — `draw`

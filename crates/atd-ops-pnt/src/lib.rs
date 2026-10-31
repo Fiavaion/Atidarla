@@ -25,13 +25,20 @@
 //! | `pnt.kernel` | the attributes its code reads (Kernel DSL) | the attributes its code writes |
 //! | `pnt.solver`, `pnt.piece` | `init`, `prev`; an attribute or `P` | the state; `piece` |
 //! | `pnt.foreach`, `pnt.foreach_end` | every attribute (pieces: one attribute) | every attribute, `iteration`; the passes merged |
+//! | `pnt.points_from_image`, `points_from_depth` (IMG in) | an image (a depth and a colour image) | `P`, `Cd`, `uv`, `id`; `value`; `depth`, `valid` |
+//! | `pnt.attribute_from_image` (IMG in) | `uv` or `P`, an image | any attribute |
+//! | `pnt.file_in`, `pnt.sensor_in` (M6 capture, `docs/point-caches.md`) | a file (worker thread); a sensor or its test scene | the file's attributes; `P`, `Cd`, `depth`, `valid`, `body`, `id` or joints and bones |
 //! | `img.render_points` (IMG) | `P`, `Cd`, polylines | an image |
 
 mod attr;
+pub mod cache;
 mod emitter;
 mod field;
+mod file_in;
 mod foreach;
+mod from_image;
 mod fuse;
+mod image_kit;
 mod kernel;
 mod kit;
 mod neighbours;
@@ -41,6 +48,7 @@ mod points;
 pub mod project;
 mod render;
 mod select;
+mod sensor;
 mod solver;
 mod sort;
 mod sources;
@@ -50,6 +58,7 @@ use atd_core::registry::{OpFamily, OperatorSchema, ParamSchema, Registry, Socket
 use atd_gpu::engine::{GeoOp, OpLibrary};
 
 pub use particles::MAX_CAPACITY;
+pub use sensor::{JOINT_NAMES as SENSOR_JOINTS, test_pose as sensor_test_pose};
 
 /// A PNT operator schema: GEO inputs (`(name, feedback)`), one GEO output.
 pub(crate) fn pnt(
@@ -112,6 +121,11 @@ const OPS: &[(Schema, Factory)] = &[
     (kernel::schema, kernel::create),
     (foreach::begin_schema, foreach::create_begin),
     (foreach::end_schema, foreach::create_end),
+    (from_image::points_schema, from_image::create_points),
+    (from_image::depth_schema, from_image::create_depth),
+    (from_image::attribute_schema, from_image::create_attribute),
+    (file_in::schema, file_in::create),
+    (sensor::schema, sensor::create),
 ];
 
 /// Every schema this crate registers (PNT operators and Render Points).
