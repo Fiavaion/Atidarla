@@ -257,6 +257,9 @@ pub struct RunOptions {
     /// Seconds; 0 turns the heartbeat watch off.
     pub heartbeat_timeout: f64,
     pub startup_grace: f64,
+    /// Pass `--allow-python-ops` to the app: the project's Python runs
+    /// without the Allow dialog (an unattended show cannot answer it).
+    pub allow_python_ops: bool,
 }
 
 /// `atidarla run`.
@@ -297,6 +300,9 @@ pub fn run(project: &Path, opts: &RunOptions) -> Result<()> {
         cmd.arg(project).arg("--heartbeat").arg(&heartbeat);
         if opts.kiosk {
             cmd.arg("--kiosk");
+        }
+        if opts.allow_python_ops {
+            cmd.arg("--allow-python-ops");
         }
         cmd
     };
