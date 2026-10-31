@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Atidarla setup (FR-H5, PRD A68), a WiX v5 Burn bundle: installs the
+  Microsoft Visual C++ 2015-2022 runtime (x64), then the Atidarla MSI, so a
+  new machine needs nothing else. Built by packaging/windows/build-msi.ps1:
+    wix build bundle.wxs -ext WixToolset.BootstrapperApplications.wixext -ext WixToolset.Util.wixext
+  with
+    -d Version=1.2.3    numeric version (the MSI's)
+    -d Msi=...          the MSI built from atidarla.wxs
+    -d VcRedist=...     vc_redist.x64.exe (Microsoft-signed; checked by the script)
+    -d VcRedistBld=N    its build number (14.44.35211 -> 35211)
+
+  Why a bundle: Microsoft deprecated the VC++ merge modules, and the
+  redistributable is the supported, Windows Update-serviced way to install
+  the runtime. The bundle keeps the MSI unchanged for managed deployment.
+
+  Silent install (lab images): the same properties as the MSI.
+    Atidarla-1.0.0-windows-x64-setup.exe /quiet /norestart /log install.log
+    Atidarla-1.0.0-windows-x64-setup.exe /quiet /norestart ADDTOPATH=0 DESKTOPSHORTCUT=1 INSTALLFOLDER="D:\Apps\Atidarla"
+    Atidarla-1.0.0-windows-x64-setup.exe /uninstall /quiet /norestart
+  The runtime is skipped when the same or a newer one is installed, and
+  stays installed on uninstall (other programs share it).
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <!-- Fixed from the first public release, like the MSI's UpgradeCode. -->
+  <Bundle
+      Name="Atidarla"
+      Manufacturer="The Atidarla Contributors"
+      Version="$(Version)"
+      UpgradeCode="09FDB1F4-0148-4753-B63C-A92A2D39CAD7"
+      AboutUrl="https://github.com/fiavaion/atidarla"
+      bal:CommandLineVariables="caseInsensitive">
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication
+          Theme="hyperlinkLicense"
+          LicenseUrl="https://github.com/fiavaion/atidarla/blob/main/LICENSE-MIT"
+          ShowVersion="yes"
+          SuppressOptionsUI="yes" />
+    </BootstrapperApplication>
+
+    <!-- Passed to the MSI; settable on the command line (NAME=value). -->
+    <Variable Name="ADDTOPATH" Value="1" bal:Overridable="yes" />
+    <Variable Name="DESKTOPSHORTCUT" Value="0" bal:Overridable="yes" />
+    <!-- Unset by default: the MSI then uses its own default folder. -->
+    <Variable Name="INSTALLFOLDER" bal:Overridable="yes" />
+
+    <!-- The installed VC++ 14.x x64 runtime, as its installer records it. -->
+    <util:RegistrySearch Id="VcRedistInstalledSearch" Root="HKLM"
+        Key="SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" Value="Installed"
+        Variable="VcRedistInstalled" Bitness="always64" />
+    <util:RegistrySearch Id="VcRedistBldSearch" After="VcRedistInstalledSearch" Root="HKLM"
+        Key="SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" Value="Bld"
+        Variable="VcRedistBld" Bitness="always64" />
+
+    <Chain>
+      <ExePackage Id="VcRedist"
+          SourceFile="$(VcRedist)"
+          DisplayName="Microsoft Visual C++ 2015-2022 Redistributable (x64)"
+          PerMachine="yes"
+          Permanent="yes"
+          Vital="yes"
+          InstallArguments="/install /quiet /norestart"
+          DetectCondition="VcRedistInstalled = 1 AND VcRedistBld &gt;= $(VcRedistBld)">
+        <!-- 1638: this or a newer version is already installed. -->
+        <ExitCode Value="1638" Behavior="success" />
+        <ExitCode Value="3010" Behavior="scheduleReboot" />
+      </ExePackage>
+      <MsiPackage Id="Atidarla" SourceFile="$(Msi)">
+        <MsiProperty Name="ADDTOPATH" Value="[ADDTOPATH]" />
+        <MsiProperty Name="DESKTOPSHORTCUT" Value="[DESKTOPSHORTCUT]" />
+        <MsiProperty Name="INSTALLFOLDER" Value="[INSTALLFOLDER]" Condition="INSTALLFOLDER" />
+      </MsiPackage>
+    </Chain>
+  </Bundle>
+</Wix>

@@ -1,9 +1,11 @@
 # 1. Install and first launch
 
-> **Status.** Atidarla does not have a packaged installer yet. Packaging is planned for the last
-> milestone (M6). Today you build the app from its source code with Rust's tools. This takes a
-> few steps, then it runs like any other program. If you are in a class, your lecturer may give
-> you a ready-built copy; the rest of this manual works the same either way.
+> **Installers.** If you have an installer (the macOS DMG, the Windows setup `.exe` or the Linux
+> AppImage), use it and skip to [Starting the app](#starting-the-app): it brings its own Python
+> and, on Windows, the Microsoft Visual C++ runtime, so you install nothing else first. See
+> [`docs/install.md`](../install.md), which also covers silent installs for computer labs.
+> The rest of this page builds the app from its source code with Rust's tools. This takes a few
+> steps, then it runs like any other program; the rest of this manual works the same either way.
 
 ## What you need
 
@@ -11,7 +13,7 @@
 |---|---|---|
 | A computer with a recent GPU | Atidarla draws on the GPU | Windows (DirectX 12) or macOS (Metal). Linux needs a Vulkan driver and is best-effort. |
 | **Rust** (through `rustup`) | To build the app | The exact version is pinned in `rust-toolchain.toml`; `rustup` installs it for you the first time you build. |
-| **Python 3.13** (3.11 or newer works) | Atidarla embeds Python for expressions, Python operators and the Textport | Must be on your `PATH`. |
+| **Python 3.13** (3.11 or newer works) | Atidarla embeds Python for expressions, Python operators and the Textport | Only to build from source (the installers bundle their own). Must be on your `PATH`. |
 | **uv** | Only for AI features | A Python package manager. See [uv](https://docs.astral.sh/uv/). |
 | **Ollama** | Only for the Assistant and LLM Chat, if you want a local language model | Optional. See chapter 9. |
 

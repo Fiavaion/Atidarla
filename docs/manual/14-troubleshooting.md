@@ -11,7 +11,8 @@ Where to look first:
 
 ## Building and starting
 
-**The build fails mentioning Python.** The app embeds Python and needs to find it. Install
+**The build fails mentioning Python.** (Building from source only: an installed app brings its
+own Python and ignores the one on your machine.) The app embeds Python and needs to find it. Install
 Python 3.13 and make sure it is on your `PATH`. On macOS also set
 `PYO3_PYTHON=$(brew --prefix python@3.13)/bin/python3.13` ([chapter 1](01-install.md)).
 

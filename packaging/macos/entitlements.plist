@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- Hardened-runtime entitlements for notarisation (docs/install.md).
-     - disable-library-validation: the app loads Python.framework (PyO3) and
-       Python extension modules that are not signed by our Team ID.
+     - disable-library-validation: the app loads Python extension modules a
+       user installs (not signed by our Team ID) besides the bundled
+       runtime's libpython. The bundled python3 program is signed with
+       these entitlements too.
      - allow-unsigned-executable-memory: CPython and its extension modules
        (ctypes, numpy) need it.
      - audio-input / camera: Audio In and Video In operators. -->
