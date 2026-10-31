@@ -119,12 +119,6 @@ impl UiSettings {
         self.save();
         true
     }
-
-    /// Stops writing to disk (smoke runs leave the user's settings alone).
-    pub fn in_memory(mut self) -> Self {
-        self.path = None;
-        self
-    }
 }
 
 pub fn clamp_scale(s: f32) -> f32 {
@@ -178,14 +172,5 @@ mod tests {
         assert_eq!(UiSettings::load(path.clone()).scale, 1.0);
         assert_eq!(clamp_scale(f32::NAN), 1.0);
         std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
-    }
-
-    #[test]
-    fn in_memory_settings_never_write() {
-        let path = temp("memory");
-        let mut s = UiSettings::load(path.clone()).in_memory();
-        assert!(s.follow_zoom(2.0));
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        assert!(!path.exists());
     }
 }
