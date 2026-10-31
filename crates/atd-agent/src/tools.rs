@@ -86,7 +86,7 @@ pub fn specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "build_network",
-            description: "Stages a whole network in one call: nodes (type, name, parameter values) and the wires between them. A node whose name already exists with the same type is updated, not duplicated, so call it again with the same names to fix errors. A text value for a number parameter is taken as an expression (e.g. `0.5 + 0.5 * sin(time)`). Returns the nodes made and every error; then call accept_changes.",
+            description: "Stages a whole network in one call: nodes (type, name, parameter values) and the wires between them. A node whose name already exists with the same type is updated, not duplicated, so call it again with the same names to fix errors. A text value for a number, vector or colour parameter is taken as an expression (e.g. `0.5 + 0.5 * sin(time)`); on a vector or colour its one number drives every component (a colour's red, green and blue). A wire from a SIG node to a parameter name binds the parameter to that channel (from `out`: the node's first channel, or for a vector one channel per component when it has enough). Returns the nodes made and every error; then call accept_changes.",
             schema: obj(
                 json!({
                     "nodes": {"type": "array", "items": {"type": "object", "properties": {
@@ -132,7 +132,7 @@ pub fn specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "set_param",
-            description: "Sets a parameter: a value, an expression (e.g. `0.5 + 0.5 * sin(time)`, or `op('lfo1')['lfo']`), or a binding to a SIG node's channel. Without Show Lock this is staged; under Show Lock only whitelisted parameters within their ranges move, at once.",
+            description: "Sets a parameter: a value, an expression (e.g. `0.5 + 0.5 * sin(time)`, or `op('lfo1')['lfo']`), or a binding to a SIG node's channel. Vectors and colours take them too: one number drives every component (a colour's red, green and blue); binding to the whole node (channel \"\") with as many channels as components drives one each. Without Show Lock this is staged; under Show Lock only whitelisted parameters within their ranges move, at once.",
             schema: obj(
                 json!({
                     "node": node.clone(), "param": {"type": "string"},
@@ -998,8 +998,10 @@ impl Agent {
                 }
             }
             made.push(name.to_owned());
-            // (name, takes text, is a vector or colour)
-            let kinds: Vec<(String, bool, bool)> = self.reg(ws).get(t).map_or(Vec::new(), |op| {
+            // (name, takes text). A text value for anything else is an
+            // expression; on a vector or colour one number drives every
+            // component (A66).
+            let kinds: Vec<(String, bool)> = self.reg(ws).get(t).map_or(Vec::new(), |op| {
                 op.params
                     .iter()
                     .map(|p| {
@@ -1007,23 +1009,12 @@ impl Agent {
                             p.kind,
                             ParamKind::String | ParamKind::Menu { .. } | ParamKind::Path
                         );
-                        let vector = matches!(p.kind, ParamKind::Vec { .. } | ParamKind::Colour);
-                        (p.name.clone(), text, vector)
+                        (p.name.clone(), text)
                     })
                     .collect()
             });
             for (p, v) in n["params"].as_object().into_iter().flatten() {
-                let kind = kinds.iter().find(|k| &k.0 == p);
-                let text = kind.is_some_and(|k| k.1);
-                if kind.is_some_and(|k| k.2)
-                    && v.as_str()
-                        .is_some_and(|e| serde_json::from_str::<Value>(e.trim()).is_err())
-                {
-                    errors.push(format!(
-                        "{name}.{p}: `{p}` is a vector or colour: give a list of numbers such as [1, 1]; expressions animate single-number parameters only (animate another number parameter, or bind the vector to a SIG node's channels)"
-                    ));
-                    continue;
-                }
+                let text = kinds.iter().find(|k| &k.0 == p).is_some_and(|k| k.1);
                 let expression = v
                     .as_str()
                     .filter(|e| !text && serde_json::from_str::<Value>(e.trim()).is_err());
