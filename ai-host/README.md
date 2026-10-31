@@ -16,6 +16,11 @@ uv sync --extra diffusion --extra vision  # + SD-Turbo (torch, diffusers) and ON
 uv run pytest                             # tests needing extras or weights skip without them
 ```
 
+uv picks a Python 3.11+ it finds (or downloads one). On a machine with an installed Atidarla,
+`uv sync --python <bundled python>` builds the environment on the app's own CPython instead
+(`Atidarla.app/Contents/Resources/python/bin/python3`, `<install folder>\python\python.exe`;
+`docs/install.md`). ML packages and weights are never part of that runtime.
+
 | Extra | Adapter | Runs |
 |---|---|---|
 | (none) | `builtin` | `builtin.invert`, `builtin.echo` (reference models for tests) |
