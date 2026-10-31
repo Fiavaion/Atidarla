@@ -35,4 +35,5 @@ All platforms.
 
 ## Examples
 
+- [PNT Fields](../../../examples/pnt-fields.atidarla/) — `wave`
 - [Signal scope](../../../examples/signal-scope.atidarla/) — `wave`

@@ -26,33 +26,52 @@
 //! | `pnt.solver`, `pnt.piece` | `init`, `prev`; an attribute or `P` | the state; `piece` |
 //! | `pnt.foreach`, `pnt.foreach_end` | every attribute (pieces: one attribute) | every attribute, `iteration`; the passes merged |
 //! | `pnt.splat_in` | a PLY, SPZ or SOG file (worker thread) | `P`, `Cd`, `scale`, `orient`, `sh0`… (detail `sh_degree`) |
+//! | `pnt.points_from_image`, `points_from_depth` (IMG in) | an image (a depth and a colour image) | `P`, `Cd`, `uv`, `id`; `value`; `depth`, `valid` |
+//! | `pnt.attribute_from_image` (IMG in) | `uv` or `P`, an image | any attribute |
+//! | `pnt.file_in`, `pnt.sensor_in` (M6 capture, `docs/point-caches.md`) | a file (worker thread); a sensor or its test scene | the file's attributes; `P`, `Cd`, `depth`, `valid`, `body`, `id` or joints and bones |
+//! | `pnt.attribute_noise`, `attribute_from_channels` (SIG in), `falloff_field` | `P` or a vector attribute; channels | any attribute (`falloff`) |
+//! | `pnt.attribute_transfer`, `proximity`, `neighbours` (grid hash) | `P` of both inputs, the attribute | the attribute; `dist`, `nearvec`; `nbr`, `nbrdist`, `nbrcount` |
+//! | `pnt.lattice`, `pnt.flock` (grid hash), `pnt.trail` | `P` (a cage's `P`); `P`, `v`; `P`, `Cd` | `P` (cage: lines); `v`; history lines, `age` |
+//! | `pnt.attribute_promote`, `pnt.ray_intersect` | an attribute; `P` (`N`), a target's polygons | the reduction on every point; `P`, `hitdist` |
 //! | `img.render_points` (IMG) | `P`, `Cd`, polylines | an image |
 
 mod attr;
+pub mod cache;
 mod emitter;
 mod field;
+mod file_in;
 mod foreach;
+mod from_image;
 mod fuse;
+mod image_kit;
 mod kernel;
 mod kit;
+mod lattice;
+mod lookup;
 mod neighbours;
 mod noise;
 mod particles;
 mod points;
 pub mod project;
+mod promote;
+mod ray;
 mod render;
 mod select;
+mod sensor;
 mod solver;
 mod sort;
 mod sources;
 mod splat;
 pub mod splat_file;
+mod trail;
+mod transfer;
 mod transform;
 
 use atd_core::registry::{OpFamily, OperatorSchema, ParamSchema, Registry, SocketSchema, WireType};
 use atd_gpu::engine::{GeoOp, OpLibrary};
 
 pub use particles::MAX_CAPACITY;
+pub use sensor::{JOINT_NAMES as SENSOR_JOINTS, test_pose as sensor_test_pose};
 
 /// A PNT operator schema: GEO inputs (`(name, feedback)`), one GEO output.
 pub(crate) fn pnt(
@@ -116,6 +135,22 @@ const OPS: &[(Schema, Factory)] = &[
     (foreach::begin_schema, foreach::create_begin),
     (foreach::end_schema, foreach::create_end),
     (splat::schema, splat::create),
+    (from_image::points_schema, from_image::create_points),
+    (from_image::depth_schema, from_image::create_depth),
+    (from_image::attribute_schema, from_image::create_attribute),
+    (file_in::schema, file_in::create),
+    (sensor::schema, sensor::create),
+    (lookup::noise_schema, lookup::create_noise),
+    (lookup::channels_schema, lookup::create_channels),
+    (lookup::falloff_schema, lookup::create_falloff),
+    (transfer::transfer_schema, transfer::create_transfer),
+    (transfer::proximity_schema, transfer::create_proximity),
+    (transfer::neighbours_schema, transfer::create_neighbours),
+    (lattice::schema, lattice::create),
+    (trail::trail_schema, trail::create_trail),
+    (trail::flock_schema, trail::create_flock),
+    (promote::schema, promote::create),
+    (ray::schema, ray::create),
 ];
 
 /// Every schema this crate registers (PNT operators and Render Points).

@@ -27,7 +27,7 @@ use crate::sort::{MAX_SORT, Sorter};
 /// `P`, `vals`, `cstart`, `cend` and `params.grid` (inverse cell size,
 /// radius², unused, unused) and `params.gi` (table mask, most neighbours,
 /// most candidates, unused).
-const QUERY: &str = "fn cell_of(p: vec3f) -> vec3i {
+pub(crate) const QUERY: &str = "fn cell_of(p: vec3f) -> vec3i {
     return vec3i(floor(p * params.grid.x));
 }
 fn cell_hash(c: vec3i) -> u32 {
@@ -66,7 +66,7 @@ fn search(p: vec3f) {
 ";
 
 /// Bindings 2-5 of every query kernel.
-const QUERY_BINDINGS: &str = "@group(0) @binding(2) var<storage, read> P: array<vec4f>;
+pub(crate) const QUERY_BINDINGS: &str = "@group(0) @binding(2) var<storage, read> P: array<vec4f>;
 @group(0) @binding(3) var<storage, read> vals: array<u32>;
 @group(0) @binding(4) var<storage, read> cstart: array<u32>;
 @group(0) @binding(5) var<storage, read> cend: array<u32>;

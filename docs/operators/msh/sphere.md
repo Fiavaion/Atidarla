@@ -37,3 +37,4 @@ All platforms.
 - [Mesh Primitives](../../../examples/mesh-primitives.atidarla/) — `ball`
 - [Scatter to Iso Surface](../../../examples/mesh-scatter-iso.atidarla/) — `base`
 - [Mesh Shaping](../../../examples/mesh-shaping.atidarla/) — `ball`
+- [PNT Motion](../../../examples/pnt-motion.atidarla/) — `ball`

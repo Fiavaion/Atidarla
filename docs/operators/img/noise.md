@@ -45,6 +45,7 @@ All platforms.
 - [Pack: Spinning Solid](../../../examples/pack-spinning-solid.atidarla/) — `skin`
 - [Pack: Vignette](../../../examples/pack-vignette.atidarla/) — `clouds`
 - [Pixel map](../../../examples/pixel-map.atidarla/) — `noise1`
+- [PNT Capture](../../../examples/pnt-capture.atidarla/) — `picture`
 - [Render Textures](../../../examples/render-textures.atidarla/) — `noise`
 - [Stage deck](../../../examples/stage-deck.atidarla/) — `tunnel_noise`, `grid_noise`
 - [Texture sharing](../../../examples/texture-sharing.atidarla/) — `pattern`

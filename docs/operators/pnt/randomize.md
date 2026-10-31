@@ -37,5 +37,6 @@ All platforms.
 
 - [PNT Constellation](../../../examples/pnt-constellation.atidarla/) — `tints`
 - [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `sizes`, `colours`
+- [PNT Fields](../../../examples/pnt-fields.atidarla/) — `inks`
 - [PNT For-Each](../../../examples/pnt-foreach.atidarla/) — `tint`, `band_colour`
 - [PNT Solver](../../../examples/pnt-solver.atidarla/) — `cell_colours`

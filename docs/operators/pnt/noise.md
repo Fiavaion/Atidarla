@@ -37,4 +37,5 @@ All platforms.
 - [Mesh Shaping](../../../examples/mesh-shaping.atidarla/) — `bumps`
 - [Particles](../../../examples/particles.atidarla/) — `flow`
 - [PNT Constellation](../../../examples/pnt-constellation.atidarla/) — `flow`
+- [PNT Fields](../../../examples/pnt-fields.atidarla/) — `wander`, `swirl`
 - [Points](../../../examples/points.atidarla/) — `swirl`, `ripple`

@@ -775,6 +775,26 @@ pub fn classify(type_id: &str) -> Option<Class> {
         | "pnt.piece" | "pnt.randomize" | "pnt.scatter" | "pnt.smooth" | "pnt.sort"
         | "pnt.subset" | "pnt.taper" | "pnt.transform" | "pnt.turbulence" | "pnt.twist"
         | "pnt.vortex" | "pnt.wave" | "pnt.wind" => Pure,
+        // M6 capture and lookup operators: GPU work in the frame's encoder.
+        "pnt.attribute_from_channels"
+        | "pnt.attribute_promote"
+        | "pnt.ray_intersect"
+        | "pnt.attribute_from_image"
+        | "pnt.attribute_noise"
+        | "pnt.attribute_transfer"
+        | "pnt.falloff_field"
+        | "pnt.flock"
+        | "pnt.lattice"
+        | "pnt.neighbours"
+        | "pnt.points_from_depth"
+        | "pnt.points_from_image"
+        | "pnt.proximity" => Pure,
+        // Point files are read on a worker thread; Sensor In's recordings
+        // too (its test scene is a function of time and frame; live capture
+        // outputs nothing offline).
+        "pnt.file_in" | "pnt.sensor_in" => Waits,
+        // Keeps every point's recent positions from frame to frame.
+        "pnt.trail" => Stateful,
         "pnt.emitter" | "pnt.solver" => Stateful,
         // Reads its file on a worker thread; offline the cook waits for it.
         "pnt.splat_in" => Waits,

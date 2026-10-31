@@ -518,6 +518,8 @@ dependencies = [
  "atd-interop",
  "atd-kernel",
  "atd-ops-img",
+ "atd-ops-msh",
+ "atd-ops-sig",
  "flate2",
  "image-webp",
  "log",

@@ -36,6 +36,7 @@ All platforms.
 - [Pack: Beat Flash](../../../examples/pack-beat-flash.atidarla/) — `wheel`
 - [Pack: Film Grain](../../../examples/pack-film-grain.atidarla/) — `sky`
 - [Pack: LFO Bank](../../../examples/pack-lfo-bank.atidarla/) — `backdrop`
+- [PNT Capture](../../../examples/pnt-capture.atidarla/) — `depth_map`
 - [Render Textures](../../../examples/render-textures.atidarla/) — `sphere_look`
 - [Stage deck](../../../examples/stage-deck.atidarla/) — `sunset`, `glow_ramp`
 - [Time effects](../../../examples/time-effects.atidarla/) — `columns`

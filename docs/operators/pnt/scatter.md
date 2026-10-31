@@ -38,6 +38,8 @@ All platforms.
 - [Kernel Particles](../../../examples/kernel-particles.atidarla/) — `seed`
 - [PNT Constellation](../../../examples/pnt-constellation.atidarla/) — `sphere`, `field`
 - [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `column`, `ring`
+- [PNT Fields](../../../examples/pnt-fields.atidarla/) — `brushes`, `swarm`
 - [PNT For-Each](../../../examples/pnt-foreach.atidarla/) — `column`, `strip`
 - [PNT Fountain](../../../examples/pnt-fountain.atidarla/) — `ring`
+- [PNT Motion](../../../examples/pnt-motion.atidarla/) — `blob`, `flock_start`, `dust`
 - [PNT Solver](../../../examples/pnt-solver.atidarla/) — `disk`

@@ -38,4 +38,6 @@ All platforms.
 
 ## Examples
 
+- [PNT Fields](../../../examples/pnt-fields.atidarla/) — `across`
+- [PNT Motion](../../../examples/pnt-motion.atidarla/) — `nudge`
 - [PNT Solver](../../../examples/pnt-solver.atidarla/) — `kick`

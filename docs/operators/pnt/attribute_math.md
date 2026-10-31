@@ -38,4 +38,5 @@ All platforms.
 ## Examples
 
 - [PNT For-Each](../../../examples/pnt-foreach.atidarla/) — `spread`, `place`
+- [PNT Motion](../../../examples/pnt-motion.atidarla/) — `recentre`
 - [PNT Solver](../../../examples/pnt-solver.atidarla/) — `warm`

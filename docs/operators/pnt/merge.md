@@ -29,5 +29,6 @@ All platforms.
 
 ## Examples
 
+- [PNT Capture](../../../examples/pnt-capture.atidarla/) — `top_row`, `everything`
 - [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `both`
 - [PNT For-Each](../../../examples/pnt-foreach.atidarla/) — `both`

@@ -32,4 +32,5 @@ All platforms.
 
 ## Examples
 
+- [PNT Motion](../../../examples/pnt-motion.atidarla/) — `home`
 - [PNT Solver](../../../examples/pnt-solver.atidarla/) — `pull`

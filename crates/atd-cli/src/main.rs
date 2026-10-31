@@ -11,6 +11,7 @@ mod isf_import;
 mod kernel;
 mod merge;
 mod models;
+mod points;
 mod project;
 mod pt8;
 mod render;
@@ -326,6 +327,13 @@ enum Command {
         #[command(subcommand)]
         action: cloud::CloudCommand,
     },
+    /// Point caches (docs/point-caches.md): convert PLY, CSV, XYZ/PTS and
+    /// sequences of them to Atidarla's `.atdpc` (or PLY/CSV), and inspect
+    /// them.
+    Points {
+        #[command(subcommand)]
+        action: points::PointsCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -479,6 +487,7 @@ fn main() -> ExitCode {
         Command::VerifyShow { bundle, gpu } => export::verify(&bundle, gpu),
         Command::Models { action } => models::run(action),
         Command::Cloud { action } => cloud::run(action),
+        Command::Points { action } => points::run(action),
         Command::Run {
             project,
             kiosk,
