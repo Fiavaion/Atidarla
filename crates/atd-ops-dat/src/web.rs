@@ -244,6 +244,33 @@ impl DatOp for ClientOp {
             self.due = false;
             self.status.clear();
         }
+        // The last answer first, so a new request's own error (bad
+        // headers or URL) is not cleared by an answer arriving this cook.
+        if let Some(w) = &self.worker
+            && let Ok(mut s) = w.mailbox.state.try_lock()
+            && s.seq != self.seen
+        {
+            self.seen = s.seq;
+            match s.result.take() {
+                Some(Ok(r)) => {
+                    self.status = format!(
+                        "{} · {} bytes · {} ms",
+                        r.status,
+                        r.body.len(),
+                        r.took.as_millis()
+                    );
+                    self.error = (r.status >= 400).then(|| format!("HTTP {}", r.status));
+                    if !(ctx.output.is_text() && ctx.output.as_text() == r.body) {
+                        *ctx.output = Dat::text(r.body);
+                    }
+                }
+                Some(Err(e)) => {
+                    self.status.clear();
+                    self.error = Some(e);
+                }
+                None => {}
+            }
+        }
         if self.due {
             let request = (|| {
                 split_url(url, |s| match s {
@@ -283,31 +310,6 @@ impl DatOp for ClientOp {
                         self.status = "sending…".into();
                     }
                 }
-            }
-        }
-        if let Some(w) = &self.worker
-            && let Ok(mut s) = w.mailbox.state.try_lock()
-            && s.seq != self.seen
-        {
-            self.seen = s.seq;
-            match s.result.take() {
-                Some(Ok(r)) => {
-                    self.status = format!(
-                        "{} · {} bytes · {} ms",
-                        r.status,
-                        r.body.len(),
-                        r.took.as_millis()
-                    );
-                    self.error = (r.status >= 400).then(|| format!("HTTP {}", r.status));
-                    if !(ctx.output.is_text() && ctx.output.as_text() == r.body) {
-                        *ctx.output = Dat::text(r.body);
-                    }
-                }
-                Some(Err(e)) => {
-                    self.status.clear();
-                    self.error = Some(e);
-                }
-                None => {}
             }
         }
         match &self.error {
