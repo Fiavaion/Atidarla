@@ -3,6 +3,11 @@
 # notarises and staples when the identity and credentials below are set.
 # Never installs anything and never needs sudo. See docs/install.md.
 #
+# The app carries its own CPython (PRD A68): the pinned python-build-standalone
+# runtime (packaging/python-runtime.env) in Contents/Resources/python. The
+# release binaries are built against that runtime and find its libpython
+# through an rpath; atd-py starts it with that folder as its home.
+#
 #   packaging/macos/build-dmg.sh            # release build, then dist/*.dmg
 #
 # Environment (all optional):
@@ -10,6 +15,9 @@
 #                             (default: the workspace version in Cargo.toml)
 #   ATD_BUNDLE_ID             CFBundleIdentifier (default org.atidarla.Atidarla)
 #   ATD_SKIP_BUILD=1          use the binaries already in the target folder
+#                             (they must have been built against the bundled
+#                             runtime: PYO3_CONFIG_FILE=$ATD_DIST/tools/
+#                             python-<version>-<release>-<triple>/pyo3-config.txt)
 #   CARGO_TARGET_DIR          as for cargo (default: target)
 #   ATD_DIST                  output folder (default: dist)
 #   ATD_MACOS_SIGN_IDENTITY   "Developer ID Application: Name (TEAMID)"; signs
@@ -28,9 +36,15 @@ VERSION=${ATD_VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -
 BUNDLE_ID=${ATD_BUNDLE_ID:-org.atidarla.Atidarla}
 ARCH=$(uname -m)
 IDENTITY=${ATD_MACOS_SIGN_IDENTITY:-}
+case "$ARCH" in
+    arm64) TRIPLE=aarch64-apple-darwin ;;
+    *) TRIPLE=$ARCH-apple-darwin ;;
+esac
 
+# The bundled runtime, checked against its pinned SHA-256.
+PY_HOME=$(packaging/fetch-python.sh "$TRIPLE" "$DIST/tools")
 if [ "${ATD_SKIP_BUILD:-}" != "1" ]; then
-    cargo build --release -p atd-app -p atd-cli
+    PYO3_CONFIG_FILE="$PY_HOME/../pyo3-config.txt" cargo build --release -p atd-app -p atd-cli
 fi
 REL="$TARGET/release"
 for bin in atidarla-app atidarla; do
@@ -54,6 +68,27 @@ cp "$REL/atidarla-app" "$REL/atidarla" "$APP/Contents/MacOS/"
 cp -R "$SYPHON" "$APP/Contents/Frameworks/"
 cp LICENSE-MIT LICENSE-APACHE "$APP/Contents/Resources/"
 cp third-party/Syphon/License.txt "$APP/Contents/Resources/Syphon-License.txt"
+
+# The Python runtime. Precompile the standard library (hash-checked .pyc that
+# are never rewritten), so Python does not write __pycache__ into the signed
+# bundle at run time.
+PY="$APP/Contents/Resources/python"
+cp -R "$PY_HOME" "$PY"
+cp "$PY"/lib/python3.*/LICENSE.txt "$APP/Contents/Resources/Python-License.txt"
+# -B and -f: the modules compileall itself imports would otherwise get
+# timestamp .pyc first, which compileall then keeps, and Python rewrites.
+"$PY/bin/python3" -I -B -m compileall -f -q -j 0 --invalidation-mode unchecked-hash "$PY"/lib/python3.* > /dev/null
+# Each executable finds libpython (@rpath/libpython3.N.dylib) in the bundle.
+for bin in atidarla-app atidarla; do
+    install_name_tool -add_rpath @executable_path/../Resources/python/lib "$APP/Contents/MacOS/$bin"
+    if otool -L "$APP/Contents/MacOS/$bin" | grep -E -q '/opt/homebrew|/usr/local|/Library/Frameworks/Python|Python.framework'; then
+        echo "error: $bin links a Python outside the bundle (built against another PYO3_PYTHON?):" >&2
+        otool -L "$APP/Contents/MacOS/$bin" >&2
+        exit 1
+    fi
+    otool -L "$APP/Contents/MacOS/$bin" | grep -q '@rpath/libpython3' ||
+        { echo "error: $bin does not link @rpath/libpython3" >&2; exit 1; }
+done
 cp -R examples "$APP/Contents/Resources/examples"
 find "$APP/Contents/Resources/examples" -name .cache -type d -prune -exec rm -rf {} +
 
@@ -68,9 +103,20 @@ done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/Atidarla.icns"
 rm -rf "$ICONSET"
 
-# Sign inside out: the framework, the executables, then the bundle.
+# The runtime's Mach-O files (libpython, extension modules, Tcl/Tk, the
+# python3.N program), signed before the bundle that seals them.
+MACHO="$STAGE/macho.txt"
+find "$PY" -type f \( -name '*.dylib' -o -name '*.so' -o -perm -u+x \) -print | while IFS= read -r f; do
+    if file -b "$f" | grep -q Mach-O; then printf '%s\n' "$f"; fi
+done > "$MACHO"
+
+# Sign inside out: the runtime, the framework, the executables, then the bundle.
 if [ -n "$IDENTITY" ]; then
     echo "signing with $IDENTITY"
+    while IFS= read -r f; do
+        codesign --force --timestamp --options runtime \
+            --entitlements packaging/macos/entitlements.plist --sign "$IDENTITY" "$f"
+    done < "$MACHO"
     codesign --force --timestamp --options runtime --sign "$IDENTITY" "$APP/Contents/Frameworks/Syphon.framework"
     for bin in atidarla atidarla-app; do
         codesign --force --timestamp --options runtime \
@@ -82,12 +128,14 @@ if [ -n "$IDENTITY" ]; then
         --sign "$IDENTITY" "$APP"
 else
     echo "no ATD_MACOS_SIGN_IDENTITY: ad hoc signature (Gatekeeper will ask; see docs/install.md)"
+    while IFS= read -r f; do codesign --force --sign - "$f"; done < "$MACHO"
     codesign --force --sign - "$APP/Contents/Frameworks/Syphon.framework"
     codesign --force --sign - "$APP/Contents/MacOS/atidarla"
     codesign --force --sign - "$APP/Contents/MacOS/atidarla-app"
     codesign --force --sign - "$APP"
 fi
-codesign --verify --strict --verbose=1 "$APP"
+rm "$MACHO"
+codesign --verify --deep --strict --verbose=1 "$APP"
 
 # The disk image: the app, a link to /Applications, the examples.
 ln -s /Applications "$STAGE/Applications"
