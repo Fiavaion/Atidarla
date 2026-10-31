@@ -1,0 +1,175 @@
+# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 20
+
+[[node]]
+id = 0
+name = "blob"
+type = "pnt.scatter"
+pos = [0.0, 0.0]
+params.centre = [-1.7, 0.0, 0.0]
+params.count = 6000
+params.radius = 0.55
+params.shape = "ball"
+
+[[node]]
+id = 1
+name = "squash"
+type = "pnt.lattice"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+params.amplitude = 0.35
+params.centre = [-1.7, 0.0, 0.0]
+params.evolution = { value = 0.0, expr = "time * 0.6" }
+params.size = [1.3, 1.3, 1.3]
+
+[[node]]
+id = 2
+name = "cage"
+type = "pnt.lattice"
+pos = [220.0, 200.0]
+params.amplitude = 0.35
+params.centre = [-1.7, 0.0, 0.0]
+params.evolution = { value = 0.0, expr = "time * 0.6" }
+params.output = "cage"
+params.size = [1.3, 1.3, 1.3]
+
+[[node]]
+id = 3
+name = "blob_colour"
+type = "pnt.colour"
+pos = [440.0, 0.0]
+inputs.in = { node = 1, output = "out" }
+params.attribute = "P"
+params.high = 0.6
+params.low = -0.6
+params.ramp = "ice"
+
+[[node]]
+id = 4
+name = "flock_start"
+type = "pnt.scatter"
+pos = [0.0, 400.0]
+params.count = 1500
+params.radius = 0.6
+params.seed = 7
+params.shape = "ball"
+
+[[node]]
+id = 5
+name = "nudge"
+type = "pnt.attribute"
+pos = [220.0, 400.0]
+inputs.in = { node = 4, output = "out" }
+params.amplitude = 0.5
+params.name = "v"
+params.source = "noise"
+params.type = "vec3"
+params.value = [0.0, 0.0, 0.0, 0.0]
+
+[[node]]
+id = 6
+name = "sky"
+type = "pnt.solver"
+pos = [440.0, 400.0]
+inputs.init = { node = 5, output = "out" }
+inputs.prev = { node = 9, output = "out" }
+
+[[node]]
+id = 7
+name = "boids"
+type = "pnt.flock"
+pos = [660.0, 400.0]
+inputs.in = { node = 6, output = "out" }
+params.max_speed = 0.7
+params.min_speed = 0.3
+params.radius = 0.25
+
+[[node]]
+id = 8
+name = "home"
+type = "pnt.attract"
+pos = [880.0, 400.0]
+inputs.in = { node = 7, output = "out" }
+params.strength = 0.6
+
+[[node]]
+id = 9
+name = "fly"
+type = "pnt.integrate"
+pos = [1100.0, 400.0]
+inputs.in = { node = 8, output = "out" }
+
+[[node]]
+id = 10
+name = "birds"
+type = "pnt.colour"
+pos = [1320.0, 400.0]
+inputs.in = { node = 9, output = "out" }
+params.attribute = "v"
+params.high = 0.7
+params.low = 0.3
+params.measure = "length"
+params.ramp = "heat"
+
+[[node]]
+id = 11
+name = "streaks"
+type = "pnt.trail"
+pos = [1540.0, 400.0]
+inputs.in = { node = 10, output = "out" }
+params.length = 12
+
+[[node]]
+id = 12
+name = "flock_place"
+type = "pnt.transform"
+pos = [1760.0, 400.0]
+inputs.in = { node = 11, output = "out" }
+params.translate = [1.2, 0.0, 0.0]
+
+[[node]]
+id = 13
+name = "draw_blob"
+type = "img.render_points"
+pos = [660.0, 0.0]
+inputs.geo = { node = 3, output = "out" }
+params.height = 3.0
+
+[[node]]
+id = 14
+name = "draw_cage"
+type = "img.render_points"
+pos = [440.0, 200.0]
+inputs.geo = { node = 2, output = "out" }
+params.colour = [1.0, 0.8, 0.3, 1.0]
+params.draw = "both"
+params.height = 3.0
+params.size = 5.0
+
+[[node]]
+id = 15
+name = "draw_flock"
+type = "img.render_points"
+pos = [1980.0, 400.0]
+inputs.geo = { node = 12, output = "out" }
+params.draw = "lines"
+params.height = 3.0
+
+[[node]]
+id = 16
+name = "blob_and_cage"
+type = "img.composite"
+pos = [880.0, 100.0]
+inputs.a = { node = 13, output = "out" }
+inputs.b = { node = 14, output = "out" }
+params.operation = "add"
+
+[[node]]
+id = 17
+name = "stage"
+type = "img.composite"
+pos = [2200.0, 250.0]
+inputs.a = { node = 16, output = "out" }
+inputs.b = { node = 15, output = "out" }
+params.operation = "add"

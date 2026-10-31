@@ -41,3 +41,4 @@ All platforms.
 - [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `height`
 - [PNT Fields](../../../examples/pnt-fields.atidarla/) — `heat`, `by_crowd`
 - [PNT Fountain](../../../examples/pnt-fountain.atidarla/) — `by_speed`
+- [PNT Motion](../../../examples/pnt-motion.atidarla/) — `blob_colour`, `birds`

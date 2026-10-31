@@ -30,6 +30,7 @@
 //! | `pnt.file_in`, `pnt.sensor_in` (M6 capture, `docs/point-caches.md`) | a file (worker thread); a sensor or its test scene | the file's attributes; `P`, `Cd`, `depth`, `valid`, `body`, `id` or joints and bones |
 //! | `pnt.attribute_noise`, `attribute_from_channels` (SIG in), `falloff_field` | `P` or a vector attribute; channels | any attribute (`falloff`) |
 //! | `pnt.attribute_transfer`, `proximity`, `neighbours` (grid hash) | `P` of both inputs, the attribute | the attribute; `dist`, `nearvec`; `nbr`, `nbrdist`, `nbrcount` |
+//! | `pnt.lattice`, `pnt.flock` (grid hash), `pnt.trail` | `P` (a cage's `P`); `P`, `v`; `P`, `Cd` | `P` (cage: lines); `v`; history lines, `age` |
 //! | `img.render_points` (IMG) | `P`, `Cd`, polylines | an image |
 
 mod attr;
@@ -43,6 +44,7 @@ mod fuse;
 mod image_kit;
 mod kernel;
 mod kit;
+mod lattice;
 mod lookup;
 mod neighbours;
 mod noise;
@@ -55,6 +57,7 @@ mod sensor;
 mod solver;
 mod sort;
 mod sources;
+mod trail;
 mod transfer;
 mod transform;
 
@@ -136,6 +139,9 @@ const OPS: &[(Schema, Factory)] = &[
     (transfer::transfer_schema, transfer::create_transfer),
     (transfer::proximity_schema, transfer::create_proximity),
     (transfer::neighbours_schema, transfer::create_neighbours),
+    (lattice::schema, lattice::create),
+    (trail::trail_schema, trail::create_trail),
+    (trail::flock_schema, trail::create_flock),
 ];
 
 /// Every schema this crate registers (PNT operators and Render Points).

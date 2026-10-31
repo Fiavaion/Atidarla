@@ -41,4 +41,5 @@ All platforms.
 - [PNT Fields](../../../examples/pnt-fields.atidarla/) — `brushes`, `swarm`
 - [PNT For-Each](../../../examples/pnt-foreach.atidarla/) — `column`, `strip`
 - [PNT Fountain](../../../examples/pnt-fountain.atidarla/) — `ring`
+- [PNT Motion](../../../examples/pnt-motion.atidarla/) — `blob`, `flock_start`
 - [PNT Solver](../../../examples/pnt-solver.atidarla/) — `disk`

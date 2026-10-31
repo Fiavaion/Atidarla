@@ -436,3 +436,137 @@ fn attribute_transfer_carries_values_from_nearby_points() {
         }
     }
 }
+
+#[test]
+fn lattice_moves_points_with_their_cage() {
+    let Some(mut e) = engine() else { return };
+    let mut b = Build::new(&mut e);
+    let pts = b.node("pnt.points", &[("count", json!(100)), ("seed", json!(4))]);
+    // A 2 × 2 × 2 cage moved as a whole moves everything inside with it;
+    // with no noise the cage is at rest and nothing moves.
+    let still = b.node("pnt.lattice", &[("amplitude", json!(0.0))]);
+    let cage = b.node(
+        "pnt.lattice",
+        &[
+            ("output", json!("cage")),
+            ("amplitude", json!(0.0)),
+            ("divisions", json!([2.0, 2.0, 2.0])),
+        ],
+    );
+    let shifted = b.node("pnt.transform", &[("translate", json!([0.25, -0.5, 0.0]))]);
+    let moved = b.node("pnt.lattice", &[("divisions", json!([2.0, 2.0, 2.0]))]);
+    let stretched_cage = b.node("pnt.transform", &[("scale", json!([2.0, 1.0, 1.0]))]);
+    let stretched = b.node("pnt.lattice", &[("divisions", json!([2.0, 2.0, 2.0]))]);
+    let noisy = b.node("pnt.lattice", &[]);
+    b.wire(pts, still, "in");
+    b.wire(cage, shifted, "in");
+    b.wire(pts, moved, "in");
+    b.wire(shifted, moved, "cage");
+    b.wire(cage, stretched_cage, "in");
+    b.wire(pts, stretched, "in");
+    b.wire(stretched_cage, stretched, "cage");
+    b.wire(pts, noisy, "in");
+    b.done();
+    e.cook(&[still, cage, moved, stretched, noisy], 0.0)
+        .unwrap();
+    let p = floats(&e, pts, "P");
+    assert_eq!(e.geometry(cage).unwrap().points(), 8);
+    assert_eq!(e.geometry(cage).unwrap().prims(), 12, "a box's edges");
+    let close = |a: f32, b: f32| (a - b).abs() < 1e-5;
+    for (i, q) in floats(&e, still, "P").iter().enumerate() {
+        assert!((0..3).all(|c| close(q[c], p[i][c])), "{q:?} vs {:?}", p[i]);
+    }
+    for (i, q) in floats(&e, moved, "P").iter().enumerate() {
+        assert!(close(q[0], p[i][0] + 0.25) && close(q[1], p[i][1] - 0.5));
+    }
+    for (i, q) in floats(&e, stretched, "P").iter().enumerate() {
+        assert!(
+            close(q[0], p[i][0] * 2.0) && close(q[1], p[i][1]),
+            "linear inside"
+        );
+    }
+    let n = floats(&e, noisy, "P");
+    assert!(n.iter().zip(&p).any(|(a, b)| (a[0] - b[0]).abs() > 1e-3));
+}
+
+#[test]
+fn trails_keep_history_as_lines() {
+    let Some(mut e) = engine() else { return };
+    let mut b = Build::new(&mut e);
+    let pts = b.node(
+        "pnt.points",
+        &[("shape", json!("line")), ("count", json!(3))],
+    );
+    let mover = b.node("pnt.transform", &[]);
+    let trail = b.node("pnt.trail", &[("length", json!(4))]);
+    b.wire(pts, mover, "in");
+    b.wire(mover, trail, "in");
+    b.edits.push(Edit::SetParam {
+        node: mover,
+        param: "translate".into(),
+        value: Some(Param::constant(json!([0.0, 0.0, 0.0]))),
+    });
+    b.done();
+    // Move up by 0.1 a frame: frame f is at y = 0.1 f.
+    for f in 0..6 {
+        e.edit(
+            "move",
+            vec![Edit::SetParam {
+                node: mover,
+                param: "translate".into(),
+                value: Some(Param::constant(json!([0.0, 0.1 * f as f64, 0.0]))),
+            }],
+        )
+        .unwrap();
+        e.cook(&[trail], f as f64 / 60.0).unwrap();
+    }
+    let g = e.geometry(trail).unwrap();
+    assert_eq!(g.points(), 12);
+    assert_eq!(g.prims(), 3, "one line per point");
+    let p = floats(&e, trail, "P");
+    let age = floats(&e, trail, "age");
+    for src in 0..3 {
+        for k in 0..4 {
+            let j = src * 4 + k;
+            let want = 0.1 * (5 - k) as f32;
+            assert!(
+                (p[j][1] - want).abs() < 1e-5,
+                "point {src} step {k}: {}",
+                p[j][1]
+            );
+            assert!((age[j][0] - k as f32 / 3.0).abs() < 1e-6);
+        }
+    }
+}
+
+#[test]
+fn flocks_steer_toward_neighbours_and_hold_speed() {
+    let Some(mut e) = engine() else { return };
+    let mut b = Build::new(&mut e);
+    let pts = b.node(
+        "pnt.scatter",
+        &[
+            ("shape", json!("ball")),
+            ("count", json!(300)),
+            ("radius", json!(0.5)),
+        ],
+    );
+    let flock = b.node(
+        "pnt.flock",
+        &[("min_speed", json!(0.3)), ("max_speed", json!(0.8))],
+    );
+    let again = b.node(
+        "pnt.flock",
+        &[("min_speed", json!(0.3)), ("max_speed", json!(0.8))],
+    );
+    b.wire(pts, flock, "in");
+    b.wire(pts, again, "in");
+    b.done();
+    e.cook(&[flock, again], 0.0).unwrap();
+    let v = floats(&e, flock, "v");
+    assert_eq!(v, floats(&e, again, "v"), "repeats exactly");
+    for row in &v {
+        let s = (row[0] * row[0] + row[1] * row[1] + row[2] * row[2]).sqrt();
+        assert!((0.3 - 1e-4..=0.8 + 1e-4).contains(&s), "speed {s}");
+    }
+}

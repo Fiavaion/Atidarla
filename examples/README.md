@@ -49,6 +49,7 @@ every IMG and SIG operator (CLAUDE.md rule 7); each operator's page in
 | [pnt-deformers](pnt-deformers.atidarla/) | Twist, Taper, Bend and Wave on a column; Copy to Points with random sizes and colours (M2) |
 | [pnt-constellation](pnt-constellation.atidarla/) | Smooth, Normals, Sort and Connect on the GPU grid hash; lines in Render Points (M2) |
 | [pnt-fields](pnt-fields.atidarla/) | Falloff Field, Attribute Noise and Attribute from Channels on a grid; Attribute Transfer and Proximity from wandering brushes; Neighbours counting a swarm (M6) |
+| [pnt-motion](pnt-motion.atidarla/) | A Lattice deforming a ball by a drifting cage (and the cage drawn), boids (Flock) in a Solver loop drawn as Trails (M6) |
 | [pnt-capture](pnt-capture.atidarla/) | Points from Image and from Depth, Attribute from Image, Point File In (CSV, PLY and a CSV sequence) and Sensor In's test scene with body tracking (M6, [`docs/point-caches.md`](../docs/point-caches.md)) |
 | [pnt-solver](pnt-solver.atidarla/) | A Solver loop (Attract, Turbulence, Drag, Integrate, Age) over pieces coloured per piece (M2) |
 | [pnt-foreach](pnt-foreach.atidarla/) | For-Each blocks: six counted copies of a column, and a strip coloured band by band (pieces) (M2) |

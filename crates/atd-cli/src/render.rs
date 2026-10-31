@@ -781,6 +781,8 @@ pub fn classify(type_id: &str) -> Option<Class> {
         | "pnt.attribute_noise"
         | "pnt.attribute_transfer"
         | "pnt.falloff_field"
+        | "pnt.flock"
+        | "pnt.lattice"
         | "pnt.neighbours"
         | "pnt.points_from_depth"
         | "pnt.points_from_image"
@@ -789,6 +791,8 @@ pub fn classify(type_id: &str) -> Option<Class> {
         // too (its test scene is a function of time and frame; live capture
         // outputs nothing offline).
         "pnt.file_in" | "pnt.sensor_in" => Waits,
+        // Keeps every point's recent positions from frame to frame.
+        "pnt.trail" => Stateful,
         "pnt.emitter" | "pnt.solver" => Stateful,
         "pnt.particles" => Stateful,
         "img.render" | "msh.platonic" => Pure,

@@ -56,7 +56,7 @@ static GLOBAL: Counting = Counting;
 const BOUND: f64 = 90.0;
 
 /// Nodes cooked per frame (all but the static Points source).
-const NODES: usize = 18;
+const NODES: usize = 20;
 
 #[test]
 fn geo_chains_steady_state_allocations() {
@@ -149,6 +149,9 @@ fn geo_chains_steady_state_allocations() {
     let nbrs = node(&mut e, "pnt.neighbours", &[]);
     let transfer = node(&mut e, "pnt.attribute_transfer", &[]);
     let prox = node(&mut e, "pnt.proximity", &[]);
+    let lattice = node(&mut e, "pnt.lattice", &[]);
+    let trail = node(&mut e, "pnt.trail", &[("length", json!(8))]);
+    let flock = node(&mut e, "pnt.flock", &[]);
     let mix = node(&mut e, "pnt.merge", &[]);
     let r3 = node(&mut e, "img.render_points", &[]);
     let r4 = node(&mut e, "img.render_points", &[]);
@@ -176,8 +179,11 @@ fn geo_chains_steady_state_allocations() {
         wire(sensor, transfer, "from"),
         wire(transfer, prox, "in"),
         wire(pfd, prox, "to"),
-        wire(prox, r4, "geo"),
-        wire(afc, mix, "a"),
+        wire(prox, flock, "in"),
+        wire(flock, r4, "geo"),
+        wire(afc, lattice, "in"),
+        wire(lattice, trail, "in"),
+        wire(trail, mix, "a"),
         wire(pfd, mix, "b"),
         wire(sensor, mix, "c"),
         wire(mix, r3, "geo"),
@@ -232,7 +238,7 @@ fn geo_chains_steady_state_allocations() {
     );
     for n in [
         pts, n1, n2, r1, ps, force, r2, img, pfi, afi, pfd, sensor, mix, r3, falloff, anoise, wave,
-        afc,
+        afc, lattice, trail,
     ] {
         assert_eq!(e.error(n), None);
     }
@@ -280,7 +286,7 @@ fn geo_chains_steady_state_allocations() {
         }
     }
     assert!(stable >= 60, "neighbour operators still create GPU objects");
-    for n in [nbrs, transfer, prox, r4] {
+    for n in [nbrs, transfer, prox, flock, r4] {
         assert_eq!(e.error(n), None);
     }
     if std::env::var_os("ATD_ALLOC_BREAKDOWN").is_some() {
