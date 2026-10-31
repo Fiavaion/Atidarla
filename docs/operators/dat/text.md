@@ -26,4 +26,5 @@ All platforms.
 
 ## Examples
 
+- [DAT network](../../../examples/dat-network.atidarla/) — `state`
 - [DAT tables](../../../examples/dat-tables.atidarla/) — `csv`, `note`

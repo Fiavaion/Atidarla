@@ -31,4 +31,5 @@ All platforms.
 ## Examples
 
 - [DAT files](../../../examples/dat-files.atidarla/) — `acts`
+- [DAT network](../../../examples/dat-network.atidarla/) — `cue`
 - [DAT tables](../../../examples/dat-tables.atidarla/) — `parsed`

@@ -12,7 +12,10 @@ publish.workspace = true
 [dependencies]
 atd-core.workspace = true
 atd-gpu.workspace = true
+atd-ai.workspace = true
 serde_json.workspace = true
+ureq.workspace = true
+tungstenite.workspace = true
 
 [lints]
 workspace = true

@@ -22,13 +22,19 @@
 //! | `dat.prompt_template` | text with `{name}` filled from a table, text and channels |
 //! | `dat.file_in` | a file's text or table, reloaded when it is saved |
 //! | `dat.file_out` | its input, written to a file |
+//! | `dat.web_client` | an HTTP(S) response body, through the egress gate |
+//! | `dat.web_server` | requests received; serves its input on loopback |
+//! | `dat.websocket` | messages received; sends its input |
 
 pub mod delim;
 mod file;
 mod json;
+mod net;
 mod select;
 mod table;
 mod template;
+mod web;
+mod websocket;
 
 use atd_core::registry::{OpFamily, OperatorSchema, ParamSchema, Registry, SocketSchema, WireType};
 use atd_gpu::engine::{DatOp, OpLibrary};
@@ -101,6 +107,9 @@ fn ops() -> Vec<(OperatorSchema, Factory)> {
         (template::schema(), template::create),
         (file::file_in_schema(), file::create_file_in),
         (file::file_out_schema(), file::create_file_out),
+        (web::client_schema(), web::create_client),
+        (web::server_schema(), web::create_server),
+        (websocket::schema(), websocket::create),
     ]
 }
 

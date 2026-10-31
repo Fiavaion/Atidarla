@@ -451,9 +451,12 @@ dependencies = [
 name = "atd-ops-dat"
 version = "0.0.1"
 dependencies = [
+ "atd-ai",
  "atd-core",
  "atd-gpu",
  "serde_json",
+ "tungstenite",
+ "ureq 3.5.0",
 ]
 
 [[package]]

@@ -789,7 +789,10 @@ pub fn classify(type_id: &str) -> Option<Class> {
         | "dat.prompt_template" => Pure,
         // Offline it reads its file on the cook, before the first frame.
         "dat.file_in" => Waits,
-        "dat.file_out" => Sink,
+        "dat.file_out" | "dat.web_server" | "dat.websocket" => Sink,
+        // Reads the network: offline it sends no request and keeps its
+        // (empty) value.
+        "dat.web_client" => LiveInput,
         "img.movie_in" | "img.text" | "img.wgsl" | "sig.audio_file_in" => Waits,
         // Waits for its compile (and its file).
         "img.kernel" => Waits,
