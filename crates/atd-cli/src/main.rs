@@ -1,6 +1,7 @@
 //! `atidarla` — headless entry points (PRD §7.10).
 
 mod agent;
+mod ai_host;
 mod bake;
 mod batch;
 mod bench;
@@ -323,6 +324,12 @@ enum Command {
         #[arg(long)]
         emit_wgsl: bool,
     },
+    /// The local AI Host an installed app ships (PRD A68): status, a start
+    /// check, and installing optional adapters' packages on request.
+    AiHost {
+        #[command(subcommand)]
+        action: ai_host::AiHostCommand,
+    },
     /// The AI model manager: catalogue, licence acceptance, downloads and
     /// checks (FR-A12, docs/models.md).
     Models {
@@ -500,6 +507,7 @@ fn main() -> ExitCode {
             no_gpu,
         } => export::run(&project, &out, export::ExportOptions { zip, gpu: !no_gpu }),
         Command::VerifyShow { bundle, gpu } => export::verify(&bundle, gpu),
+        Command::AiHost { action } => ai_host::run(action),
         Command::Models { action } => models::run(action),
         Command::Cloud { action } => cloud::run(action),
         Command::Points { action } => points::run(action),
