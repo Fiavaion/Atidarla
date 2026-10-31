@@ -173,9 +173,11 @@ allow them:
   new file) asks again.
 - While a project is open and allowed, your own edits hot-reload without asking (you are the
   one editing). They do not update the remembered hash, so the next open asks again.
-- **Headless:** `atidarla check` and `atidarla render` run a project's Python operators only
-  with `--allow-python-ops` (for that run; nothing is remembered). Without it, `check` reports
-  the nodes it did not run and still passes, and `render` fails if the rendered image needs one.
+- **Headless:** `atidarla check`, `render`, `bake`, `batch`, `serve`, `soak` and `agent ask` /
+  `agent eval` run a project's Python (operators, Script nodes and Python expressions) only with
+  `--allow-python-ops` (for that run; nothing is remembered). Without it, `check` reports the
+  nodes and expressions it did not run and still passes, `render` fails if the rendered image
+  needs one, and `serve` cooks the show without them.
 
 **Threat model.** In scope: a project file from someone else running code when you open it.
 Out of scope: anything that can already write to your disk (it can change Atidarla itself);
@@ -189,14 +191,25 @@ node's `code` parameter rather than in `ops/`. They run on their own worker thre
 explicit choice: the app's Allow dialog, which also opens for a project whose network has Script
 nodes and lists them ("Allow this time" or "Allow and remember"; the remembered hash covers `ops/`
 files, not network code, so it never allows scripts by itself and the dialog asks again on the
-next open), or `--allow-python-ops` for `check` and `render`. Opening another project stops them
+next open), or `--allow-python-ops` for the headless commands. Opening another project stops them
 until it is allowed. Until then their nodes report the same "not allowed" error as Python
 operators. Known limit: a script that never returns holds the Script worker (no timeout yet; the
 show is not affected).
 
-**Known gap (not closed by this work):** Python *expressions* in parameters (A22) run as soon
-as a project opens, without asking. Until they go through the same gate, opening an untrusted
-project is not safe even with its Python operators blocked. Raised with Mark.
+**Python expressions** (PRD A22: any parameter expression outside the native subset) are network
+code too and follow the Script DAT rule exactly. The engine asks its Python host whether the
+project's Python is allowed once per frame (`PythonHost::allowed`, the same process-wide flag as
+Script DATs, `atd_py::script::allow`); while it is not, no expression job is offered to the
+Python worker (which also refuses any it is handed), the parameter keeps its stored value, and
+the node reports "Python expressions in this project are not allowed to run". Native-tier
+expressions are evaluated in Rust and keep working. The Allow dialog opens for a project with
+Python expressions and lists each one; "Allow and remember" does not cover them (the remembered
+hash is of `ops/` files: hashing network text would make every edit of any parameter a new trust
+decision, and a project that differs only in an expression would look trusted), so the dialog
+asks again on the next open. Opening another project withdraws the allowance; a new project,
+and the patch the app starts with, are your own, so their Python runs. While a project is
+allowed, Python expressions you type evaluate as soon as you commit them; in one that is not,
+the parameter panel says why they do not.
 
 ## Where it lives
 
