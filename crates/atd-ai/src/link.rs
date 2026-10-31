@@ -389,15 +389,19 @@ impl Link {
                     why.unwrap_or_else(|| "the session was closed".into()),
                 ));
             }
-            let (blocked, unreachable, waiting) = self.with_status(|st| {
+            // One read, so the reason matches the flags it explains.
+            let (blocked, unreachable, waiting, reason) = self.with_status(|st| {
+                let reason = match &st.state {
+                    LinkState::Waiting(why) => Some(why.clone()),
+                    _ => st.error.clone(),
+                };
                 let waiting = matches!(st.state, LinkState::Waiting(_));
-                (st.blocked, st.unreachable, waiting)
+                (st.blocked, st.unreachable, waiting, reason)
             });
             let why = || {
-                self.with_status(|st| match &st.state {
-                    LinkState::Waiting(why) => why.clone(),
-                    _ => format!("no result within {timeout:?}"),
-                })
+                reason
+                    .clone()
+                    .unwrap_or_else(|| format!("no result within {timeout:?}"))
             };
             if blocked {
                 return Err(NoResult::Blocked);
@@ -573,6 +577,9 @@ impl Worker {
                 let unreachable = self.out_of_reach(&cfg);
                 self.status(|s| {
                     s.state = LinkState::Waiting(why.clone());
+                    // Kept while the next attempt routes, so a wait that
+                    // reads `unreachable` then still has the reason.
+                    s.error = Some(why.clone());
                     s.target = None;
                     s.blocked = blocked;
                     s.unreachable = unreachable;

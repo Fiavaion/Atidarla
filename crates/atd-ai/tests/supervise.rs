@@ -224,7 +224,15 @@ fn offline_with_only_refusing_hosts_fails_fast() {
     let took = t0.elapsed();
     println!("refusing host: {r:?} after {took:?}");
     assert!(matches!(r, Err(NoResult::Unreachable(_))), "{r:?}");
-    assert!(took < fail_fast_bound(), "took {took:?}");
+    // Windows retries a refused connect for about 2 s before reporting it;
+    // still far inside the 30 s give-up this replaces.
+    let bound = fail_fast_bound()
+        + if cfg!(windows) {
+            Duration::from_secs(3)
+        } else {
+            Duration::ZERO
+        };
+    assert!(took < bound, "took {took:?}");
 }
 
 /// Offline, a host that is up but slow is waited for: every frame gets its
