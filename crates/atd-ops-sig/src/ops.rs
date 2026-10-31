@@ -719,6 +719,7 @@ mod tests {
         ) -> Channels {
             let mut out = Channels::default();
             let mut ctx = SigCtx {
+                dat: atd_gpu::engine::DatIo::none(),
                 inputs: SigInputs::new(inputs, &self.sig),
                 output: &mut out,
                 params: Params::new(&self.net, &self.reg, &self.sig, node),
@@ -936,6 +937,7 @@ mod tests {
         let synced = h.node("lfo", &[("sync", json!("beats"))]);
         let mut out = Channels::default();
         let mut ctx = SigCtx {
+            dat: atd_gpu::engine::DatIo::none(),
             inputs: SigInputs::new(&[], &h.sig),
             output: &mut out,
             params: Params::new(&h.net, &h.reg, &h.sig, synced),
@@ -1117,6 +1119,7 @@ mod tests {
         let mut out = Channels::default();
         let mut cook = |out: &mut Channels, t| {
             let mut ctx = SigCtx {
+                dat: atd_gpu::engine::DatIo::none(),
                 inputs: SigInputs::new(&[], &h.sig),
                 output: out,
                 params: Params::new(&h.net, &h.reg, &h.sig, n),

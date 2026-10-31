@@ -239,6 +239,7 @@ fn every_sig_operator_cooks_without_allocating() {
         for f in 0..frames {
             for (_, id, inputs, op, out) in cases.iter_mut() {
                 let mut ctx = SigCtx {
+                    dat: atd_gpu::engine::DatIo::none(),
                     inputs: SigInputs::new(inputs, &sig),
                     output: out,
                     params: Params::new(&net, &reg, &sig, *id),

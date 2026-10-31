@@ -178,6 +178,7 @@ mod tests {
         let start = Instant::now();
         let mut cook = |op: &mut AudioOut, f: u64| {
             let mut ctx = SigCtx {
+                dat: atd_gpu::engine::DatIo::none(),
                 inputs: SigInputs::new(&sources, &sig),
                 output: &mut out,
                 params: Params::new(&net, &reg, &sig, id),

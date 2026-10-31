@@ -127,6 +127,7 @@ impl Chain {
                 };
                 let mut out = sig.remove(id).unwrap_or_default();
                 let mut ctx = SigCtx {
+                    dat: atd_gpu::engine::DatIo::none(),
                     inputs: SigInputs::new(&sources, &sig),
                     output: &mut out,
                     params: Params::new(&self.net, &self.reg, &sig, *id)

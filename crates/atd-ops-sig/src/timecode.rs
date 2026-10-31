@@ -239,6 +239,7 @@ mod tests {
         let mut out = Channels::default();
         let cook = |op: &mut TimecodeIn, out: &mut Channels, t: f64| {
             let mut ctx = SigCtx {
+                dat: atd_gpu::engine::DatIo::none(),
                 inputs: SigInputs::new(&[], &sig),
                 output: out,
                 params: Params::new(&net, &reg, &sig, id),

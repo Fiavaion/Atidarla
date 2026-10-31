@@ -586,6 +586,7 @@ mod tests {
             };
             let mut out = Channels::default();
             let mut ctx = SigCtx {
+                dat: atd_gpu::engine::DatIo::none(),
                 inputs: SigInputs::new(&sources, &self.sig),
                 output: &mut out,
                 params: Params::new(&self.net, &self.reg, &self.sig, self.node).with_mode(mode),

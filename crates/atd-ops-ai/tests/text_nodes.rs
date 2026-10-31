@@ -145,6 +145,7 @@ impl Rig {
         }
         let sources = [input.map(|_| self.src)];
         let mut ctx = SigCtx {
+            dat: atd_gpu::engine::DatIo::none(),
             inputs: SigInputs::new(&sources, &self.sig),
             output: &mut self.out,
             params: Params::new(&self.net, &self.reg, &self.sig, self.id).with_mode(mode),

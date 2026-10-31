@@ -577,6 +577,7 @@ mod tests {
         ) -> Result<(), String> {
             let sources = [Some(self.src)];
             let mut ctx = SigCtx {
+                dat: atd_gpu::engine::DatIo::none(),
                 inputs: SigInputs::new(&sources, &self.sig),
                 output: out,
                 params: Params::new(&self.net, &self.reg, &self.sig, id),
