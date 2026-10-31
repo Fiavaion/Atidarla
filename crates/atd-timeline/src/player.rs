@@ -16,8 +16,10 @@ use serde_json::Value;
 use crate::eval::{OpKind, Signals, Timeline};
 use crate::transport::{ClockSource, Motion, PlayState, Transport};
 
-/// The engine's signals: SIG channels from the last cook, stored parameter
-/// values from the network.
+/// The engine's signals: SIG channels from the last cook, parameter values
+/// from the network, a vector's or colour's components as its binding or
+/// expression drove them on the last cook (PRD A66; live values left out:
+/// they are the timeline's own output).
 #[derive(Debug, Clone, Copy)]
 pub struct EngineSignals<'a>(pub &'a Engine);
 
@@ -27,6 +29,11 @@ impl Signals for EngineSignals<'_> {
     }
 
     fn param(&self, node: NodeId, param: &str, index: Option<usize>) -> Option<f64> {
+        if let Some(i) = index
+            && let Some(v) = self.0.param_component(node, param, i, false)
+        {
+            return Some(v);
+        }
         let v = self
             .0
             .network()

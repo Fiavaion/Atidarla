@@ -8,7 +8,7 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
-use atd_core::graph::{Edit, Endpoint, Node, NodeId, Wire};
+use atd_core::graph::{Edit, Endpoint, Node, NodeId, Param, Wire};
 use atd_core::registry::Registry;
 use atd_format::timeline::TimelineDoc;
 use atd_gpu::engine::{Engine, EngineConfig, OpLibrary};
@@ -156,6 +156,46 @@ fn playing_tracks_set_live_values_without_allocating() {
     );
     assert_eq!(ticks, 0, "Player::tick with set_live, 120 frames");
     assert_eq!(set, 0, "Engine::set_live of a number, 60 changes");
+}
+
+/// The components of a vector track that are not keyed follow the
+/// parameter's expression (PRD A66), not its stored value.
+#[test]
+fn unkeyed_components_follow_a_driven_colour() {
+    let Some(mut e) = engine() else {
+        return;
+    };
+    let colour = add(&mut e, "img.constant");
+    e.edit(
+        "expr",
+        [Edit::SetParam {
+            node: colour,
+            param: "colour".into(),
+            value: Some(Param {
+                value: json!([0.0, 0.0, 0.0, 0.75]),
+                expr: Some("0.25 + 0.25".into()),
+                bind: None,
+            }),
+        }],
+    )
+    .unwrap();
+    e.cook_frame(Some(colour), 0.0).unwrap();
+    let mut doc = TimelineDoc {
+        length: 10.0,
+        ..TimelineDoc::default()
+    };
+    let t = doc.track_mut(colour, "colour", Some(0));
+    t.set_key(0.0, 1.0);
+    t.set_key(10.0, 1.0);
+    let mut p = Player::new(doc, &e);
+    p.transport.play();
+    p.tick(&mut e, 0.0);
+    // Red from the track; green and blue from the expression; the stored
+    // alpha.
+    assert_eq!(
+        e.live_values().get(colour, "colour"),
+        Some(&json!([1.0, 0.5, 0.5, 0.75]))
+    );
 }
 
 /// Stop clears what the timeline set, but not a value another writer (a
