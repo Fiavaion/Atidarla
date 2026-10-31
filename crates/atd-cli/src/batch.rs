@@ -45,8 +45,8 @@ pub enum BatchCommand {
         /// Cook every item, even those already in the bin.
         #[arg(long)]
         force: bool,
-        /// Run the project's Python operators (ops/*.py); see
-        /// docs/python-ops.md.
+        /// Run the project's Python (ops/*.py operators, Script nodes, Python
+        /// expressions); see docs/python-ops.md.
         #[arg(long)]
         allow_python_ops: bool,
     },

@@ -24,6 +24,10 @@ pub enum AgentCommand {
         request: String,
         #[command(flatten)]
         model: ModelArgs,
+        /// Run the project's Python (ops/*.py operators, Script nodes,
+        /// Python expressions); see docs/python-ops.md.
+        #[arg(long)]
+        allow_python_ops: bool,
     },
     /// Run the network-generation eval and write a report.
     Eval {
@@ -36,6 +40,11 @@ pub enum AgentCommand {
         only: Option<String>,
         #[command(flatten)]
         model: ModelArgs,
+        /// Evaluate the Python expressions the model writes (they are code
+        /// with your user's privileges); without it they keep their stored
+        /// values and count as node errors. See docs/python-ops.md.
+        #[arg(long)]
+        allow_python_ops: bool,
     },
 }
 
@@ -103,9 +112,10 @@ pub fn run(cmd: AgentCommand) -> Result<()> {
             project,
             request,
             model,
+            allow_python_ops,
         } => {
             let mut llm = llm(&model)?;
-            let mut ws = ServeWorkspace::open(&project, true)?;
+            let mut ws = ServeWorkspace::open(&project, true, allow_python_ops)?;
             let lock = ShowLock::load(&project).map_err(|e| anyhow!(e))?;
             let mut agent = Agent::new(scopes(), lock);
             let run =
@@ -128,11 +138,24 @@ pub fn run(cmd: AgentCommand) -> Result<()> {
             out,
             only,
             model,
-        } => eval(&prompts, out.as_deref(), only.as_deref(), &model),
+            allow_python_ops,
+        } => eval(
+            &prompts,
+            out.as_deref(),
+            only.as_deref(),
+            &model,
+            allow_python_ops,
+        ),
     }
 }
 
-fn eval(path: &Path, out: Option<&Path>, only: Option<&str>, m: &ModelArgs) -> Result<()> {
+fn eval(
+    path: &Path,
+    out: Option<&Path>,
+    only: Option<&str>,
+    m: &ModelArgs,
+    allow_python: bool,
+) -> Result<()> {
     let text = std::fs::read_to_string(path).with_context(|| path.display().to_string())?;
     let prompts: Prompts = toml_edit::de::from_str(&text)?;
     let mut llm = llm(m)?;
@@ -149,7 +172,7 @@ fn eval(path: &Path, out: Option<&Path>, only: Option<&str>, m: &ModelArgs) -> R
         let dir = tmp.join(format!("{}.atidarla", p.id));
         let _ = std::fs::remove_dir_all(&dir);
         let t = Instant::now();
-        let mut ws = ServeWorkspace::open(&dir, false)?;
+        let mut ws = ServeWorkspace::open(&dir, false, allow_python)?;
         let mut agent = Agent::new(scopes(), ShowLock::default());
         let run = assistant::build(llm.as_mut(), &mut agent, &mut ws, &p.text, m.max_steps);
         // Judge the network the model left, cooked afresh.

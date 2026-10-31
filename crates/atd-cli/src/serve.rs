@@ -53,6 +53,12 @@ pub struct ServeArgs {
     /// Stop after this many seconds (tests).
     #[arg(long)]
     pub seconds: Option<f64>,
+    /// Run the project's Python: operators (ops/*.py), Script nodes and
+    /// Python parameter expressions. They are code with your user's
+    /// privileges; without this flag they do not run (expressions keep
+    /// their stored values). See docs/python-ops.md.
+    #[arg(long)]
+    pub allow_python_ops: bool,
 }
 
 /// The project as the agent sees it, cooked by a headless engine.
@@ -62,6 +68,8 @@ pub(crate) struct ServeWorkspace {
     engine: Engine,
     flat: Flat,
     save: bool,
+    /// `--allow-python-ops`: the project's Python runs (kept on reopen).
+    allow_python: bool,
     time: f64,
     /// The GPU adapter the engine runs on (`atidarla soak` reports it).
     pub(crate) adapter: wgpu::AdapterInfo,
@@ -69,7 +77,9 @@ pub(crate) struct ServeWorkspace {
 }
 
 impl ServeWorkspace {
-    pub(crate) fn open(dir: &Path, save: bool) -> Result<Self> {
+    /// Opens `dir`; its Python (operators, Script nodes, Python
+    /// expressions) runs only with `allow_python` (`--allow-python-ops`).
+    pub(crate) fn open(dir: &Path, save: bool, allow_python: bool) -> Result<Self> {
         if !dir.join("project.toml").exists() {
             let name = dir
                 .file_stem()
@@ -79,6 +89,11 @@ impl ServeWorkspace {
         }
         let gpu = atd_gpu::GpuContext::headless().map_err(|e| anyhow!("no GPU: {e}"))?;
         let mut loaded = load_checked(dir)?;
+        if allow_python {
+            loaded.python.allow();
+        }
+        // Network Python (Script DATs, Python expressions): the same flag.
+        atd_py::script::allow(allow_python);
         let [w, h] = loaded.project.resolution;
         let registry = std::mem::take(&mut loaded.registry);
         let library = std::mem::take(&mut loaded.library);
@@ -108,6 +123,7 @@ impl ServeWorkspace {
             engine,
             flat,
             save,
+            allow_python,
             time: 0.0,
             adapter: gpu.adapter.get_info(),
             history: Vec::new(),
@@ -304,7 +320,8 @@ impl Workspace for ServeWorkspace {
         if self.save {
             atd_format::save(&self.dir, &self.loaded.project).map_err(|e| e.to_string())?;
         }
-        let fresh = Self::open(&self.dir, self.save).map_err(|e| format!("{e:#}"))?;
+        let fresh =
+            Self::open(&self.dir, self.save, self.allow_python).map_err(|e| format!("{e:#}"))?;
         let history = std::mem::take(&mut self.history);
         *self = fresh;
         self.history = history;
@@ -384,7 +401,7 @@ pub fn run(args: ServeArgs) -> Result<()> {
     if !args.mcp_stdio && args.http.is_none() && args.osc.is_none() {
         bail!("nothing to serve: give --mcp-stdio, --http <addr> and/or --osc <port>");
     }
-    let mut ws = ServeWorkspace::open(&args.project, !args.no_save)?;
+    let mut ws = ServeWorkspace::open(&args.project, !args.no_save, args.allow_python_ops)?;
     let mut scopes: BTreeSet<Scope> = Scope::defaults();
     if args.auto_accept {
         scopes.insert(Scope::Accept);
@@ -459,7 +476,7 @@ pub fn run(args: ServeArgs) -> Result<()> {
 /// For tests: a session over a project folder.
 #[cfg(test)]
 pub(crate) fn session(dir: &Path, scopes: BTreeSet<Scope>) -> Result<(Agent, ServeWorkspace)> {
-    let ws = ServeWorkspace::open(dir, true)?;
+    let ws = ServeWorkspace::open(dir, true, false)?;
     let lock = ShowLock::load(dir).map_err(|e| anyhow!(e))?;
     Ok((Agent::new(scopes, lock), ws))
 }

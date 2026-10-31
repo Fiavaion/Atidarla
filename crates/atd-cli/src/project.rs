@@ -19,8 +19,9 @@ pub struct CheckOptions {
     pub gpu: bool,
     /// Frames to cook with `gpu`.
     pub frames: u32,
-    /// Run the projects' Python operators (`ops/*.py`) when cooking.
-    /// Without it they are reported as not run (`docs/python-ops.md`).
+    /// Run the projects' Python (`ops/*.py` operators, Script DATs and
+    /// Python expressions) when cooking. Without it they are reported as not
+    /// run (`docs/python-ops.md`).
     pub allow_python_ops: bool,
 }
 
@@ -418,6 +419,7 @@ fn cook(
     let mut errors = Vec::new();
     let mut unavailable = Vec::new();
     let mut not_run = Vec::new();
+    let mut not_evaluated = Vec::new();
     for n in engine.network().nodes() {
         let Some(e) = engine.error(n.id) else {
             continue;
@@ -426,6 +428,11 @@ fn cook(
         // project (`docs/python-ops.md`).
         if e.starts_with(atd_py::ops::NOT_ALLOWED) {
             not_run.push(n.name.as_str());
+            continue;
+        }
+        // Python expressions likewise: the parameter used its stored value.
+        if e.contains(atd_core::expr::PYTHON_NOT_ALLOWED) {
+            not_evaluated.push(flat.display(n.id));
             continue;
         }
         let fallback = engine.registry().get(&n.type_id).is_some_and(|s| {
@@ -451,6 +458,12 @@ fn cook(
         summary += &format!(
             ", Python operators not run (pass --allow-python-ops to run the project's ops/ code): {}",
             not_run.join(", ")
+        );
+    }
+    if !not_evaluated.is_empty() {
+        summary += &format!(
+            ", Python expressions not evaluated (pass --allow-python-ops to run them): {}",
+            not_evaluated.join(", ")
         );
     }
     if !errors.is_empty() {
