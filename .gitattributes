@@ -11,3 +11,15 @@
 *.png binary
 *.jpg binary
 *.rgba binary
+# Example media some tests compare byte for byte with their generators.
+*.obj text eol=lf
+*.json text eol=lf
+*.csv text eol=lf
+*.xyz text eol=lf
+*.atk text eol=lf
+*.exr binary
+*.ply binary
+*.spz binary
+*.sog binary
+*.webp binary
+*.atdpc binary
