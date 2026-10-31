@@ -105,7 +105,9 @@ the app is not done yet.
 files (`;` between folders on Windows, `:` elsewhere). Each shader that translates appears as an
 `img.isf_*` operator.
 
-**AI features.** AI nodes run in a separate program, the AI Host. Set it up once:
+**AI features.** AI nodes run in a separate program, the AI Host. The installers ship it and the
+app starts it when needed; add the heavier adapters with `atidarla ai-host install <extra>`
+([chapter 8](08-ai.md)). From a source checkout, set it up once:
 
 ```sh
 cd ai-host

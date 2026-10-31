@@ -32,6 +32,7 @@ A **project** is a folder ending in `.atidarla`. A `git:<rev>` can stand in for 
 | [`diff`, `merge`, `merge-file`](#diff-merge-and-merge-file) | Compare and combine projects |
 | [`fmt`](#fmt) | Rewrite projects in canonical form |
 | [`models`](#models) | The AI model manager |
+| [`ai-host`](#ai-host) | The bundled AI Host: status, start check, optional adapters |
 | [`comfy`](#comfy) | Import a ComfyUI workflow |
 | [`cloud`](#cloud) | Start and stop a Runpod AI Host |
 | [`kernel`](#kernel) | Check a Kernel DSL file |
@@ -236,6 +237,23 @@ atidarla models path [ID]
 
 See chapter 8. `accept` shows the licence and asks you to type `accept`. `--yes` skips the
 question for scripts.
+
+## ai-host
+
+```sh
+atidarla ai-host status
+atidarla ai-host check [--timeout <SECONDS>]
+atidarla ai-host install <EXTRA>... [--allow-internet | --wheelhouse <FOLDER>]
+atidarla ai-host remove
+```
+
+`status` shows which local host runs (`ATD_AI_HOST_CMD`, the one bundled with the app, or a
+development checkout), the extras offered and those installed. `check` starts the local host and
+lists its adapters and built-in models. `install` adds optional adapters' packages (`vision`,
+`stt`, `diffusion`, `cloud`) to the bundled host, in your user folder, from the hash-pinned
+versions shipped with the app; Sovereign mode refuses the download without `--allow-internet`.
+`remove` deletes every installed extra. See chapter 8 and
+[`docs/install.md`](../install.md#optional-ai-adapters).
 
 ## comfy
 

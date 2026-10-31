@@ -15,6 +15,7 @@ pub mod client;
 pub mod cloud;
 pub mod comfy;
 pub mod egress;
+pub mod hostenv;
 pub mod hosts;
 pub mod link;
 pub mod llm;

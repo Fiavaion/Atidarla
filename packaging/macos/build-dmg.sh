@@ -6,7 +6,9 @@
 # The app carries its own CPython (PRD A68): the pinned python-build-standalone
 # runtime (packaging/python-runtime.env) in Contents/Resources/python. The
 # release binaries are built against that runtime and find its libpython
-# through an rpath; atd-py starts it with that folder as its home.
+# through an rpath; atd-py starts it with that folder as its home. The AI
+# Host's source sits beside it in Contents/Resources/ai-host
+# (packaging/stage-ai-host.sh), so the supervisor starts it with no setup.
 #
 #   packaging/macos/build-dmg.sh            # release build, then dist/*.dmg
 #
@@ -89,6 +91,10 @@ for bin in atidarla-app atidarla; do
     otool -L "$APP/Contents/MacOS/$bin" | grep -q '@rpath/libpython3' ||
         { echo "error: $bin does not link @rpath/libpython3" >&2; exit 1; }
 done
+# The AI Host (source, lock, extras' pinned requirements; precompiled), so
+# the app starts its local host with no setup. Extras the user installs go
+# to ~/Library/Application Support/Atidarla/ai-host, never into the bundle.
+packaging/stage-ai-host.sh "$APP/Contents/Resources/ai-host" "$PY/bin/python3"
 cp -R examples "$APP/Contents/Resources/examples"
 find "$APP/Contents/Resources/examples" -name .cache -type d -prune -exec rm -rf {} +
 
@@ -103,10 +109,11 @@ done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/Atidarla.icns"
 rm -rf "$ICONSET"
 
-# The runtime's Mach-O files (libpython, extension modules, Tcl/Tk, the
-# python3.N program), signed before the bundle that seals them.
+# The runtime's Mach-O files (libpython, extension modules, the python3.N
+# program) and any in the AI Host folder (none today: it is source only),
+# signed before the bundle that seals them.
 MACHO="$STAGE/macho.txt"
-find "$PY" -type f \( -name '*.dylib' -o -name '*.so' -o -perm -u+x \) -print | while IFS= read -r f; do
+find "$PY" "$APP/Contents/Resources/ai-host" -type f \( -name '*.dylib' -o -name '*.so' -o -perm -u+x \) -print | while IFS= read -r f; do
     if file -b "$f" | grep -q Mach-O; then printf '%s\n' "$f"; fi
 done > "$MACHO"
 

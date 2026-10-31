@@ -16,10 +16,22 @@ uv sync --extra diffusion --extra vision  # + SD-Turbo (torch, diffusers) and ON
 uv run pytest                             # tests needing extras or weights skip without them
 ```
 
-uv picks a Python 3.11+ it finds (or downloads one). On a machine with an installed Atidarla,
-`uv sync --python <bundled python>` builds the environment on the app's own CPython instead
-(`Atidarla.app/Contents/Resources/python/bin/python3`, `<install folder>\python\python.exe`;
-`docs/install.md`). ML packages and weights are never part of that runtime.
+uv picks a Python 3.11+ it finds (or downloads one).
+
+**In an installed Atidarla** this package is bundled (`Contents/Resources/ai-host`, `<install
+folder>\ai-host`, `usr/lib/atidarla/ai-host`) and the app starts it on its own CPython with no
+setup and no `ATD_AI_HOST_CMD`. Extras are added on request with
+`atidarla ai-host install <extra> [--allow-internet | --wheelhouse <folder>]`, into the user's
+folder, from `requirements/<extra>.txt`: `uv export` of `uv.lock` for each extra, hash-pinned and
+installed with `pip --require-hashes --no-deps --only-binary :all:` (`docs/install.md`). After
+changing `uv.lock`, regenerate them (`tests/test_requirements.py` fails until you do):
+
+```sh
+uv export --frozen --extra vision --no-dev --no-emit-project --no-header --format requirements-txt -q -o requirements/vision.txt
+```
+
+(and the same for `stt`, `diffusion`, `cloud`). No ML packages and no weights are bundled.
+The supervisor's lookup order is `ATD_AI_HOST_CMD`, then the bundled host, then this checkout.
 
 | Extra | Adapter | Runs |
 |---|---|---|

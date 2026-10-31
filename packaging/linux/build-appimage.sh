@@ -2,7 +2,7 @@
 # Builds an AppImage of Atidarla (FR-H5, Linux best-effort). Bundles the app,
 # the CLI, the examples and CPython (the pinned python-build-standalone
 # runtime, packaging/python-runtime.env, in usr/lib/atidarla/python; PRD
-# A68); system libraries (Vulkan driver, ALSA, X11 or Wayland) come from the
+# A68) and the AI Host in usr/lib/atidarla/ai-host; system libraries (Vulkan driver, ALSA, X11 or Wayland) come from the
 # host. Never installs anything.
 #
 #   packaging/linux/build-appimage.sh
@@ -43,6 +43,10 @@ cp "$PY_HOME"/lib/python3.*/LICENSE.txt "$APPDIR/usr/share/atidarla/Python-Licen
 # The AppImage is read-only: precompile so imports do not recompile each run.
 "$APPDIR/usr/lib/atidarla/python/bin/python3" -I -B -m compileall -f -q -j 0 \
     --invalidation-mode unchecked-hash "$APPDIR"/usr/lib/atidarla/python/lib/python3.* > /dev/null
+# The AI Host (source, lock, extras' pinned requirements), started by the
+# supervisor with no setup; extras the user installs go to
+# $XDG_DATA_HOME/atidarla/ai-host.
+packaging/stage-ai-host.sh "$APPDIR/usr/lib/atidarla/ai-host" "$APPDIR/usr/lib/atidarla/python/bin/python3"
 cp packaging/icons/atidarla.svg "$APPDIR/atidarla.svg"
 # appimagetool wants a raster .DirIcon; render one when rsvg-convert is there.
 if command -v rsvg-convert >/dev/null; then
@@ -68,7 +72,7 @@ cat > "$APPDIR/AppRun" <<'EOF'
 # anything else opens the app.
 HERE=$(dirname "$(readlink -f "$0")")
 case "${1:-}" in
-    render|run|serve|soak|bench|bake|check|fmt|docs|registry|models|batch|agent|cloud|comfy|kernel|diff|merge|merge-file|isf-import|export-show|verify-show)
+    render|run|serve|soak|bench|bake|check|fmt|docs|registry|models|ai-host|batch|agent|cloud|comfy|kernel|diff|merge|merge-file|isf-import|export-show|verify-show)
         exec "$HERE/usr/bin/atidarla" "$@" ;;
 esac
 exec "$HERE/usr/bin/atidarla-app" "$@"

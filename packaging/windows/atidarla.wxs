@@ -11,6 +11,10 @@
                         PRD A68), installed as INSTALLFOLDER\python
     -d PythonDll=...    its DLL (python313.dll), also installed beside the
                         executables, which load it at start-up
+    -d AiHostDir=...    the AI Host (source, lock, extras' pinned
+                        requirements; precompiled), installed as
+                        INSTALLFOLDER\ai-host. Optional extras go to the
+                        user's %LOCALAPPDATA%\Atidarla\ai-host on request
 
   The Microsoft Visual C++ runtime is not in this MSI: the setup bundle
   (bundle.wxs, Atidarla-<version>-windows-x64-setup.exe) installs it first.
@@ -45,6 +49,7 @@
       <Directory Id="INSTALLFOLDER" Name="Atidarla">
         <Directory Id="EXAMPLESFOLDER" Name="examples" />
         <Directory Id="PYTHONFOLDER" Name="python" />
+        <Directory Id="AIHOSTFOLDER" Name="ai-host" />
       </Directory>
     </StandardDirectory>
     <StandardDirectory Id="ProgramMenuFolder" />
@@ -98,10 +103,15 @@
       <Files Include="$(PythonDir)\**" />
     </ComponentGroup>
 
+    <ComponentGroup Id="AiHost" Directory="AIHOSTFOLDER">
+      <Files Include="$(AiHostDir)\**" />
+    </ComponentGroup>
+
     <Feature Id="Main" Title="Atidarla" Level="1">
       <ComponentGroupRef Id="Program" />
       <ComponentGroupRef Id="Examples" />
       <ComponentGroupRef Id="Python" />
+      <ComponentGroupRef Id="AiHost" />
     </Feature>
   </Package>
 </Wix>

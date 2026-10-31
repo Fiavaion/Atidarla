@@ -107,7 +107,15 @@ command line add `--allow-python-ops`.
 
 **An AI node reports no host or a missing model.** Open **View, AI Hosts** to see whether a host
 is ready and **View, Models** to see whether the model is downloaded. Install the host's extras
-([chapter 8](08-ai.md)): `diffusion` and `vision` for pictures, `stt` for speech.
+([chapter 8](08-ai.md)): `diffusion` and `vision` for pictures, `stt` for speech
+(`atidarla ai-host install <extra> --allow-internet` in an installed app).
+`atidarla ai-host check` starts the local host and prints the error if it cannot start;
+`atidarla ai-host status` shows which host command runs. An `ATD_AI_HOST_CMD` left set in your
+environment replaces the bundled host: unset it.
+
+**`ai-host install` fails.** Sovereign mode refuses the download without `--allow-internet`. Behind
+a proxy or without internet, use `--wheelhouse <folder>` ([`docs/install.md`](../install.md#optional-ai-adapters)).
+A failed install leaves the extras you had. `atidarla ai-host remove` starts over.
 
 **A model will not download.** Sovereign mode blocks the internet. Use **Download once
 anyway** in the Models window, or `atidarla models download <id> --allow-internet`. You must
