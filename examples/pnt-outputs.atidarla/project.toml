@@ -1,0 +1,20 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "PNT Outputs"
+description = '''
+Points out of the GEO world (PRD §6 PNT outputs, A65). A coarse 12-sided ring (MSH Circle,
+a polyline) is rebuilt by Resample as 60 evenly spaced points, rippled by Wave and coloured
+by height (Colour by Attribute), then drawn.
+
+The same points leave the GPU two ways. To Channels reads the first eight positions back as
+channels (P0_x … P7_z): view it to watch them move, or bind them to any parameter. Pixel Out
+lights the 60-pixel RGB strip in patch.toml with the points' colours, point i on pixel i,
+and outputs its DMX slots as channels; DMX Out sends universe 1 to 127.0.0.1 over Art-Net.
+
+Both read back asynchronously: live they trail the points by a frame or two; an offline
+render reads each frame's own points.
+
+Try: Resample mode spacing; To Channels layout samples; Pixel Out Send artnet to send the
+universe itself; edit patch.toml while the project runs (it reloads on save).
+'''
+resolution = [640, 360]

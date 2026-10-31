@@ -12,6 +12,8 @@ publish.workspace = true
 [dependencies]
 atd-core.workspace = true
 atd-gpu.workspace = true
+# Pixel Out: fixture types, the patch layout and the DMX senders.
+atd-io.workspace = true
 atd-kernel.workspace = true
 atd-ops-img.workspace = true
 flate2.workspace = true

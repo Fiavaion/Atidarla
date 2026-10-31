@@ -25,7 +25,7 @@ pub mod stage;
 mod stateful;
 mod text;
 mod time_machine;
-mod watch;
+pub mod watch;
 mod wgsl;
 
 use atd_core::registry::Registry;
@@ -34,6 +34,7 @@ use atd_gpu::fullscreen::{FullscreenPass, MAX_PARAM_VEC4};
 
 pub use ops::DEFS;
 pub use ops2::DEFS2;
+pub use pixel_map::Senders as DmxSenders;
 pub use share::{SENDERS_KEY as SHARE_SENDERS_KEY, senders as share_senders};
 pub use stateful::STATEFUL;
 

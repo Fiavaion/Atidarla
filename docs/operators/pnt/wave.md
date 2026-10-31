@@ -37,3 +37,4 @@ All platforms.
 
 - [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `ripple`
 - [PNT For-Each](../../../examples/pnt-foreach.atidarla/) — `ripple`
+- [PNT Outputs](../../../examples/pnt-outputs.atidarla/) — `ripple`

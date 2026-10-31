@@ -1,26 +1,37 @@
 # DMX, fixtures and LED pixel mapping (FR-S7)
 
 Atidarla sends DMX512 over Ethernet, as Art-Net (ArtDmx, UDP 6454) or sACN (ANSI E1.31,
-UDP 5568). Two operators do it:
+UDP 5568). Three operators do it:
 
 | Operator | Use |
 |---|---|
 | [DMX Out](operators/sig/dmx_out.md) (`sig.dmx_out`) | Any channels (0–1) to the slots of one universe, from a start slot. |
 | [Pixel Map](operators/img/pixel_map.md) (`img.pixel_map`) | An image to fixtures and LED pixels: samples image regions through a **patch** file and outputs the DMX slot values; sends every patched universe itself, or feeds DMX Out. |
+| [Pixel Out](operators/pnt/pixel_out.md) (`pnt.pixel_out`) | Points to fixtures and LED pixels: point *i*'s colour (`Cd`) drives the patch's *i*-th pixel; the same slot channels and sending as Pixel Map. |
 
-Example: [`examples/pixel-map.atidarla`](../examples/pixel-map.atidarla/).
+Examples: [`examples/pixel-map.atidarla`](../examples/pixel-map.atidarla/),
+[`examples/pnt-outputs.atidarla`](../examples/pnt-outputs.atidarla/).
 
 Sending runs on its own thread per universe: the cook only hands over the latest values
 (CLAUDE.md rule 1). A universe is sent when it changes, at most 44 times a second, and
 repeated every second as a keep-alive.
 
-## Why `img.pixel_map`
+## Why `img.pixel_map` and `pnt.pixel_out`
 
 PRD §6 lists "Pixel Out (points → DMX/LED/laser)" among the outputs. FR-S7 asks for "LED
 pixel mapping from IMG regions", so the operator built in M3 reads an image: it is an IMG
-operator with a SIG output, like Analyze, named for what it does. A points-driven variant
-(sample positions from a PNT stream, lasers) can come later as `pnt.pixel_out` and reuse the
-same fixture types and DMX layout (`atd_io::fixture`).
+operator with a SIG output, like Analyze, named for what it does. Pixel Out is the
+points-driven variant: a GPU→SIG operator with a GEO input (PRD A65) that reads the points'
+colours back and reuses the same fixture types, patch layout and senders
+(`atd_io::fixture`, `atd_io::dmx`). It sends directly and also outputs the slot channels, so
+it can feed DMX Out exactly as Pixel Map does; one design for both keeps one DMX path.
+
+**Patches for Pixel Out.** Points fill the pixels in patch order: fixtures in file order, each
+fixture's pixels in its own order, point 0 first. The parser still asks every fixture for a
+region (`point`, `line` or `rect`) so one patch file serves both operators; Pixel Out ignores
+it. Pixels past the last point are black, and so is every pixel while no points arrive. The
+colour attribute is `Cd` by default (any 1-, 3- or 4-component attribute: one component is
+grey; alpha is ignored). Laser output is not part of this operator.
 
 ## Fixture types
 
@@ -125,10 +136,18 @@ Patch files are read on a watcher thread. After warm-up the DMX path allocates n
 slot values, channel names and the senders' buffers are reused. Recording the compute pass
 creates a bind group each measured frame, as Analyze does (counted by the allocation test).
 
+Pixel Out copies the colour attribute of the first *n* points (*n* = the patch's pixel count)
+into the same kind of three-buffer ring, so live it also trails the points by one frame or
+two. Offline it submits the frame recorded so far and waits for its own copy: its channels
+are those of the frame's own points (not one late), and it sends nothing. It creates no bind
+groups; `cargo test -p atd-ops-pnt --test alloc_readout` bounds its allocations.
+
 ## Testing without a fixture
 
 `cargo test -p atd-ops-img --test pixel_map` renders a known gradient, maps it through a
 patch with a strip and a project fixture, and checks the slot values against a CPU
 reference, as channels and as Art-Net and sACN packets received by a loopback UDP socket
-that parses them as a fixture would. Any Art-Net or sACN monitor on the LAN (or on the same
+that parses them as a fixture would. `cargo test -p atd-ops-pnt --test readout` does the
+same for Pixel Out: random coloured points against their `Cd` read back on the CPU, as
+channels and as Art-Net packets on loopback. Any Art-Net or sACN monitor on the LAN (or on the same
 machine with Host `127.0.0.1`) shows the live output of the example.

@@ -523,6 +523,7 @@ dependencies = [
  "atd-format",
  "atd-gpu",
  "atd-interop",
+ "atd-io",
  "atd-kernel",
  "atd-ops-img",
  "atd-ops-msh",

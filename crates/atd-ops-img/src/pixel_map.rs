@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
 use atd_core::registry::{OpFamily, OperatorSchema, ParamSchema, SocketSchema, WireType};
-use atd_gpu::engine::{ImgToSigCtx, ImgToSigOp};
+use atd_gpu::engine::{ImgToSigCtx, ImgToSigOp, Params};
 use atd_io::dmx::{DmxSender, Protocol};
 use atd_io::fixture::Mapping;
 
@@ -126,11 +126,21 @@ struct Pipeline {
     layout: wgpu::BindGroupLayout,
 }
 
-/// The senders and the settings they were opened with.
+/// DMX senders, one per universe, and the settings they were opened with
+/// (shared with PNT Pixel Out).
 #[derive(Default)]
-struct Senders {
+pub struct Senders {
     config: Option<(String, String, i64, Vec<u16>)>,
     senders: Vec<DmxSender>,
+}
+
+impl std::fmt::Debug for Senders {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Senders")
+            .field("config", &self.config)
+            .field("senders", &self.senders.len())
+            .finish()
+    }
 }
 
 enum Build {
@@ -297,10 +307,15 @@ fn upload(device: &wgpu::Device, queue: &wgpu::Queue, mapping: Mapping) -> Patch
 }
 
 impl Senders {
-    /// Opens one sender per universe when the settings change; closes them
-    /// for `off` and offline (sinks do not emit in an offline render).
-    fn update(&mut self, ctx: &ImgToSigCtx<'_>, universes: &[(u16, usize)]) -> Result<(), String> {
-        let p = ctx.params;
+    /// Opens one sender per universe when the `protocol`, `host` and `port`
+    /// parameters change; closes them for `off` and offline (sinks do not
+    /// emit in an offline render). `op` names the operator in errors.
+    pub fn update(
+        &mut self,
+        p: &Params<'_>,
+        op: &str,
+        universes: &[(u16, usize)],
+    ) -> Result<(), String> {
         let protocol = if p.mode().is_offline() {
             "off"
         } else {
@@ -335,10 +350,17 @@ impl Senders {
         for &(u, _) in universes {
             self.senders.push(
                 DmxSender::new(protocol, host, port, u)
-                    .map_err(|e| format!("Pixel Map, universe {u}: {e}"))?,
+                    .map_err(|e| format!("{op}, universe {u}: {e}"))?,
             );
         }
         Ok(())
+    }
+
+    /// Hands each universe's latest slots to its sender (when sending).
+    pub fn publish(&self, universes: &[Vec<u8>]) {
+        for (sender, data) in self.senders.iter().zip(universes) {
+            sender.publish(data);
+        }
     }
 }
 
@@ -430,7 +452,8 @@ impl ImgToSigOp for PixelMap {
             ctx.output.set_single(&[], &[]);
             return Ok(());
         };
-        self.senders.update(ctx, &patch.mapping.universes)?;
+        self.senders
+            .update(&ctx.params, "Pixel Map", &patch.mapping.universes)?;
 
         // Read finished measurements without waiting; offline, wait for
         // the previous frame's, so values are exactly one frame late.
@@ -461,9 +484,7 @@ impl ImgToSigOp for PixelMap {
         }
         if fresh {
             patch.mapping.fill(&patch.colours, &mut patch.universes);
-            for (sender, data) in self.senders.senders.iter().zip(&patch.universes) {
-                sender.publish(data);
-            }
+            self.senders.publish(&patch.universes);
         }
 
         // Sample when the image may have changed.

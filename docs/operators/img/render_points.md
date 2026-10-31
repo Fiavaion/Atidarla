@@ -50,5 +50,6 @@ All platforms.
 - [PNT For-Each](../../../examples/pnt-foreach.atidarla/) — `draw`
 - [PNT Fountain](../../../examples/pnt-fountain.atidarla/) — `draw`
 - [PNT Motion](../../../examples/pnt-motion.atidarla/) — `draw_blob`, `draw_cage`, `draw_flock`, `draw_wrap`
+- [PNT Outputs](../../../examples/pnt-outputs.atidarla/) — `draw`
 - [PNT Solver](../../../examples/pnt-solver.atidarla/) — `draw`
 - [Points](../../../examples/points.atidarla/) — `draw_cloud`, `draw_grid`
