@@ -48,25 +48,52 @@ pub(crate) struct Entry {
     /// The current error, formatted only when it changes.
     pub error: RefCell<Option<String>>,
     last_error: Cell<Option<EvalError>>,
+    /// What was wrong with the last Python result the worker gave, so the
+    /// error is formatted only when it changes.
+    py_fault: Cell<Option<PyFault>>,
+}
+
+/// A Python result the parameter cannot take.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PyFault {
+    /// A tuple of this many numbers, of the wrong length.
+    Tuple(usize),
+    NotFinite,
 }
 
 impl Entry {
     /// Refuses a tuple the parameter cannot take: any tuple for a number or
     /// toggle, one of another length than the components it drives for a
     /// vector or colour (a colour takes red, green and blue).
-    fn check(&self, v: ExprValue) -> Result<ExprValue, String> {
+    fn check(&self, v: ExprValue) -> Result<ExprValue, PyFault> {
         let ExprValue::Tuple { .. } = v else {
             return Ok(v);
         };
         let n = v.count();
         match self.width {
-            None => Err(format!("gives {n} numbers; `{}` takes one", self.param)),
             Some(w) if n == w => Ok(v),
-            Some(w) => Err(format!(
-                "gives {n} numbers; `{}` takes one, or {w}",
-                self.param
-            )),
+            _ => Err(PyFault::Tuple(n)),
         }
+    }
+
+    /// Clears the value and reports `fault` (formatted only when it
+    /// changes, never per frame).
+    fn fail_python(&self, fault: PyFault) {
+        self.value.set(None);
+        if self.py_fault.get() == Some(fault) && self.error.borrow().is_some() {
+            return;
+        }
+        self.py_fault.set(Some(fault));
+        let param = &self.param;
+        let msg = match (fault, self.width) {
+            (PyFault::NotFinite, _) => "not a finite number".to_owned(),
+            (PyFault::Tuple(n), None) => format!("gives {n} numbers; `{param}` takes one"),
+            (PyFault::Tuple(n), Some(w)) => {
+                format!("gives {n} numbers; `{param}` takes one, or {w}")
+            }
+        };
+        self.error
+            .replace(Some(format!("expression for `{param}`: {msg}")));
     }
 }
 
@@ -166,6 +193,7 @@ impl ExprTable {
                     value: Cell::new(value),
                     error: RefCell::new(error),
                     last_error: Cell::new(None),
+                    py_fault: Cell::new(None),
                 });
             }
             if !entries.is_empty() {
@@ -240,23 +268,24 @@ impl ExprTable {
                 };
                 let (_, result) = results.swap_remove(i);
                 results.retain(|(k, _)| k != key);
-                match result.and_then(|v| e.check(v)) {
-                    Ok(v) if v.is_finite() => {
-                        e.value.set(Some(v));
-                        e.error.replace(None);
-                    }
-                    Ok(_) => {
-                        e.value.set(None);
-                        e.error.replace(Some(format!(
-                            "expression for `{}`: not a finite number",
-                            e.param
-                        )));
-                    }
+                let v = match result {
+                    Ok(v) => v,
                     Err(msg) => {
                         e.value.set(None);
+                        e.py_fault.set(None);
                         e.error
                             .replace(Some(format!("expression for `{}`: {msg}", e.param)));
+                        continue;
                     }
+                };
+                match e.check(v) {
+                    Ok(v) if v.is_finite() => {
+                        e.value.set(Some(v));
+                        e.py_fault.set(None);
+                        e.error.replace(None);
+                    }
+                    Ok(_) => e.fail_python(PyFault::NotFinite),
+                    Err(fault) => e.fail_python(fault),
                 }
             }
         }

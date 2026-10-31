@@ -507,6 +507,24 @@ impl<'a> Params<'a> {
         self.value(name)?.as_array()?.get(i)?.as_f64()
     }
 
+    /// A number, integer or toggle parameter at full precision: a live
+    /// value, else its bound channel, else its expression, else its value
+    /// (a toggle as 0 or 1); `None` for other kinds.
+    pub fn number(&self, name: &str) -> Option<f64> {
+        let num = |v: &Value| {
+            v.as_f64()
+                .or_else(|| v.as_bool().map(|b| f64::from(u8::from(b))))
+        };
+        let stored = self.value(name).and_then(num)?;
+        if let Some(v) = self.live(name).and_then(num) {
+            return Some(v);
+        }
+        if let Some(v) = self.bound(name) {
+            return Some(f64::from(v));
+        }
+        Some(self.expr(name).unwrap_or(stored))
+    }
+
     /// A number parameter: its bound channel, else its expression, else
     /// its value.
     pub fn f32(&self, name: &str) -> f32 {
@@ -628,7 +646,9 @@ pub(crate) fn bound_component(
     }
     let ch = sig.get(&bind.node)?;
     if bind.channel.is_empty() && n > 1 && ch.len() >= n {
-        return Some(ch.last(i));
+        // An empty channel falls back to the stored value, as the
+        // one-channel path does.
+        return ch.channel(i).last().copied();
     }
     ch.value(&bind.channel)
 }
@@ -1585,6 +1605,36 @@ impl Engine {
             mode: self.mode,
         };
         params.component(param, i)
+    }
+
+    /// A number, integer or toggle parameter as `node` reads it now
+    /// ([`Params::number`]): with bindings and expressions from the last
+    /// cook, and live values unless `with_live` is false (a timeline
+    /// condition reading it).
+    pub fn param_number(&self, node: NodeId, param: &str, with_live: bool) -> Option<f64> {
+        let params = Params {
+            net: &self.net,
+            registry: &self.registry,
+            sig: &self.sig,
+            node,
+            project_dir: None,
+            exprs: Some(&self.exprs),
+            live: with_live.then_some(&self.live),
+            mode: self.mode,
+        };
+        params.number(param)
+    }
+
+    /// Component `i` of a vector or colour parameter as its binding or
+    /// expression drove it on the last cook, ignoring live values; `None`
+    /// when neither drives it (a mapping filling the components it does
+    /// not write).
+    pub fn driven_component(&self, node: NodeId, param: &str, i: usize) -> Option<f64> {
+        let p = self.net.node(node)?.params.get(param)?;
+        if p.bind.is_none() && p.expr.is_none() {
+            return None;
+        }
+        self.param_component(node, param, i, false)
     }
 
     /// Attaches the Python worker that evaluates expressions outside the
@@ -3113,6 +3163,24 @@ fn settle(errors: &mut HashMap<NodeId, String>, exprs: &ExprTable, id: NodeId) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_empty_channel_drives_no_component() {
+        let node = NodeId(7);
+        let whole = ChannelRef {
+            node,
+            channel: String::new(),
+        };
+        let mut ch = Channels::single(&["x", "y"], &[0.25, 0.5]);
+        let sig = HashMap::from([(node, ch.clone())]);
+        assert_eq!(bound_component(&sig, &whole, 1, 2), Some(0.5));
+        // A block of no samples: the components keep their stored value.
+        ch.set_block(&["x", "y"], 48_000.0, 0);
+        let sig = HashMap::from([(node, ch)]);
+        assert_eq!(bound_component(&sig, &whole, 0, 2), None);
+        assert_eq!(bound_component(&sig, &whole, 1, 2), None);
+        assert_eq!(bound_component(&sig, &whole, 0, 1), None, "one channel");
+    }
 
     #[test]
     fn a_writer_that_keeps_the_previous_values_leaves_them_alone() {
