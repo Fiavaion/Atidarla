@@ -103,7 +103,10 @@ atidarla serve show.atidarla --osc 9000                  # /atd/<node>/<param> <
 The project is cooked headless at 60 fps (outputs, sharing and DMX run as in the app). HTTP
 listens on loopback only. `--auto-accept` lets the agent accept its own changes; `--scope
 python.exec` grants Python; `--no-save` keeps changes in memory. A missing project folder is
-created empty.
+created empty. OSC (`--osc`, UDP from any host on the network, unauthenticated) is a session of its
+own with the `edit` scope only (plus `accept` with `--auto-accept`, which then applies each
+message at once; under Show Lock whitelisted moves apply at once anyway): it never has
+`python.exec`, whatever `--scope` grants the MCP session, so it cannot write Python.
 
 ### Claude Code
 

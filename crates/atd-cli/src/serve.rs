@@ -190,6 +190,9 @@ impl ServeWorkspace {
 }
 
 impl Workspace for ServeWorkspace {
+    fn pack(&self, name: &str) -> Option<&PackDef> {
+        self.loaded.project.packs.get(name)
+    }
     fn network(&self) -> &Network {
         static EMPTY: std::sync::OnceLock<Network> = std::sync::OnceLock::new();
         self.loaded
@@ -410,6 +413,33 @@ fn osc(port: u16, tx: Sender<Request>) -> Result<()> {
     Ok(())
 }
 
+/// The OSC session's scopes: edits (and accepting them with
+/// `--auto-accept`), never `python.exec`.
+fn osc_scopes(auto_accept: bool) -> BTreeSet<Scope> {
+    let mut s: BTreeSet<Scope> = [Scope::Edit].into_iter().collect();
+    if auto_accept {
+        s.insert(Scope::Accept);
+    }
+    s
+}
+
+/// Handles one OSC request on its own session; with `--auto-accept` the
+/// change it staged is accepted at once.
+fn osc_call(
+    agent: &mut Agent,
+    ws: &mut ServeWorkspace,
+    msg: &serde_json::Value,
+    auto_accept: bool,
+) -> Option<serde_json::Value> {
+    let answer = mcp::handle(agent, ws, msg);
+    if auto_accept {
+        let accept = json!({"jsonrpc": "2.0", "id": 0, "method": "tools/call", "params": {
+            "name": "accept_changes", "arguments": {"label": "OSC"}}});
+        let _ = mcp::handle(agent, ws, &accept);
+    }
+    answer
+}
+
 fn flatten(p: rosc::OscPacket, out: &mut Vec<rosc::OscMessage>) {
     match p {
         rosc::OscPacket::Message(m) => out.push(m),
@@ -431,7 +461,12 @@ pub fn run(args: ServeArgs) -> Result<()> {
     }
     ws.allow_agent_python(scopes.contains(&Scope::PythonExec));
     let lock = ShowLock::load(&args.project).map_err(|e| anyhow!(e))?;
-    let mut agent = Agent::new(scopes, lock);
+    let mut agent = Agent::new(scopes, lock.clone());
+    // OSC (UDP, any host on the LAN, no authentication) is its own session
+    // with only the scopes it needs: never `python.exec`, so it cannot write
+    // Python, whatever the MCP session was granted. It accepts its own
+    // changes only with --auto-accept (Show Lock moves apply at once).
+    let mut osc_agent = Agent::new(osc_scopes(args.auto_accept), lock);
 
     let (tx, rx): (Sender<Request>, Receiver<Request>) = channel();
     let stdio = args.mcp_stdio.then(mcp::read_stdio);
@@ -446,8 +481,9 @@ pub fn run(args: ServeArgs) -> Result<()> {
         );
         mcp::serve_http(listener, tx.clone());
     }
+    let (osc_tx, osc_rx): (Sender<Request>, Receiver<Request>) = channel();
     if let Some(port) = args.osc {
-        osc(port, tx.clone())?;
+        osc(port, osc_tx)?;
         eprintln!("atidarla serve: OSC on udp port {port} (/atd/<node>/<param>)");
     }
     let start = Instant::now();
@@ -471,6 +507,9 @@ pub fn run(args: ServeArgs) -> Result<()> {
                     }
                 }
             }
+        }
+        while let Ok((msg, reply)) = osc_rx.try_recv() {
+            let _ = reply.send(osc_call(&mut osc_agent, &mut ws, &msg, args.auto_accept));
         }
         ws.frame();
         // In-show cues (FR-G5) fire as the clock passes their beat.
@@ -590,5 +629,62 @@ mod tests {
         assert_eq!(net.len(), 2);
         assert!(net.node_by_name("blur1").is_some());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// OSC is its own session without `python.exec`: even when the MCP
+    /// session was granted it, an OSC message cannot write a Script's code
+    /// (and with --auto-accept a plain value still goes through).
+    #[test]
+    fn osc_cannot_write_python() {
+        let Ok(gpu) = atd_gpu::GpuContext::headless() else {
+            return;
+        };
+        drop(gpu);
+        let dir =
+            std::env::temp_dir().join(format!("atd-serve-osc-{}.atidarla", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let scopes = Scope::defaults()
+            .into_iter()
+            .chain([Scope::Accept, Scope::PythonExec])
+            .collect();
+        let (mut agent, mut ws) = session(&dir, scopes).unwrap();
+        for (t, n) in [("dat.script", "script1"), ("img.noise", "noise1")] {
+            agent.call(&mut ws, "create_node", &json!({"type": t, "name": n}));
+        }
+        agent.call(&mut ws, "accept_changes", &json!({"label": "setup"}));
+        let before = ws
+            .network()
+            .node_by_name("script1")
+            .unwrap()
+            .params
+            .get("code")
+            .cloned();
+        let mut osc = Agent::new(osc_scopes(true), ShowLock::default());
+        let set = |node: &str, param: &str, value: Value| {
+            json!({"jsonrpc": "2.0", "id": 0, "method": "tools/call", "params": {
+                "name": "set_param", "arguments": {"node": node, "param": param, "value": value}}})
+        };
+        let answer = osc_call(
+            &mut osc,
+            &mut ws,
+            &set("script1", "code", json!("def cook(i):\n    return 'pwned'")),
+            true,
+        );
+        assert!(text(&answer).contains("python.exec"), "{answer:?}");
+        assert_eq!(
+            ws.network()
+                .node_by_name("script1")
+                .unwrap()
+                .params
+                .get("code")
+                .cloned(),
+            before
+        );
+        osc_call(&mut osc, &mut ws, &set("noise1", "scale", json!(3.0)), true);
+        assert_eq!(
+            ws.network().node_by_name("noise1").unwrap().params["scale"].value,
+            json!(3.0)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
