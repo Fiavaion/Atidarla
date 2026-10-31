@@ -1001,10 +1001,8 @@ pub trait PythonHost: Send {
     /// Whether the expression `source` on `node`'s `param` may run. The
     /// engine asks when its expressions or [`Self::generation`] change, never
     /// per frame; one that may not is offered to no worker and reports
-    /// [`PYTHON_NOT_ALLOWED`].
-    fn allows(&self, _node: crate::graph::NodeId, _param: &str, _source: &str) -> bool {
-        true
-    }
+    /// [`PYTHON_NOT_ALLOWED`]. No default: every host decides.
+    fn allows(&self, node: crate::graph::NodeId, param: &str, source: &str) -> bool;
     /// Offers this frame's jobs. Never blocks: when the worker is busy they
     /// are skipped, and results arrive a frame later.
     fn submit(&mut self, jobs: &[PyJob]);

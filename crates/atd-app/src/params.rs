@@ -52,7 +52,7 @@ pub fn ui(
             ui.weak(
                 "This Python expression came with the project, a paste, a merge or an agent and \
                  has not been allowed; until you allow it (File > Allow Python…) the parameter \
-                 keeps its stored value. Native \
+                 keeps its stored value, also after you edit it. Native \
                  expressions (time, frame, math, op()) always run.",
             );
         }
@@ -228,10 +228,18 @@ pub fn ui(
                 if let Some(edit) = edit {
                     let key = format!("{node}:{}", p.name);
                     let label = format!("{name}.{}", p.name);
+                    // Python the user writes here is theirs and runs
+                    // (docs/python-ops.md), but only if what they edited was
+                    // theirs too: one keystroke in a foreign expression or
+                    // script does not allow the rest of it.
+                    let ours = typed_items(engine, node, &p.name)
+                        .iter()
+                        .all(atd_py::allow::allows);
                     match engine.edit_coalesced(&label, &key, [edit]) {
-                        // Python the user writes here is theirs: it runs
-                        // (docs/python-ops.md).
-                        Ok(()) => allow_typed(engine, node, &p.name),
+                        Ok(()) if ours => {
+                            atd_py::allow::allow(typed_items(engine, node, &p.name));
+                        }
+                        Ok(()) => {}
                         Err(e) => error = Some(e.to_string()),
                     }
                 }
@@ -246,20 +254,21 @@ pub fn ui(
     error
 }
 
-/// Adds the network Python of `node`'s `param`, as the user just set it in
-/// this panel, to the allow-list: a direct action in the app, unlike Python
-/// from a file, a paste, a merge or an agent.
-fn allow_typed(engine: &Engine, node: NodeId, param: &str) {
+/// The network Python of `node`'s `param` as it is now. What the user sets
+/// in this panel is added to the allow-list (a direct action in the app,
+/// unlike Python from a file, a paste, a merge or an agent) when what they
+/// changed was already allowed or was not Python.
+fn typed_items(engine: &Engine, node: NodeId, param: &str) -> Vec<atd_py::allow::Item> {
     let Some(n) = engine.network().node(node) else {
-        return;
+        return Vec::new();
     };
-    let items = atd_py::allow::node_items(n, engine.registry())
+    atd_py::allow::node_items(n, engine.registry())
         .into_iter()
         .filter(|i| match i {
             atd_py::allow::Item::Expr { param: p, .. } => p == param,
             atd_py::allow::Item::Script { .. } => param == "code",
-        });
-    atd_py::allow::allow(items);
+        })
+        .collect()
 }
 
 /// The starting text of a new expression: the current value (a vector's
