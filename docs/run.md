@@ -12,6 +12,7 @@ atidarla run examples/audio-reactive-feedback.atidarla --kiosk
 |---|---|
 | `<project>` | Project folder (`*.atidarla`). |
 | `--kiosk` | Show mode: the app opens full screen with no window frame, shows only the viewer (no menu, no editor panels) and hides the cursor. Output windows of the project (`cmp.window`, `docs/outputs.md`) open as usual. |
+| `--allow-python-ops` | Run the project's Python (operators in `ops/`, Script nodes, Python expressions) without the Allow dialog, which an unattended show cannot answer; passed to the app on every launch. Only for projects you trust (`docs/python-ops.md`). |
 | `--max-restarts N` | Restarts in a row before giving up (default 10; 0 never restarts). A run that lasts a minute counts as healthy and resets the count. |
 | `--restart-delay S` | Seconds before the first restart (default 1). Each restart in a row doubles it, up to 60 s. |
 | `--heartbeat-timeout S` | Seconds without a heartbeat before the app is killed and restarted (default 15; 0 turns the watch off). |
