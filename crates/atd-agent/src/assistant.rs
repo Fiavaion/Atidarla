@@ -380,12 +380,7 @@ pub fn relevant_ops(ws: &dyn Workspace, request: &str) -> String {
         let mut params: Vec<String> = op
             .params
             .iter()
-            .filter_map(|p| {
-                let Some(stem) = series(&p.name) else {
-                    return Some(p);
-                };
-                seen.insert(stem).then_some(p)
-            })
+            .filter(|p| series(&p.name).is_none_or(|stem| seen.insert(stem)))
             .map(|p| {
                 let kind = match &p.kind {
                     ParamKind::Float { min, max, .. } => {
