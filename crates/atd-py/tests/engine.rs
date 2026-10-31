@@ -188,6 +188,75 @@ fn offline_python_results_are_exactly_one_frame_late() {
     assert_eq!(e.error(level), None);
 }
 
+/// PRD A66: a Python tuple drives a colour component by component (red,
+/// green, blue; the stored alpha stays); a tuple of another length, or one
+/// for a number, is an error and the stored value is used.
+#[test]
+fn python_tuples_drive_vectors_one_component_each() {
+    let Some(mut e) = engine() else { return };
+    e.set_python(Box::new(PyExprHost::start().unwrap()));
+    e.set_mode(atd_gpu::engine::CookMode::Offline { fps: 60.0 });
+    let (colour, level) = (e.alloc_id(), e.alloc_id());
+    let expr = |node: NodeId, param: &str, value: serde_json::Value, source: &str| Edit::SetParam {
+        node,
+        param: param.into(),
+        value: Some(Param {
+            value,
+            expr: Some(source.into()),
+            bind: None,
+        }),
+    };
+    e.edit(
+        "build",
+        [
+            Edit::AddNode {
+                node: Node::new(colour, "img.constant", "colour1"),
+            },
+            Edit::AddNode {
+                node: Node::new(level, "img.level", "level1"),
+            },
+            Edit::Connect {
+                wire: Wire::new(Endpoint::new(colour, "out"), Endpoint::new(level, "in")),
+            },
+            expr(
+                colour,
+                "colour",
+                json!([0.0, 0.0, 0.0, 1.0]),
+                "tuple([1, 0.5, 0][i] for i in range(3))",
+            ),
+        ],
+    )
+    .unwrap();
+    let pixel = |e: &mut Engine, node: NodeId, f: f64| {
+        e.cook(&[node], f / 60.0).unwrap();
+        let px = read_rgba8(e.device(), e.queue(), e.result(node).unwrap()).unwrap();
+        [px[0], px[1], px[2], px[3]]
+    };
+    assert_eq!(pixel(&mut e, colour, 0.0), [0, 0, 0, 255], "stored first");
+    let [r, g, b, a] = pixel(&mut e, colour, 1.0);
+    assert_eq!((r, b, a), (255, 0, 255));
+    assert!(matches!(g, 127 | 128), "{g}");
+    assert_eq!(e.error(colour), None);
+    e.edit(
+        "bad",
+        [
+            expr(colour, "colour", json!([0.0, 0.0, 0.0, 1.0]), "(1, 0.5)"),
+            expr(level, "brightness", json!(0.25), "(1, 2)"),
+        ],
+    )
+    .unwrap();
+    pixel(&mut e, level, 2.0);
+    assert_eq!(pixel(&mut e, level, 3.0), [0, 0, 0, 255], "stored values");
+    assert_eq!(
+        e.error(colour),
+        Some("expression for `colour`: gives 2 numbers; `colour` takes one, or 3")
+    );
+    assert_eq!(
+        e.error(level),
+        Some("expression for `brightness`: gives 2 numbers; `brightness` takes one")
+    );
+}
+
 /// Offline, a Python expression that does not finish is a node error after
 /// the timeout, not a hung render.
 #[test]

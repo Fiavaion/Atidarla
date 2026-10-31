@@ -29,6 +29,15 @@ To make a parameter follow a channel:
 
 In chapter 2 you bound the noise's **Z** to `lfo1:lfo`. Remove a binding from the same menu.
 
+Vectors and colours can be bound too, for example a [Transform](../operators/img/transform.md)'s
+**Scale**. One channel drives every component: bind **Scale** to `lfo1:lfo` and the image grows
+and shrinks evenly. A colour's channel drives red, green and blue; its alpha keeps the value you
+set. To drive the components one each, bind to the whole node (the entry marked
+*per component* in the **bind...** menu): when the node has at least as many channels as the
+parameter has components, its first channel drives the first component, the second the second,
+and so on (a colour takes three: red, green, blue). With fewer channels its first channel drives
+them all.
+
 To shape the signal on its way
 (scale it, smooth it, limit it, add a delay), put SIG nodes between the source and the
 parameter: [Math](../operators/sig/math.md), [Lag](../operators/sig/lag.md),
@@ -36,8 +45,8 @@ parameter: [Math](../operators/sig/math.md), [Lag](../operators/sig/lag.md),
 
 ## Expressions: follow a formula
 
-Any number or toggle parameter can follow an expression. Click **=** next to the parameter and
-type. The panel shows the current result. Errors appear at the top of the panel, and while an
+Any number, toggle, vector or colour parameter can follow an expression. Click **=** next to
+the parameter and type. The panel shows the current result. Errors appear at the top of the panel, and while an
 expression fails the parameter uses its stored value.
 
 Examples:
@@ -50,6 +59,12 @@ op('level1').par.contrast * 0.5       # half of another node's Contrast
 
 (The first is from the example
 [`kaleidoscope-tunnel`](../../examples/kaleidoscope-tunnel.atidarla/).)
+
+On a vector or colour the result drives every component, as a binding does: `1 + 0.25 * sin(time)`
+on a Transform's **Scale** pulses the image evenly, `0.5` on a colour makes it mid-grey with its
+alpha unchanged. A Python expression may instead give one number per component, as a tuple or
+list: `(1 + 0.25 * sin(time), 1)` stretches only across. The tuple must have as many numbers as
+the parameter drives (three for a colour); otherwise it is an error and the stored value is used.
 
 ### The two tiers
 

@@ -17,7 +17,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use atd_core::expr::{PyJob, PythonHost};
+use atd_core::expr::{ExprValue, PyJob, PythonHost};
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 
@@ -87,7 +87,10 @@ def evaluate(source, time, frame, me, refs):
 
     ns = dict(_base)
     ns.update(time=time, frame=int(frame), me=_Me(me), op=op)
-    return float(eval(code, ns))
+    result = eval(code, ns)
+    if isinstance(result, (tuple, list)):
+        return tuple(float(v) for v in result)
+    return float(result)
 "#;
 
 #[derive(Default)]
@@ -102,7 +105,7 @@ struct Inbox {
 struct Shared {
     inbox: Mutex<Inbox>,
     wake: Condvar,
-    results: Mutex<Vec<(u64, Result<f64, String>)>>,
+    results: Mutex<Vec<(u64, Result<ExprValue, String>)>>,
     stop: AtomicBool,
     /// The last batch whose results are in `results` (offline waits on it).
     finished: Mutex<u64>,
@@ -228,7 +231,7 @@ impl PythonHost for PyExprHost {
         results.extend(jobs.iter().map(|j| (j.key, Err(message.clone()))));
     }
 
-    fn collect(&mut self, out: &mut Vec<(u64, Result<f64, String>)>) {
+    fn collect(&mut self, out: &mut Vec<(u64, Result<ExprValue, String>)>) {
         out.clear();
         if let Ok(mut results) = self.shared.results.try_lock() {
             std::mem::swap(out, &mut *results);
@@ -238,7 +241,7 @@ impl PythonHost for PyExprHost {
 
 fn run(shared: &Shared) {
     let mut jobs: Vec<PyJob> = Vec::new();
-    let mut done: Vec<(u64, Result<f64, String>)> = Vec::new();
+    let mut done: Vec<(u64, Result<ExprValue, String>)> = Vec::new();
     let helper: Option<Py<PyModule>> = Python::attach(|py| {
         PyModule::from_code(py, HELPER, c"atd_expr.py", c"atd_expr")
             .map(Bound::unbind)
@@ -282,7 +285,7 @@ fn run(shared: &Shared) {
 /// channels).
 type RefTuple<'a> = (&'a str, bool, Vec<(&'a str, Vec<f64>)>, Vec<(&'a str, f64)>);
 
-fn evaluate(helper: &Bound<'_, PyModule>, job: &PyJob) -> Result<f64, String> {
+fn evaluate(helper: &Bound<'_, PyModule>, job: &PyJob) -> Result<ExprValue, String> {
     let refs: Vec<RefTuple<'_>> = job
         .refs
         .iter()
@@ -295,10 +298,20 @@ fn evaluate(helper: &Bound<'_, PyModule>, job: &PyJob) -> Result<f64, String> {
             )
         })
         .collect();
-    helper
+    let result = helper
         .getattr("evaluate")
         .and_then(|f| f.call1((&*job.source, job.time, job.frame, &*job.me, refs)))
-        .and_then(|v| v.extract::<f64>())
         // e.g. "ZeroDivisionError: division by zero"
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    // The helper gives a float, or a tuple of floats for a vector.
+    if let Ok(v) = result.extract::<f64>() {
+        return Ok(ExprValue::Number(v));
+    }
+    let values = result.extract::<Vec<f64>>().map_err(|e| e.to_string())?;
+    ExprValue::tuple(&values).ok_or_else(|| {
+        format!(
+            "gives {} numbers; a vector or colour takes one to four",
+            values.len()
+        )
+    })
 }

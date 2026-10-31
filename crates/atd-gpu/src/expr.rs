@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use atd_core::cook::Extra;
-use atd_core::expr::{self, EvalError, Expr, PyJob, PyRef};
+use atd_core::expr::{self, EvalError, Expr, ExprValue, PyJob, PyRef};
 use atd_core::graph::{Network, NodeId};
 use atd_core::registry::{ParamKind, Registry};
 use serde_json::Value;
@@ -40,11 +40,34 @@ pub(crate) struct Entry {
     pub param: String,
     pub source: Arc<str>,
     pub tier: Tier,
+    /// For a vector or colour, the components it drives
+    /// ([`ParamKind::components`]); `None` for a number or toggle.
+    pub width: Option<usize>,
     /// This frame's value (native) or the latest from Python.
-    pub value: Cell<Option<f64>>,
+    pub value: Cell<Option<ExprValue>>,
     /// The current error, formatted only when it changes.
     pub error: RefCell<Option<String>>,
     last_error: Cell<Option<EvalError>>,
+}
+
+impl Entry {
+    /// Refuses a tuple the parameter cannot take: any tuple for a number or
+    /// toggle, one of another length than the components it drives for a
+    /// vector or colour (a colour takes red, green and blue).
+    fn check(&self, v: ExprValue) -> Result<ExprValue, String> {
+        let ExprValue::Tuple { .. } = v else {
+            return Ok(v);
+        };
+        let n = v.count();
+        match self.width {
+            None => Err(format!("gives {n} numbers; `{}` takes one", self.param)),
+            Some(w) if n == w => Ok(v),
+            Some(w) => Err(format!(
+                "gives {n} numbers; `{}` takes one, or {w}",
+                self.param
+            )),
+        }
+    }
 }
 
 /// Every expression in the network.
@@ -60,6 +83,7 @@ impl ExprTable {
     /// extra dependencies, and the nodes whose expressions changed.
     pub(crate) fn build(
         net: &Network,
+        registry: &Registry,
         old: &mut ExprTable,
     ) -> (ExprTable, HashMap<NodeId, Extra>, Vec<NodeId>) {
         let mut table = ExprTable {
@@ -130,10 +154,15 @@ impl ExprTable {
                 let (value, error) = previous
                     .map(|e| (e.value.get(), e.error.into_inner()))
                     .unwrap_or_default();
+                let width = registry
+                    .get(&node.type_id)
+                    .and_then(|s| s.params.iter().find(|p| p.name == *param))
+                    .and_then(|p| p.kind.components());
                 entries.push(Entry {
                     param: param.clone(),
                     source: Arc::from(source),
                     tier,
+                    width,
                     value: Cell::new(value),
                     error: RefCell::new(error),
                     last_error: Cell::new(None),
@@ -171,7 +200,7 @@ impl ExprTable {
     }
 
     /// The value an expression gave a parameter this frame.
-    pub(crate) fn value(&self, node: NodeId, param: &str) -> Option<f64> {
+    pub(crate) fn value(&self, node: NodeId, param: &str) -> Option<ExprValue> {
         self.entry(node, param)?.value.get()
     }
 
@@ -196,7 +225,7 @@ impl ExprTable {
     }
 
     /// Applies results from the Python worker.
-    pub(crate) fn apply_python(&self, results: &mut Vec<(u64, Result<f64, String>)>) {
+    pub(crate) fn apply_python(&self, results: &mut Vec<(u64, Result<ExprValue, String>)>) {
         if results.is_empty() {
             return;
         }
@@ -211,7 +240,7 @@ impl ExprTable {
                 };
                 let (_, result) = results.swap_remove(i);
                 results.retain(|(k, _)| k != key);
-                match result {
+                match result.and_then(|v| e.check(v)) {
                     Ok(v) if v.is_finite() => {
                         e.value.set(Some(v));
                         e.error.replace(None);
@@ -296,7 +325,7 @@ impl Ctx<'_> {
             });
             match result {
                 Ok(v) => {
-                    e.value.set(Some(v));
+                    e.value.set(Some(ExprValue::Number(v)));
                     if e.last_error.take().is_some() {
                         e.error.replace(None);
                     }
@@ -355,14 +384,27 @@ impl Ctx<'_> {
     ) -> Result<f64, NumError> {
         let n = self.net.node(node).ok_or(NumError::Missing)?;
         let live = self.live.get(node, param);
-        if index.is_none() && live.is_none() {
-            if let Some(bind) = n.params.get(param).and_then(|p| p.bind.as_ref())
-                && let Some(v) = self
-                    .sig
-                    .get(&bind.node)
-                    .and_then(|c| c.value(&bind.channel))
-            {
-                return Ok(f64::from(v));
+        // A component of a vector or colour is driven unless a live vector
+        // overrides it; it must be one the binding or expression drives.
+        let width = crate::engine::components(self.net, self.registry, node, param);
+        let driven = match index {
+            None => live.is_none() && width.is_none(),
+            Some(i) => !live.is_some_and(Value::is_array) && width.is_some_and(|w| i < w),
+        };
+        if driven {
+            if let Some(bind) = n.params.get(param).and_then(|p| p.bind.as_ref()) {
+                let v = match index {
+                    None => self
+                        .sig
+                        .get(&bind.node)
+                        .and_then(|c| c.value(&bind.channel)),
+                    Some(i) => {
+                        crate::engine::bound_component(self.sig, bind, i, width.unwrap_or(1))
+                    }
+                };
+                if let Some(v) = v {
+                    return Ok(f64::from(v));
+                }
             }
             if let Some(e) = self.table.entry(node, param) {
                 match &e.tier {
@@ -377,7 +419,11 @@ impl Ctx<'_> {
                         }
                     }
                     Tier::Python { .. } => {
-                        if let Some(v) = e.value.get() {
+                        let v = e.value.get().and_then(|v| match index {
+                            None => v.number(),
+                            Some(i) => v.component(i),
+                        });
+                        if let Some(v) = v {
                             return Ok(v);
                         }
                     }
@@ -435,8 +481,13 @@ impl Ctx<'_> {
                             .get(node.id, name)
                             .or_else(|| self.net.param_value(self.registry, node.id, name));
                         match value {
+                            // Each component as driven (binding, expression).
                             Some(Value::Array(a)) => {
-                                values.extend(a.iter().map(|v| v.as_f64().unwrap_or(0.0)));
+                                values.extend(a.iter().enumerate().map(|(i, v)| {
+                                    self.number(node.id, name, Some(i), 0)
+                                        .ok()
+                                        .unwrap_or_else(|| v.as_f64().unwrap_or(0.0))
+                                }));
                             }
                             Some(_) => {
                                 if let Ok(v) = self.number(node.id, name, None, 0) {

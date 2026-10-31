@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use atd_core::expr::{self, EvalError, Expr, PyJob, PyRef, PythonHost};
+use atd_core::expr::{self, EvalError, Expr, ExprValue, PyJob, PyRef, PythonHost};
 use atd_py::expr::PyExprHost;
 
 fn snapshot() -> Vec<PyRef> {
@@ -107,10 +107,10 @@ const CORPUS: &[&str] = &[
     "1 or 1 / 0",
 ];
 
-fn python_results(jobs: &[PyJob]) -> Vec<Result<f64, String>> {
+fn python_results(jobs: &[PyJob]) -> Vec<Result<ExprValue, String>> {
     let mut host = PyExprHost::start().unwrap();
     host.submit(jobs);
-    let mut got: Vec<Option<Result<f64, String>>> = vec![None; jobs.len()];
+    let mut got: Vec<Option<Result<ExprValue, String>>> = vec![None; jobs.len()];
     let mut buf = Vec::new();
     let start = Instant::now();
     while got.iter().any(Option::is_none) {
@@ -155,7 +155,7 @@ fn native_and_python_tiers_agree() {
         };
         let native = e.eval(&env);
         match (&native, &py) {
-            (Ok(a), Ok(b)) => assert!(
+            (Ok(a), Ok(ExprValue::Number(b))) => assert!(
                 (a - b).abs() <= 1e-9 * a.abs().max(1.0),
                 "{source}: native {a}, Python {b}"
             ),
@@ -175,6 +175,9 @@ fn python_handles_the_rest() {
         "me.name.count('l')",
         "1 / 0",
         "nope + 1",
+        // Tuples and lists drive vectors component by component (A66).
+        "(1 + time, 0.5)",
+        "[1, 2, 3, 4, 5]",
     ];
     let jobs: Vec<PyJob> = sources
         .iter()
@@ -182,11 +185,11 @@ fn python_handles_the_rest() {
         .map(|(i, s)| job(i as u64, s))
         .collect();
     let got = python_results(&jobs);
-    assert_eq!(got[0], Ok(2.0));
-    assert_eq!(got[1], Ok(10.0));
-    assert_eq!(got[2], Ok(2.0));
-    assert_eq!(got[3], Ok(2.0));
-    assert_eq!(got[4], Ok(2.0));
+    assert_eq!(got[0], Ok(ExprValue::Number(2.0)));
+    assert_eq!(got[1], Ok(ExprValue::Number(10.0)));
+    assert_eq!(got[2], Ok(ExprValue::Number(2.0)));
+    assert_eq!(got[3], Ok(ExprValue::Number(2.0)));
+    assert_eq!(got[4], Ok(ExprValue::Number(2.0)));
     assert!(
         got[5].as_ref().unwrap_err().contains("ZeroDivisionError"),
         "{:?}",
@@ -196,6 +199,12 @@ fn python_handles_the_rest() {
         got[6].as_ref().unwrap_err().contains("NameError"),
         "{:?}",
         got[6]
+    );
+    assert_eq!(got[7], Ok(ExprValue::tuple(&[13.375, 0.5]).unwrap()));
+    assert!(
+        got[8].as_ref().unwrap_err().contains("gives 5 numbers"),
+        "{:?}",
+        got[8]
     );
     for i in [0, 1, 3, 4] {
         assert!(

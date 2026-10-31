@@ -4,12 +4,16 @@
 //! (dragging a value, typing) are coalesced into one undo step, which is
 //! sealed as soon as no parameter widget is being dragged or focused.
 //!
-//! Number and toggle parameters can follow an expression (`=` button,
-//! PRD A22): the native subset runs every frame on the cook path, anything
-//! else in Python a frame late. Errors show at the top of the panel, with
-//! the operator's status line if it has one (e.g. Share Out's published
-//! name).
+//! Number, toggle, vector and colour parameters can follow an expression
+//! (`=` button, PRD A22) or a channel: the native subset runs every frame
+//! on the cook path, anything else in Python a frame late. One number
+//! drives every component of a vector (a colour's red, green and blue); a
+//! Python tuple, or a binding to a whole SIG node with enough channels,
+//! drives them one each (PRD A66). Errors show at the top of the panel,
+//! with the operator's status line if it has one (e.g. Share Out's
+//! published name).
 
+use atd_core::expr::ExprValue;
 use atd_core::graph::{ChannelRef, Edit, NodeId, Param};
 use atd_core::registry::WireType;
 use atd_core::registry::{ParamKind, ParamSchema};
@@ -70,10 +74,7 @@ pub fn ui(
                     .network()
                     .node(node)
                     .is_some_and(|n| n.params.contains_key(&p.name));
-                let bindable = matches!(
-                    p.kind,
-                    ParamKind::Float { .. } | ParamKind::Int { .. } | ParamKind::Toggle
-                );
+                let bindable = p.kind.can_follow();
                 let label = ui.label(&p.label).on_hover_text(&p.help);
                 control.param_label(&label, node, p);
                 // Channel export by drag (FR-P2): drop a channel (from the
@@ -119,7 +120,6 @@ pub fn ui(
                         None
                     }
                     Some(b) => {
-                        let live = engine.channels(b.node).and_then(|c| c.value(&b.channel));
                         let src = engine
                             .network()
                             .node(b.node)
@@ -129,11 +129,29 @@ pub fn ui(
                         } else {
                             b.channel.as_str()
                         };
-                        match live {
-                            Some(v) => ui.label(format!("{v:.3}")),
+                        let shown = match &current {
+                            // A vector or colour as its node reads it.
+                            Value::Array(a) if p.kind.components().is_some() => Some(driven(
+                                (0..a.len())
+                                    .map(|i| engine.param_component(node, &p.name, i, true)),
+                            )),
+                            _ => engine
+                                .channels(b.node)
+                                .and_then(|c| c.value(&b.channel))
+                                .map(|v| format!("{v:.3}")),
+                        };
+                        let hover = match p.kind.components() {
+                            Some(_) if b.channel.is_empty() => format!(
+                                "Follows {src}: one channel per component when it has \
+                                 enough, else its first channel for every component"
+                            ),
+                            _ => format!("Follows {src}:{chan}"),
+                        };
+                        match shown {
+                            Some(v) => ui.label(v),
                             None => ui.weak("—"),
                         }
-                        .on_hover_text(format!("Follows {src}:{chan}"));
+                        .on_hover_text(hover);
                         None
                     }
                     None => {
@@ -215,13 +233,23 @@ pub fn ui(
     error
 }
 
-/// The starting text of a new expression: the current value.
+/// The starting text of a new expression: the current value (a vector's
+/// first component, which the expression then gives every component).
 fn expr_seed(current: &Value) -> String {
     match current {
         Value::Bool(b) => if *b { "True" } else { "False" }.to_owned(),
         Value::Number(n) => n.to_string(),
+        Value::Array(a) => a.first().map_or_else(|| "0".to_owned(), expr_seed),
         _ => "0".to_owned(),
     }
+}
+
+/// A driven vector's components for display: `(1.000, 0.500)`.
+fn driven(components: impl Iterator<Item = Option<f64>>) -> String {
+    let parts: Vec<String> = components
+        .map(|c| c.map_or_else(|| "—".to_owned(), |v| format!("{v:.3}")))
+        .collect();
+    format!("({})", parts.join(", "))
 }
 
 /// An expression field. Returns the new text when committed (Enter or
@@ -232,7 +260,7 @@ fn expr_widget(
     node: NodeId,
     p: &ParamSchema,
     stored: &str,
-    live: Option<f64>,
+    live: Option<ExprValue>,
 ) -> (Option<String>, bool, bool) {
     let id = egui::Id::unique(("atd-expr-draft", node.0, &p.name));
     let mut s = ui
@@ -247,10 +275,15 @@ fn expr_widget(
                     .desired_width(150.0),
             );
             match live {
-                Some(v) => ui.weak(format!("{v:.3}")),
+                Some(v) => ui.weak(v.to_string()),
                 None => ui.weak("—"),
             }
-            .on_hover_text("The expression's current value");
+            .on_hover_text(if p.kind.components().is_some() {
+                "The expression's current value: one number drives every component \
+                 (a colour's red, green and blue); a Python tuple drives one each"
+            } else {
+                "The expression's current value"
+            });
             toggled = ui
                 .add(egui::Button::new("=").small().selected(true))
                 .on_hover_text("Stop following the expression")
@@ -277,17 +310,17 @@ fn bind_widget(
     p: &ParamSchema,
     current: Option<&ChannelRef>,
 ) -> Option<Option<ChannelRef>> {
-    if !matches!(
-        p.kind,
-        ParamKind::Float { .. } | ParamKind::Int { .. } | ParamKind::Toggle
-    ) {
+    if !p.kind.can_follow() {
         ui.label("");
         return None;
     }
+    let vector = p.kind.components().is_some();
     let net = engine.network();
     let label = |r: &ChannelRef| {
         let n = net.node(r.node).map_or("?", |n| n.name.as_str());
-        if r.channel.is_empty() {
+        if r.channel.is_empty() && vector {
+            format!("{n} (per component)")
+        } else if r.channel.is_empty() {
             n.to_owned()
         } else {
             format!("{n}:{}", r.channel)
@@ -302,15 +335,19 @@ fn bind_widget(
         if !is_sig || n.id == node {
             continue;
         }
-        match engine.channels(n.id).filter(|c| !c.is_empty()) {
-            Some(c) => options.extend(c.names().map(|ch| ChannelRef {
-                node: n.id,
-                channel: ch.to_owned(),
-            })),
-            None => options.push(ChannelRef {
+        let channels = engine.channels(n.id).filter(|c| !c.is_empty());
+        // A vector can follow the whole node: channel i drives component i.
+        if vector || channels.is_none() {
+            options.push(ChannelRef {
                 node: n.id,
                 channel: String::new(),
-            }),
+            });
+        }
+        if let Some(c) = channels {
+            options.extend(c.names().map(|ch| ChannelRef {
+                node: n.id,
+                channel: ch.to_owned(),
+            }));
         }
     }
     let mut chosen = current.cloned();

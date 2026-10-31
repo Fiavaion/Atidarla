@@ -1452,6 +1452,7 @@ mod tests {
         let blue = a
             .engine
             .expression_value(id(&a, "aberration1__blue_shift"), "amount")
+            .and_then(atd_core::expr::ExprValue::number)
             .expect("the expression inside the Pack evaluates");
         let red = a
             .engine

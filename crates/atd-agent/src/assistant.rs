@@ -209,7 +209,7 @@ Rules:\n\
 - Build with ONE build_network call holding every node, its parameters and every wire; use only the operator types, parameter names and input names listed (call get_schema for any other type first).\n\
 - Wires connect an output to an input of the same wire type (IMG to IMG, SIG to SIG, GEO to GEO). Most image nodes take their image on input `in`; check the schema.\n\
 - Changes are staged. When the network is built, call accept_changes, then read the errors it returns and fix them (set_param, connect, delete_node) and accept again, until there are no errors.\n\
-- Animate with expressions such as `0.5 + 0.5 * sin(time)` in set_param, or bind a parameter to a SIG node's channel.\n\
+- Animate with expressions such as `0.5 + 0.5 * sin(time)` in set_param, or bind a parameter to a SIG node's channel. Vectors and colours (a transform's scale, a colour) animate the same way: the one number drives every component.\n\
 - Do not explain; act with tools. Stop when the network is accepted with no errors.\n\nOperators (type — summary):\n",
     );
     // Image and channel operators first: a small model copies the prefix
@@ -1040,6 +1040,55 @@ mod tests {
         assert_eq!(
             view.node_by_name("blur1").unwrap().params["size"].value,
             json!(8)
+        );
+    }
+
+    /// A66: expressions and wired channels drive vectors and colours.
+    #[test]
+    fn build_network_animates_vectors_and_colours() {
+        let mut reg = atd_core::Registry::default();
+        atd_ops_img::register(&mut reg);
+        atd_ops_sig::register(&mut reg);
+        let mut ws = NetworkWorkspace::new(reg);
+        let mut agent = Agent::new(Scope::defaults().into_iter().collect(), ShowLock::default());
+        let net = json!({
+            "nodes": [
+                {"name": "noise1", "type": "img.noise"},
+                {"name": "lfo1", "type": "sig.lfo"},
+                {"name": "transform1", "type": "img.transform", "params": {"translate": "0.1 * sin(time)"}},
+                {"name": "constant1", "type": "img.constant", "params": {"colour": "0.5 + 0.5 * sin(time)"}}
+            ],
+            "wires": [
+                {"from": "noise1", "to": "transform1", "input": "in"},
+                {"from": "lfo1", "output": "out", "to": "transform1", "input": "scale"}
+            ]
+        });
+        let Output::Json(out) = agent.call(&mut ws, "build_network", &net) else {
+            panic!("build_network failed");
+        };
+        assert_eq!(out["errors"], json!([]), "{out}");
+        assert_eq!(out["wires"], 2, "{out}");
+        let view = agent.view(&ws).clone();
+        let t = &view.node_by_name("transform1").unwrap().params;
+        assert_eq!(t["translate"].expr.as_deref(), Some("0.1 * sin(time)"));
+        assert_eq!(t["translate"].value, json!([0.0, 0.0]), "the fallback");
+        assert_eq!(
+            t["scale"].bind.as_ref().map(|b| b.node),
+            view.node_by_name("lfo1").map(|n| n.id)
+        );
+        let c = &view.node_by_name("constant1").unwrap().params["colour"];
+        assert_eq!(c.expr.as_deref(), Some("0.5 + 0.5 * sin(time)"));
+        // A list is still a value.
+        let list = json!({"nodes": [{"name": "transform1", "type": "img.transform", "params": {"pivot": "[0.25, 0.75]"}}]});
+        let Output::Json(out) = agent.call(&mut ws, "build_network", &list) else {
+            panic!("build_network failed");
+        };
+        assert_eq!(out["errors"], json!([]), "{out}");
+        let view = agent.view(&ws).clone();
+        let p = &view.node_by_name("transform1").unwrap().params["pivot"];
+        assert_eq!(
+            (p.value.clone(), p.expr.clone()),
+            (json!([0.25, 0.75]), None)
         );
     }
 

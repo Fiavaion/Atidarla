@@ -1,7 +1,7 @@
 # Parameter expressions
 
-Any number or toggle parameter can follow an expression instead of a value: click **=**
-next to it in the Parameters panel and type. The panel shows the current result; errors
+Any number, toggle, vector or colour parameter can follow an expression instead of a value:
+click **=** next to it in the Parameters panel and type. The panel shows the current result; errors
 appear at the top of the panel, and while an expression fails the parameter uses its stored
 value. In a project file an expression is saved with the value it falls back to:
 
@@ -45,6 +45,36 @@ error; a loop through channels reads the previous frame's value.
 Errors follow Python: dividing by zero, `sqrt(-1)`, `log(0)` and a name that does not exist
 are errors, not silent zeros. Renaming a node breaks expressions that name it, as in
 TouchDesigner.
+
+## Vectors and colours (PRD A66)
+
+An expression on a vector or colour gives one number, and that number drives every component:
+`1 + 0.25 * sin(time)` on `img.transform`'s `scale` scales both axes. On a colour it drives red,
+green and blue; alpha keeps its stored value. A vector's first four components are driven, any
+further ones keep their stored values.
+
+A **Python** expression may give a tuple or list instead, one number per component:
+`(1 + 0.25 * sin(time), 1)` on `scale`, `(1, 0.5 * op('lfo1')['lfo'], 0)` on a colour. It must
+have exactly as many numbers as the parameter drives (a colour: three); any other length, or a
+tuple on a number parameter, is an error and the stored value is used. The native tier gives
+single numbers only.
+
+Channel bindings follow the same rule. A binding to one channel (`lfo1:lfo`) drives every
+component. A binding to a whole SIG node (no channel name) drives one component per channel
+when the node has at least as many channels as there are components (channel 0 → component 0,
+and so on); with fewer, its first channel drives them all.
+
+`op('name').par.param[i]` reads component *i* as driven, so other expressions, Python's
+`op('name').par.param` tuple and Timeline tracks that key only some components (the others take
+the driven value) all see what the node cooks with.
+
+In a project file nothing new is written: a driven vector is the same inline table as a number,
+with the vector it falls back to:
+
+```toml
+params.scale = { value = [1.0, 1.0], expr = "1 + 0.25 * sin(time)" }
+params.colour = { value = [0.0, 0.0, 0.0, 1.0], bind = { node = 3, channel = "" } }
+```
 
 ## Python
 

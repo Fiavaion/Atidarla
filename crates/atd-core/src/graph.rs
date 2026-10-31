@@ -18,7 +18,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::registry::{OperatorSchema, ParamKind, Registry, SocketSchema, WireType};
+use crate::registry::{OperatorSchema, Registry, SocketSchema, WireType};
 
 /// Stable node identifier, unique within a network and never reused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -604,13 +604,9 @@ impl Network {
         param: &crate::registry::ParamSchema,
         bind: &ChannelRef,
     ) -> Result<(), GraphError> {
-        use crate::registry::ParamKind;
-        if !matches!(
-            param.kind,
-            ParamKind::Float { .. } | ParamKind::Int { .. } | ParamKind::Toggle
-        ) {
+        if !param.kind.can_follow() {
             return Err(GraphError::InvalidBinding(format!(
-                "parameter `{}` is not numeric and cannot follow a channel",
+                "parameter `{}` is not a number, toggle, vector or colour and cannot follow a channel",
                 param.name
             )));
         }
@@ -834,12 +830,9 @@ impl Network {
                         self.validate_binding(registry, node, ps, bind)?;
                     }
                     if v.expr.is_some() {
-                        if !matches!(
-                            ps.kind,
-                            ParamKind::Float { .. } | ParamKind::Int { .. } | ParamKind::Toggle
-                        ) {
+                        if !ps.kind.can_follow() {
                             return Err(GraphError::InvalidValue(format!(
-                                "`{param}`: expressions drive number and toggle parameters"
+                                "`{param}`: expressions drive number, toggle, vector and colour parameters"
                             )));
                         }
                         if v.bind.is_some() {
@@ -1463,6 +1456,77 @@ pub(crate) mod tests {
 
         // A bound parameter is kept even when its fallback equals the default.
         assert!(net.node(g).unwrap().params.contains_key("gain"));
+    }
+
+    /// Vectors and colours follow channels and expressions (A66); menus,
+    /// text and paths still do not.
+    #[test]
+    fn vectors_and_colours_follow_channels_and_expressions() {
+        let mut reg = test_registry();
+        let mut shape = op(
+            "img.shape",
+            OpFamily::Img,
+            vec![],
+            vec![socket("out", WireType::Img, false)],
+        );
+        shape.params = vec![
+            ParamSchema::vec("scale", "Scale", &[1.0, 1.0]),
+            ParamSchema::colour("fill", "Fill", [1.0, 0.5, 0.0, 1.0]),
+            ParamSchema::menu("mode", "Mode", &["a", "b"], "a"),
+            ParamSchema::string("text", "Text", ""),
+            ParamSchema::path("file", "File"),
+        ];
+        reg.register(shape).unwrap();
+        let mut net = Network::default();
+        let lfo = add(&mut net, &reg, "sig.lfo");
+        let s = add(&mut net, &reg, "img.shape");
+        let set = |net: &mut Network, param: &str, value: Param| {
+            net.apply(
+                &reg,
+                Edit::SetParam {
+                    node: s,
+                    param: param.into(),
+                    value: Some(value),
+                },
+            )
+        };
+        let expr = |value: serde_json::Value, source: &str| Param {
+            value,
+            expr: Some(source.into()),
+            bind: None,
+        };
+        set(&mut net, "scale", Param::bound(json!([1.0, 1.0]), lfo, "")).unwrap();
+        set(&mut net, "fill", expr(json!([1.0, 0.5, 0.0, 1.0]), "0.5")).unwrap();
+        assert_eq!(
+            net.bindings_of(s).map(|b| b.node).collect::<Vec<_>>(),
+            [lfo]
+        );
+        set(&mut net, "scale", expr(json!([1.0, 1.0]), "1 + time")).unwrap();
+        set(
+            &mut net,
+            "fill",
+            Param::bound(json!([0.0, 0.0, 0.0, 1.0]), lfo, "lfo"),
+        )
+        .unwrap();
+        // The fallback must still be a valid vector.
+        let err = set(&mut net, "scale", expr(json!(1.0), "time")).unwrap_err();
+        assert!(matches!(err, GraphError::InvalidValue(_)), "{err:?}");
+        for (param, value) in [
+            ("mode", json!("a")),
+            ("text", json!("x")),
+            ("file", json!("")),
+        ] {
+            let err = set(&mut net, param, Param::bound(value.clone(), lfo, "")).unwrap_err();
+            assert!(
+                matches!(err, GraphError::InvalidBinding(_)),
+                "{param}: {err:?}"
+            );
+            let err = set(&mut net, param, expr(value, "1")).unwrap_err();
+            assert!(
+                matches!(&err, GraphError::InvalidValue(m) if m.contains("expressions drive")),
+                "{param}: {err:?}"
+            );
+        }
     }
 
     #[test]

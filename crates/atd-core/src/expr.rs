@@ -866,6 +866,82 @@ impl Parser {
     }
 }
 
+/// What an expression gives: one number (both tiers), or, from Python
+/// only, a tuple or list of up to four numbers that drives a vector or
+/// colour parameter component by component (PRD A66). Copy, so a result is
+/// kept and read without allocating.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ExprValue {
+    Number(f64),
+    Tuple { len: u8, values: [f64; 4] },
+}
+
+impl ExprValue {
+    /// A tuple result; `None` when it is empty or longer than four.
+    pub fn tuple(values: &[f64]) -> Option<Self> {
+        if values.is_empty() || values.len() > 4 {
+            return None;
+        }
+        let mut out = [0.0; 4];
+        out[..values.len()].copy_from_slice(values);
+        Some(Self::Tuple {
+            len: values.len() as u8,
+            values: out,
+        })
+    }
+
+    /// The single number, if this is one.
+    pub fn number(self) -> Option<f64> {
+        match self {
+            Self::Number(v) => Some(v),
+            Self::Tuple { .. } => None,
+        }
+    }
+
+    /// Component `i` for a vector or colour: a number drives every
+    /// component, a tuple its component `i` (if it has one).
+    pub fn component(self, i: usize) -> Option<f64> {
+        match self {
+            Self::Number(v) => Some(v),
+            Self::Tuple { len, values } => (i < usize::from(len)).then(|| values[i]),
+        }
+    }
+
+    /// How many numbers the result has (one for a number).
+    pub fn count(self) -> usize {
+        match self {
+            Self::Number(_) => 1,
+            Self::Tuple { len, .. } => usize::from(len),
+        }
+    }
+
+    pub fn is_finite(self) -> bool {
+        match self {
+            Self::Number(v) => v.is_finite(),
+            Self::Tuple { len, values } => values[..usize::from(len)].iter().all(|v| v.is_finite()),
+        }
+    }
+}
+
+impl fmt::Display for ExprValue {
+    /// `0.500`, or `(1.000, 0.250)` for a tuple.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Number(v) => write!(f, "{v:.3}"),
+            Self::Tuple { len, values } => {
+                f.write_str("(")?;
+                for (i, v) in values[..usize::from(*len)].iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{v:.3}")?;
+                }
+                f.write_str(")")
+            }
+        }
+    }
+}
+
 /// A Python expression for the Python worker, refreshed every frame.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PyJob {
@@ -905,7 +981,7 @@ pub trait PythonHost: Send {
     }
     /// Moves results that arrived since the last call into `out` (cleared
     /// first): `(key, value or error message)`.
-    fn collect(&mut self, out: &mut Vec<(u64, Result<f64, String>)>);
+    fn collect(&mut self, out: &mut Vec<(u64, Result<ExprValue, String>)>);
 }
 
 /// Node names written as `op('…')` or `op("…")` in Python source (a plain

@@ -342,7 +342,8 @@ impl Textport {
 
     /// Publishes the project as the console's `atidarla` API sees it:
     /// every node with its type and parameter values (the value an
-    /// expression produced last, for a parameter that follows one).
+    /// expression produced last, for a parameter that follows one; a
+    /// vector or colour as its node read it, with bindings and expressions).
     pub fn publish(&self, engine: &Engine) {
         let reg = engine.registry();
         let net = engine.network();
@@ -355,14 +356,28 @@ impl Textport {
                     .unwrap_or_default()
                     .iter()
                     .map(|p| {
-                        let value = engine.expression_value(n.id, &p.name).map_or_else(
-                            || {
-                                net.param_value(reg, n.id, &p.name)
-                                    .cloned()
-                                    .unwrap_or(Value::Null)
+                        let stored = || {
+                            net.param_value(reg, n.id, &p.name)
+                                .cloned()
+                                .unwrap_or(Value::Null)
+                        };
+                        let value = match p.kind.components() {
+                            // A vector or colour as driven (A66).
+                            Some(_) => match stored() {
+                                Value::Array(a) => (0..a.len())
+                                    .map(|i| {
+                                        engine
+                                            .param_component(n.id, &p.name, i, true)
+                                            .map_or(Value::Null, Value::from)
+                                    })
+                                    .collect(),
+                                other => other,
                             },
-                            Value::from,
-                        );
+                            None => engine
+                                .expression_value(n.id, &p.name)
+                                .and_then(atd_core::expr::ExprValue::number)
+                                .map_or_else(stored, Value::from),
+                        };
                         Value::Array(vec![Value::from(p.name.clone()), value])
                     })
                     .collect();

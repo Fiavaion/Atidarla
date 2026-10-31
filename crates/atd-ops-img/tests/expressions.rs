@@ -246,7 +246,8 @@ fn errors_show_on_the_node_and_keep_the_value() {
         "{:?}",
         e.error(level)
     );
-    // Only number and toggle parameters take expressions.
+    // Text parameters take no expressions (numbers, toggles, vectors and
+    // colours do).
     let text = add(&mut e, "img.text", "text1", &[]);
     let err = e.edit(
         "expr",
@@ -323,5 +324,199 @@ fn native_expressions_do_not_allocate() {
     assert!(
         with_exprs <= baseline,
         "expressions allocated: {with_exprs} vs {baseline} over 60 frames"
+    );
+}
+
+/// Pixels of `node` with any alpha after cooking at `time`.
+fn coverage(e: &mut Engine, node: NodeId, time: f64) -> usize {
+    e.cook(&[node], time).unwrap();
+    read_rgba8(e.device(), e.queue(), e.result(node).unwrap())
+        .unwrap()
+        .chunks_exact(4)
+        .filter(|p| p[3] > 0)
+        .count()
+}
+
+/// First pixel of `node` after cooking at `time`.
+fn pixel(e: &mut Engine, node: NodeId, time: f64) -> [u8; 4] {
+    e.cook(&[node], time).unwrap();
+    let px = read_rgba8(e.device(), e.queue(), e.result(node).unwrap()).unwrap();
+    [px[0], px[1], px[2], px[3]]
+}
+
+fn bind(e: &mut Engine, node: NodeId, param: &str, stored: Value, src: NodeId, channel: &str) {
+    e.edit(
+        "bind",
+        [Edit::SetParam {
+            node,
+            param: param.into(),
+            value: Some(Param::bound(stored, src, channel)),
+        }],
+    )
+    .unwrap();
+}
+
+/// White → Transform (transparent outside the input); returns the transform.
+fn white_transform(e: &mut Engine, name: &str) -> NodeId {
+    let white = add(
+        e,
+        "img.constant",
+        &format!("{name}_src"),
+        &[("colour", json!([1.0, 1.0, 1.0, 1.0]))],
+    );
+    let t = add(e, "img.transform", name, &[]);
+    wire(e, white, t);
+    t
+}
+
+/// PRD A66: an LFO bound to a vector drives every component, so the
+/// transformed image grows and shrinks frame to frame.
+#[test]
+fn a_channel_drives_every_component_of_a_vector() {
+    let Some(mut e) = engine() else { return };
+    // 0.75 + 0.25 sin(2π t): 0.75 at t = 0, 1 at 0.25, 0.5 at 0.75.
+    let lfo = add(
+        &mut e,
+        "sig.lfo",
+        "lfo1",
+        &[("offset", json!(0.75)), ("amplitude", json!(0.25))],
+    );
+    let t = white_transform(&mut e, "transform1");
+    bind(&mut e, t, "scale", json!([1.0, 1.0]), lfo, "lfo");
+    let (mid, full, half) = (
+        coverage(&mut e, t, 0.0),
+        coverage(&mut e, t, 0.25),
+        coverage(&mut e, t, 0.75),
+    );
+    assert_eq!(full, 32, "scale 1 covers the 8x4 image");
+    assert!(half < mid && mid < full, "{half} < {mid} < {full}");
+    assert_eq!(half, 8, "scale 0.5 covers a quarter");
+    // A native expression drives it the same way, without a binding.
+    expr_with(
+        &mut e,
+        t,
+        "scale",
+        "0.5 if frame % 2 else 1",
+        json!([1.0, 1.0]),
+    );
+    let a = coverage(&mut e, t, 1.0);
+    let b = coverage(&mut e, t, 1.1);
+    assert_eq!([a.min(b), a.max(b)], [8, 32], "alternates");
+    assert_eq!(e.error(t), None);
+}
+
+/// A colour takes one number on red, green and blue and keeps its stored
+/// alpha; a whole SIG node with three channels drives them one each, a
+/// named channel all three.
+#[test]
+fn expressions_and_channels_drive_a_colour() {
+    let Some(mut e) = engine() else { return };
+    let c = add(&mut e, "img.constant", "colour1", &[]);
+    expr_with(
+        &mut e,
+        c,
+        "colour",
+        "0.25 + 0.25",
+        json!([0.0, 0.0, 0.0, 1.0]),
+    );
+    let [r, g, b, a] = pixel(&mut e, c, 0.0);
+    for v in [r, g, b] {
+        assert_near(v, 128);
+    }
+    assert_eq!(a, 255, "the stored alpha");
+    assert_eq!(e.error(c), None);
+    let rgb = add(
+        &mut e,
+        "sig.constant",
+        "rgb",
+        &[
+            ("name1", json!("r")),
+            ("value1", json!(1.0)),
+            ("name2", json!("g")),
+            ("value2", json!(0.5)),
+            ("name3", json!("b")),
+            ("value3", json!(0.0)),
+        ],
+    );
+    bind(&mut e, c, "colour", json!([0.0, 0.0, 0.0, 1.0]), rgb, "");
+    let [r, g, b, a] = pixel(&mut e, c, 1.0);
+    assert_eq!((r, b, a), (255, 0, 255), "per component");
+    assert_near(g, 128);
+    bind(&mut e, c, "colour", json!([0.0, 0.0, 0.0, 1.0]), rgb, "g");
+    let [r, g, b, _] = pixel(&mut e, c, 2.0);
+    assert!(r == g && g == b, "one channel on every component");
+    assert_near(r, 128);
+    // Another expression reads the driven component.
+    let (_, level) = white_level(&mut e, "level1");
+    expr(
+        &mut e,
+        level,
+        "brightness",
+        "op('colour1').par.colour[1] * 2",
+    );
+    assert_eq!(red(&mut e, level, 3.0), 255);
+    expr(
+        &mut e,
+        level,
+        "brightness",
+        "op('colour1').par.colour[0] + 0.25",
+    );
+    assert_near(red(&mut e, level, 4.0), 191);
+}
+
+/// Rule 2: a vector driven by a channel or a native expression adds no
+/// allocations per frame over the same nodes driven on a number.
+#[test]
+fn driven_vectors_do_not_allocate() {
+    let Some(mut e) = engine() else { return };
+    let lfo = add(&mut e, "sig.lfo", "lfo1", &[]);
+    let first = white_transform(&mut e, "transform1");
+    let second = add(&mut e, "img.transform", "transform2", &[]);
+    wire(&mut e, first, second);
+    let measure = |e: &mut Engine| {
+        let mut t = 0.0;
+        for _ in 0..20 {
+            e.cook(&[second], t).unwrap();
+            t += 1.0 / 60.0;
+        }
+        COUNTING.with(|c| c.set(true));
+        let before = ALLOCS.with(Cell::get);
+        for _ in 0..60 {
+            e.cook(&[second], t).unwrap();
+            t += 1.0 / 60.0;
+        }
+        let n = ALLOCS.with(Cell::get) - before;
+        COUNTING.with(|c| c.set(false));
+        n
+    };
+    // Baseline: numbers driven.
+    bind(&mut e, first, "rotate", json!(0.0), lfo, "lfo");
+    expr_with(&mut e, second, "rotate", "10 * sin(time)", json!(0.0));
+    let baseline = measure(&mut e);
+    // The same nodes with vectors driven instead.
+    for node in [first, second] {
+        e.edit(
+            "reset",
+            [Edit::SetParam {
+                node,
+                param: "rotate".into(),
+                value: None,
+            }],
+        )
+        .unwrap();
+    }
+    bind(&mut e, first, "scale", json!([1.0, 1.0]), lfo, "lfo");
+    expr_with(
+        &mut e,
+        second,
+        "translate",
+        "0.1 * sin(time) + op('transform1').par.scale[0] * 0",
+        json!([0.0, 0.0]),
+    );
+    let vectors = measure(&mut e);
+    assert_eq!(e.error(second), None);
+    assert!(
+        vectors <= baseline,
+        "driven vectors allocated: {vectors} vs {baseline} over 60 frames"
     );
 }
