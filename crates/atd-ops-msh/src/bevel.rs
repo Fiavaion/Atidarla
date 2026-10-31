@@ -9,6 +9,12 @@
 //! neighbours, so no edge gets a T-junction). A strip joins the two
 //! polygons of each bevelled edge; the holes left at the corners are
 //! filled (one polygon, or a fan from a rounded centre).
+//!
+//! Points on an open border bevel too when their polygons form one open
+//! fan: a strip runs out to the border, which keeps its place and gains
+//! the slid points. The gap there is open; it is patched (closed along
+//! the border) unless it is just the end of one strip. Border edges have
+//! one polygon and no angle, so they are never bevelled.
 
 use std::collections::{HashMap, HashSet};
 
@@ -95,39 +101,53 @@ pub fn run(s: &Snap, inputs: &[Option<Mesh>], job: &Job) -> Result<Mesh, String>
             bad[k.w as usize] = true;
         }
     }
-    // Points whose polygons do not form one closed, consistently wound
-    // fan are left alone (as are border points).
+    // Points whose polygons do not form one consistently wound fan, closed
+    // inside the mesh or open at a border, are left alone.
     let mut around: Vec<Vec<usize>> = vec![Vec::new(); np];
     for (c, k) in corners.iter().enumerate() {
         around[k.v as usize].push(c);
     }
     for v in 0..np {
         job.every(v)?;
-        if border[v] {
-            bad[v] = true;
-        }
         if bad[v] || around[v].is_empty() {
             continue;
         }
-        let start = around[v][0];
+        // A border fan starts at the one corner whose outgoing edge v → w
+        // has no polygon on its other side.
+        let start = if border[v] {
+            let mut open = around[v]
+                .iter()
+                .copied()
+                .filter(|&c| !directed.contains_key(&(corners[c].w, corners[c].v)));
+            match (open.next(), open.next()) {
+                (Some(c), None) => c,
+                _ => {
+                    bad[v] = true;
+                    continue;
+                }
+            }
+        } else {
+            around[v][0]
+        };
         let mut c = start;
-        let mut steps = 0;
+        let mut visited = 1;
         loop {
             // Across the incoming edge u → v lies the polygon with v → u.
             let k = corners[c];
             match directed.get(&(k.v, k.u)) {
-                Some(&next) => c = next,
+                Some(&next) if next != start => c = next,
+                Some(_) => break,
                 None => {
-                    bad[v] = true;
+                    bad[v] |= !border[v];
                     break;
                 }
             }
-            steps += 1;
-            if c == start || steps > around[v].len() {
+            visited += 1;
+            if visited > around[v].len() {
                 break;
             }
         }
-        if steps != around[v].len() {
+        if visited != around[v].len() {
             bad[v] = true;
         }
     }
@@ -152,9 +172,12 @@ pub fn run(s: &Snap, inputs: &[Option<Mesh>], job: &Job) -> Result<Mesh, String>
     }
     let bevelled = |a: u32, b: u32| selected.contains(&key(a, b));
     let mut touched = vec![false; np];
+    let mut ends = vec![0u32; np];
     for &(a, b) in &selected {
         touched[a as usize] = true;
         touched[b as usize] = true;
+        ends[a as usize] += 1;
+        ends[b as usize] += 1;
     }
     if selected.is_empty() {
         let mut out = m.clone();
@@ -229,12 +252,26 @@ pub fn run(s: &Snap, inputs: &[Option<Mesh>], job: &Job) -> Result<Mesh, String>
         owner.push(v);
         slide.insert((v, w), out.add_point(v3::f32(p)));
     }
-    // Each corner's chain of points in its polygon.
+    // Each corner's chain of points in its polygon. Where one bevelled edge
+    // ends at an inside point of three polygons, the strip's end runs
+    // across the third polygon, which is cut along it (`cut`) instead of
+    // keeping the point and folding a patch back over itself.
     let mut chain: Vec<Vec<u32>> = Vec::with_capacity(corners.len());
-    for k in &corners {
+    let mut cut = vec![false; corners.len()];
+    for (c, k) in corners.iter().enumerate() {
         let v = k.v;
         if !touched[v as usize] {
             chain.push(vec![v]);
+            continue;
+        }
+        let vi = v as usize;
+        if ends[vi] == 1
+            && !border[vi]
+            && around[vi].len() == 3
+            && let (Some(&a), Some(&b)) = (slide.get(&(v, k.u)), slide.get(&(v, k.w)))
+        {
+            cut[c] = true;
+            chain.push(vec![a, b]);
             continue;
         }
         let (bp, bn) = (bevelled(k.u, v), bevelled(v, k.w));
@@ -258,24 +295,11 @@ pub fn run(s: &Snap, inputs: &[Option<Mesh>], job: &Job) -> Result<Mesh, String>
             }
         });
     }
-    let mut prims = Interp::new(&m.prim_attrs, m.prims() + selected_count * segments);
-    let mut is_bevel: Vec<bool> = Vec::new();
     let mut ids: Vec<u32> = Vec::new();
-    for f in 0..m.prims() {
-        job.every(f)?;
-        ids.clear();
-        if m.closed[f] {
-            for c in first_corner[f]..first_corner[f + 1] {
-                ids.extend_from_slice(&chain[c]);
-            }
-        } else {
-            ids.extend_from_slice(m.prim(f));
-        }
-        out.add_prim(&ids, m.closed[f]);
-        prims.copy(f as u32);
-        is_bevel.push(false);
-    }
-    // Strips, with arcs shared by strips that end on the same two points.
+    // Strips (added after the polygons), with arcs shared by strips that
+    // end on the same two points.
+    let mut strips: Vec<(Vec<u32>, u32)> = Vec::with_capacity(selected_count * segments);
+    let mut is_arc: HashSet<u32> = HashSet::new();
     let mut arcs: HashMap<(u32, u32), Vec<u32>> = HashMap::new();
     let mut centre_sum: Vec<(V, u32)> = vec![([0.0; 3], 0); np];
     let mut sel: Vec<(u32, u32)> = selected.iter().copied().collect();
@@ -324,7 +348,9 @@ pub fn run(s: &Snap, inputs: &[Option<Mesh>], job: &Job) -> Result<Mesh, String>
                             .map(|x| {
                                 pts.copy(v);
                                 owner.push(v);
-                                out.add_point(v3::f32(x))
+                                let id = out.add_point(v3::f32(x));
+                                is_arc.insert(id);
+                                id
                             })
                             .collect()
                     });
@@ -342,11 +368,40 @@ pub fn run(s: &Snap, inputs: &[Option<Mesh>], job: &Job) -> Result<Mesh, String>
             ids.extend_from_slice(&quad);
             ids.dedup();
             if ids.len() >= 3 {
-                out.add_polygon(&ids);
-                prims.copy(f);
-                is_bevel.push(true);
+                strips.push((ids.clone(), f));
             }
         }
+    }
+    let mut prims = Interp::new(&m.prim_attrs, m.prims() + strips.len());
+    let mut is_bevel: Vec<bool> = Vec::with_capacity(m.prims() + strips.len());
+    for f in 0..m.prims() {
+        job.every(f)?;
+        ids.clear();
+        if m.closed[f] {
+            for c in first_corner[f]..first_corner[f + 1] {
+                ids.push(chain[c][0]);
+                if cut[c] {
+                    // The strip's end between the two slid points.
+                    let (p, q) = (chain[c][0], chain[c][1]);
+                    if let Some(r) = arcs.get(&(p, q)) {
+                        ids.extend_from_slice(r);
+                    } else if let Some(r) = arcs.get(&(q, p)) {
+                        ids.extend(r.iter().rev());
+                    }
+                }
+                ids.extend_from_slice(&chain[c][1..]);
+            }
+        } else {
+            ids.extend_from_slice(m.prim(f));
+        }
+        out.add_prim(&ids, m.closed[f]);
+        prims.copy(f as u32);
+        is_bevel.push(false);
+    }
+    for (strip, f) in &strips {
+        out.add_polygon(strip);
+        prims.copy(*f);
+        is_bevel.push(true);
     }
     out.point_attrs = pts.finish();
     out.prim_attrs = prims.finish();
@@ -361,15 +416,46 @@ pub fn run(s: &Snap, inputs: &[Option<Mesh>], job: &Job) -> Result<Mesh, String>
         }
     }
     let fresh = |p: u32| p as usize >= np || touched[p as usize];
-    let holes: Vec<(u32, u32)> = dir
+    // Pieces of the input's open border stay open: both points lie on
+    // one border edge (as its ends, or slid along it).
+    let mut on_border: HashMap<u32, Vec<(u32, u32)>> = HashMap::new();
+    for (&(a, b), uses) in &edges.uses {
+        if uses.len() == 1 {
+            on_border.entry(a).or_default().push((a, b));
+            on_border.entry(b).or_default().push((a, b));
+        }
+    }
+    for (&(v, w), &p) in &slide {
+        if edges.of(v, w).len() == 1 {
+            on_border.entry(p).or_default().push(key(v, w));
+        }
+    }
+    let on = |p: u32| on_border.get(&p).map_or(&[][..], Vec::as_slice);
+    let border_piece = |a: u32, b: u32| on(a).iter().any(|e| on(b).contains(e));
+    let mut holes: Vec<(u32, u32)> = dir
         .iter()
-        .filter(|&&(a, b)| !dir.contains(&(b, a)) && (fresh(a) || fresh(b)))
+        .filter(|&&(a, b)| !dir.contains(&(b, a)) && (fresh(a) || fresh(b)) && !border_piece(a, b))
         .map(|&(a, b)| (b, a))
         .collect();
+    holes.sort_unstable();
+    // Around a border point the hole is open, from the border back to it:
+    // it is closed along the border, unless it is just the end of one
+    // strip (a strip reaching the border leaves its end open).
+    let (open, holes) = paths(holes);
+    let mut rings = loops(holes);
+    for path in open {
+        let (first, last) = (path[0], path[path.len() - 1]);
+        if on(first).is_empty() || on(last).is_empty() {
+            continue;
+        }
+        if path.len() >= 3 && !path[1..path.len() - 1].iter().all(|p| is_arc.contains(p)) {
+            rings.push(path);
+        }
+    }
     let mut patch_src: Vec<u32> = Vec::new();
     let mut extra_points: Vec<(V, u32)> = Vec::new();
     let mut patches: Vec<Vec<u32>> = Vec::new();
-    for ring in loops(holes) {
+    for ring in rings {
         let Some(v) = ring.iter().find(|&&p| fresh(p)).map(|&p| owner[p as usize]) else {
             continue;
         };
@@ -435,6 +521,43 @@ pub fn run(s: &Snap, inputs: &[Option<Mesh>], job: &Job) -> Result<Mesh, String>
         out.set_point_attr(Column::vec3(names::N, &nn));
     }
     Ok(out)
+}
+
+/// Splits sorted directed edges into the open paths that start at a point
+/// no edge ends on, and the edges left over (for closed loops).
+fn paths(edges: Vec<(u32, u32)>) -> (Vec<Vec<u32>>, Vec<(u32, u32)>) {
+    let ends: HashSet<u32> = edges.iter().map(|e| e.1).collect();
+    let mut used = vec![false; edges.len()];
+    let from = |a: u32, used: &[bool]| -> Option<usize> {
+        let i = edges.partition_point(|e| e.0 < a);
+        (i..edges.len())
+            .take_while(|&j| edges[j].0 == a)
+            .find(|&j| !used[j])
+    };
+    let mut out = Vec::new();
+    for s in 0..edges.len() {
+        if used[s] || ends.contains(&edges[s].0) {
+            continue;
+        }
+        let mut path = vec![edges[s].0];
+        let mut j = s;
+        loop {
+            used[j] = true;
+            path.push(edges[j].1);
+            match from(edges[j].1, &used) {
+                Some(n) if path.len() <= edges.len() => j = n,
+                _ => break,
+            }
+        }
+        out.push(path);
+    }
+    let rest = edges
+        .iter()
+        .zip(&used)
+        .filter(|&(_, &u)| !u)
+        .map(|(&e, _)| e)
+        .collect();
+    (out, rest)
 }
 
 /// The `segments - 1` inner points of an arc from `p` (on a plane with

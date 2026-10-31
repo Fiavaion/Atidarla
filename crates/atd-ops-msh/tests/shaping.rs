@@ -4,6 +4,8 @@
 
 mod common;
 
+use std::collections::{HashMap, HashSet};
+
 use atd_core::geo::AttrClass;
 use atd_ops_msh::Mesh;
 use common::*;
@@ -393,6 +395,249 @@ fn bevel_chamfers_and_rounds_a_box() {
         on("msh.bevel", &[("segments", json!(3))], &b),
         on("msh.bevel", &[("segments", json!(3))], &b)
     );
+}
+
+/// A unit box without its top (+Y) face; with `split`, its +X side is two
+/// triangles meeting along the diagonal from the top front corner.
+fn open_box(split: bool) -> Mesh {
+    let b = make("msh.box", &[]);
+    let mut m = Mesh::new();
+    for &p in &b.p {
+        m.add_point(p);
+    }
+    let at = |q: [f32; 3]| b.p.iter().position(|&p| p == q).unwrap() as u32;
+    let (top, bottom) = (at([0.5, 0.5, 0.5]), at([0.5, -0.5, -0.5]));
+    for f in 0..b.prims() {
+        let poly = b.prim(f);
+        let on = |k: usize, x: f32| poly.iter().all(|&i| b.p[i as usize][k] == x);
+        if on(1, 0.5) {
+            continue;
+        }
+        if split && on(0, 0.5) {
+            let i = poly.iter().position(|&c| c == top).unwrap();
+            let r: Vec<u32> = (0..4).map(|k| poly[(i + k) % 4]).collect();
+            assert_eq!(r[2], bottom);
+            m.add_polygon(&[r[0], r[1], r[2]]);
+            m.add_polygon(&[r[0], r[2], r[3]]);
+        } else {
+            m.add_polygon(poly);
+        }
+    }
+    m
+}
+
+/// Checks that every polygon is planar and not degenerate and that the
+/// winding is consistent (each edge used once per direction, by at most
+/// two polygons); returns the border loops (edges used once).
+fn surface(m: &Mesh) -> Vec<Vec<u32>> {
+    let mut dir: HashMap<(u32, u32), usize> = HashMap::new();
+    for f in 0..m.prims() {
+        assert!(m.closed[f]);
+        let p = m.prim(f);
+        let at = |i: usize| m.p[p[i % p.len()] as usize].map(f64::from);
+        let n = m.prim_normal(f);
+        let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+        assert!(len / 2.0 > 1e-6, "polygon {f} has no area: {p:?}");
+        let n = n.map(|x| x / len);
+        let o = at(0);
+        for i in 0..p.len() {
+            let (a, b) = (at(i), at(i + 1));
+            assert!(
+                (0..3).map(|k| (a[k] - b[k]).abs()).sum::<f64>() > 1e-6,
+                "polygon {f} repeats a point"
+            );
+            let h: f64 = (0..3).map(|k| (a[k] - o[k]) * n[k]).sum();
+            assert!(h.abs() < 1e-6, "polygon {f} is not planar: {h}");
+            let e = (p[i], p[(i + 1) % p.len()]);
+            assert!(
+                dir.insert(e, f).is_none(),
+                "edge {e:?} twice in one direction"
+            );
+        }
+    }
+    let mut next: HashMap<u32, u32> = HashMap::new();
+    for &(a, b) in dir.keys() {
+        if !dir.contains_key(&(b, a)) {
+            assert!(
+                next.insert(a, b).is_none(),
+                "a border touches itself at {a}"
+            );
+        }
+    }
+    let mut starts: Vec<u32> = next.keys().copied().collect();
+    starts.sort_unstable();
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for s in starts {
+        if seen.contains(&s) {
+            continue;
+        }
+        let mut ring = vec![s];
+        seen.insert(s);
+        let mut at = next[&s];
+        while at != s {
+            assert!(seen.insert(at), "the border at {at} does not close");
+            ring.push(at);
+            at = *next.get(&at).expect("a closed border");
+        }
+        out.push(ring);
+    }
+    out
+}
+
+fn perimeter(m: &Mesh, ring: &[u32]) -> f64 {
+    (0..ring.len())
+        .map(|i| {
+            let (a, b) = (
+                m.p[ring[i] as usize],
+                m.p[ring[(i + 1) % ring.len()] as usize],
+            );
+            (0..3)
+                .map(|k| f64::from(a[k] - b[k]).powi(2))
+                .sum::<f64>()
+                .sqrt()
+        })
+        .sum()
+}
+
+#[test]
+fn bevel_reaches_open_borders() {
+    let open = open_box(false);
+    let d = 0.1;
+    let r2 = 2f64.sqrt();
+    // Every crease: four up the sides (an inside point below, the rim
+    // above) and four round the bottom. The rim stays open, each corner
+    // cut by its strip's end.
+    let c = on("msh.bevel", &[("offset", json!(d))], &open);
+    assert_eq!(c.prims(), 5 + 8 + 4, "faces, strips, bottom corners");
+    assert_eq!(c.points(), 4 * 3 + 4 * 2);
+    assert_eq!(
+        atd_ops_msh::edit::group_count(&c, AttrClass::Prim, "bevel"),
+        12
+    );
+    let border = surface(&c);
+    assert_eq!(border.len(), 1, "one rim");
+    assert_eq!(border[0].len(), 8);
+    assert!(border[0].iter().all(|&p| c.p[p as usize][1] == 0.5));
+    let rim = 4.0 * (1.0 - 2.0 * d) + 4.0 * d * r2;
+    assert!(close(perimeter(&c, &border[0]), rim, 1e-6));
+    let chamfer = 4.0 * (1.0 - 2.0 * d) * (1.0 - d)
+        + (1.0 - 2.0 * d).powi(2)
+        + 4.0 * d * r2 * (1.0 - d)
+        + 4.0 * d * r2 * (1.0 - 2.0 * d)
+        + 4.0 * 3f64.sqrt() / 2.0 * d * d;
+    assert!(close(area(&c), chamfer, 1e-6), "{} {chamfer}", area(&c));
+    assert_eq!(c.bounds(), open.bounds());
+    // Rounded: the rim follows the arcs; the area lies between the
+    // chamfer's and the true rounds'.
+    let r = on(
+        "msh.bevel",
+        &[("offset", json!(d)), ("segments", json!(3))],
+        &open,
+    );
+    let border = surface(&r);
+    assert_eq!(border.len(), 1);
+    assert_eq!(border[0].len(), 4 * (2 + 2));
+    assert!(border[0].iter().all(|&p| r.p[p as usize][1] == 0.5));
+    let pi = std::f64::consts::PI;
+    let round = 4.0 * (1.0 - 2.0 * d) * (1.0 - d)
+        + (1.0 - 2.0 * d).powi(2)
+        + 4.0 * pi * d / 2.0 * (1.0 - d)
+        + 4.0 * pi * d / 2.0 * (1.0 - 2.0 * d)
+        + 4.0 * pi * d * d / 2.0;
+    let a = area(&r);
+    assert!(a > chamfer && a < round, "{chamfer} < {a} < {round}");
+    assert_eq!(
+        r,
+        on(
+            "msh.bevel",
+            &[("offset", json!(d)), ("segments", json!(3))],
+            &open
+        ),
+        "deterministic"
+    );
+}
+
+#[test]
+fn bevel_one_edge_from_inside_to_the_border() {
+    // One side crease: its bottom end is inside the mesh (three polygons,
+    // the bottom one cut straight across), its top end on the rim.
+    let open = open_box(false);
+    let g = on(
+        "msh.group",
+        &[
+            ("name", json!("edge")),
+            ("class", json!("point")),
+            ("box_centre", json!([0.5, 0.0, 0.5])),
+            ("box_size", json!([0.1, 2.0, 0.1])),
+        ],
+        &open,
+    );
+    let d = 0.1;
+    let r2 = 2f64.sqrt();
+    let c = on(
+        "msh.bevel",
+        &[("offset", json!(d)), ("group", json!("edge"))],
+        &g,
+    );
+    assert_eq!(c.prims(), 5 + 1, "no patches at either end");
+    assert_eq!(c.points(), 8 - 2 + 4);
+    let border = surface(&c);
+    assert_eq!(border.len(), 1);
+    assert_eq!(border[0].len(), 5);
+    assert!(close(
+        perimeter(&c, &border[0]),
+        4.0 - 2.0 * d + d * r2,
+        1e-6
+    ));
+    let chamfer = 5.0 - 2.0 * d + d * r2 - d * d / 2.0;
+    assert!(close(area(&c), chamfer, 1e-6), "{} {chamfer}", area(&c));
+    // Rounded: the bottom polygon and the rim follow the arc.
+    let r = on(
+        "msh.bevel",
+        &[
+            ("offset", json!(d)),
+            ("group", json!("edge")),
+            ("segments", json!(4)),
+        ],
+        &g,
+    );
+    assert_eq!(r.prims(), 5 + 4);
+    assert_eq!(r.points(), 8 - 2 + 4 + 2 * 3);
+    let border = surface(&r);
+    assert_eq!(border.len(), 1);
+    assert_eq!(border[0].len(), 8);
+    let pi = std::f64::consts::PI;
+    let round =
+        5.0 - 2.0 * d - d * d + 2.0 * d * d * (pi / 8.0).sin() + 8.0 * d * (pi / 16.0).sin();
+    assert!(close(area(&r), round, 1e-6), "{} {round}", area(&r));
+    // Where the strip's end meets two polygons at the rim (a flat
+    // diagonal beside the crease), the gap is patched and the rim keeps
+    // its shape.
+    let split = open_box(true);
+    let g = on(
+        "msh.group",
+        &[
+            ("name", json!("edge")),
+            ("class", json!("point")),
+            ("box_centre", json!([0.5, 0.0, 0.5])),
+            ("box_size", json!([0.1, 2.0, 0.1])),
+        ],
+        &split,
+    );
+    let s = on(
+        "msh.bevel",
+        &[("offset", json!(d)), ("group", json!("edge"))],
+        &g,
+    );
+    assert_eq!(s.prims(), 6 + 1 + 1, "faces, strip, rim patch");
+    assert_eq!(s.points(), 8 - 1 + 4);
+    let border = surface(&s);
+    assert_eq!(border.len(), 1);
+    assert_eq!(border[0].len(), 5);
+    assert!(close(perimeter(&s, &border[0]), 4.0, 1e-6));
+    let expected = 5.0 - 2.0 * d + d * r2;
+    assert!(close(area(&s), expected, 1e-6), "{} {expected}", area(&s));
 }
 
 /// Mean edge length and the share of edges within `lo..hi`.
