@@ -483,6 +483,7 @@ Answer with the WHOLE network as JSON: {\"nodes\": [{\"name\", \"type\", \"param
 Rules:\n\
 - Include every node the request names or implies: an effect (blur, mirror, kaleidoscope, level …) needs a source node (noise, ramp, constant, shape …) wired into its image input.\n\
 - Wire every node: `from` is `<source node>.<output>` (usually `.out`), `to` is `<destination node>.<input>` with an input the destination operator lists; wire types must match (IMG to IMG, SIG to SIG, GEO to GEO).\n\
+- To drive a number parameter from a SIG node, wire the SIG node to the parameter by name: {\"from\": \"lfo1.out\", \"to\": \"blend1.mix\"} (a channel binding). SIG outputs never go into image inputs.\n\
 - Use only the parameter names listed for each operator. Animate a number parameter with an expression string such as `0.5 + 0.5 * sin(time)`; read a SIG node's channel in an expression as `op('lfo1')['lfo']`, using the channel names its description gives (an LFO's channel is `lfo`); or wire a SIG node into an operator's SIG input.\n\
 - Names are short identifiers (noise1, blur1). Do not explain.\n";
 
@@ -1011,6 +1012,25 @@ mod tests {
         );
         assert_eq!(noise.params["scale"].expr.as_deref(), Some("2 + sin(time)"));
         assert_eq!(noise.params["octaves"].value, json!(5));
+        // A SIG node wired to a parameter binds it.
+        let mut reg = atd_core::Registry::default();
+        atd_ops_img::register(&mut reg);
+        atd_ops_sig::register(&mut reg);
+        let mut ws2 = NetworkWorkspace::new(reg);
+        let mut agent2 = Agent::new(Scope::defaults().into_iter().collect(), ShowLock::default());
+        let bound = json!({
+            "nodes": [{"name": "lfo1", "type": "sig.lfo"}, {"name": "level1", "type": "img.level"}],
+            "wires": [{"from": "lfo1", "output": "out", "to": "level1", "input": "brightness"}]
+        });
+        let Output::Json(out2) = agent2.call(&mut ws2, "build_network", &bound) else {
+            panic!("build_network failed");
+        };
+        assert_eq!(out2["errors"], json!([]), "{out2}");
+        let v2 = agent2.view(&ws2).clone();
+        let b = v2.node_by_name("level1").unwrap().params["brightness"]
+            .bind
+            .clone();
+        assert_eq!(b.map(|b| b.node), v2.node_by_name("lfo1").map(|n| n.id));
         // Again with the same names: updated, not duplicated.
         let again =
             json!({"nodes": [{"name": "blur1", "type": "img.blur", "params": {"size": 8}}]});

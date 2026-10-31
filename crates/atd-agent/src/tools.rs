@@ -1058,11 +1058,44 @@ impl Agent {
             .into_iter()
             .flatten()
         {
-            let call = json!({
-                "from": w["from"], "to": w["to"], "input": w["input"],
-                "output": w.get("output").cloned().unwrap_or(json!("out")),
-            });
-            match self.run(ws, "connect", &args(call)) {
+            // A SIG node wired to a parameter (not an input) of the
+            // destination binds that parameter to its channel.
+            let view = self.view(ws);
+            let node_of = |k: &str| w[k].as_str().and_then(|n| view.node_by_name(n));
+            let input = w["input"].as_str().unwrap_or_default();
+            let binds = match (node_of("from"), node_of("to")) {
+                (Some(src), Some(dst)) => {
+                    let reg = self.reg(ws);
+                    let src_sig = reg.get(&src.type_id).is_some_and(|op| {
+                        op.outputs
+                            .iter()
+                            .any(|o| o.wire == atd_core::registry::WireType::Sig)
+                    });
+                    let dst_op = reg.get(&dst.type_id);
+                    src_sig
+                        && dst_op.is_some_and(|op| {
+                            !op.inputs.iter().any(|i| i.name == input)
+                                && op.params.iter().any(|p| p.name == input)
+                        })
+                }
+                _ => false,
+            };
+            let result = if binds {
+                let output = w["output"].as_str().unwrap_or("out");
+                let channel = if output == "out" { "" } else { output };
+                self.run(
+                    ws,
+                    "set_param",
+                    &args(json!({"node": w["to"], "param": input, "bind": {"node": w["from"], "channel": channel}})),
+                )
+            } else {
+                let call = json!({
+                    "from": w["from"], "to": w["to"], "input": w["input"],
+                    "output": w.get("output").cloned().unwrap_or(json!("out")),
+                });
+                self.run(ws, "connect", &args(call))
+            };
+            match result {
                 Ok(_) => wired += 1,
                 Err(e) => errors.push(format!(
                     "wire {}.{} → {}.{}: {e}",
