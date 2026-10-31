@@ -9,6 +9,9 @@
 //! and report that sharing is not available, as their capability flag
 //! declares (PRD A19).
 
+use std::sync::{Condvar, Mutex, PoisonError};
+use std::time::Duration;
+
 use atd_core::capability::{CapabilityRequirement, Fallback};
 use atd_core::registry::{OpFamily, OperatorSchema, ParamSchema, SocketSchema, WireType};
 use atd_gpu::engine::GpuOp;
@@ -143,6 +146,50 @@ pub fn create_in(device: &wgpu::Device, format: wgpu::TextureFormat) -> Box<dyn 
         let _ = (device, format);
         Box::new(Unavailable)
     }
+}
+
+/// How many Share workers are running, and a signal when one ends.
+static WORKERS: (Mutex<usize>, Condvar) = (Mutex::new(0), Condvar::new());
+
+/// Starts a Share worker thread, counted until `f` has returned and
+/// dropped everything it owns (see [`wait_for_workers`]).
+#[cfg(any(windows, target_os = "macos"))]
+fn spawn_worker(name: &str, f: impl FnOnce() + Send + 'static) -> Result<(), String> {
+    struct Running;
+    impl Drop for Running {
+        fn drop(&mut self) {
+            let (count, ended) = &WORKERS;
+            *count.lock().unwrap_or_else(PoisonError::into_inner) -= 1;
+            ended.notify_all();
+        }
+    }
+    *WORKERS.0.lock().unwrap_or_else(PoisonError::into_inner) += 1;
+    let running = Running;
+    std::thread::Builder::new()
+        .name(name.into())
+        .spawn(move || {
+            let _running = running;
+            f();
+        })
+        .map(drop)
+        .map_err(|e| format!("cannot start the {name} thread: {e}"))
+}
+
+/// Waits up to `timeout` for every Share worker to finish; `false` if some
+/// are still running. A worker ends on its own once its node is dropped,
+/// after stopping its Spout sender or Syphon server (which may wait up to
+/// 100 ms for clients) and waiting for the GPU. Call it before the process
+/// exits, after the engine is dropped, and never on the render thread
+/// (rule 1): on macOS, exiting while a worker is still tearing Syphon and
+/// Metal down can trap in CoreAnalytics' exit handler (SIGTRAP in
+/// `_dispatch_group_dispose`).
+pub fn wait_for_workers(timeout: Duration) -> bool {
+    let (count, ended) = &WORKERS;
+    let count = count.lock().unwrap_or_else(PoisonError::into_inner);
+    let (count, _) = ended
+        .wait_timeout_while(count, timeout, |n| *n > 0)
+        .unwrap_or_else(PoisonError::into_inner);
+    *count == 0
 }
 
 /// Both operators where no sharing backend exists: a node error, and no
