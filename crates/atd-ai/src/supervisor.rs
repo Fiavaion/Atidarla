@@ -267,7 +267,8 @@ impl Drop for Supervisor {
 
 /// The local host command: `ATD_AI_HOST_CMD` (whitespace-separated), or the
 /// development host in `ai-host/` run by its own virtual environment when
-/// it has one (it holds torch), else `python3 -m atd_ai_host`.
+/// it has one (it holds torch), else `-m atd_ai_host` under `ATD_PYTHON`,
+/// the installer's bundled Python (PRD A68) or `python3`.
 pub fn default_local_command() -> HostCommand {
     if let Ok(cmd) = std::env::var("ATD_AI_HOST_CMD") {
         let mut parts = cmd.split_whitespace().map(std::ffi::OsString::from);
@@ -289,6 +290,10 @@ pub fn default_local_command() -> HostCommand {
         venv.into_os_string()
     } else {
         std::env::var_os("ATD_PYTHON")
+            .or_else(|| {
+                atd_core::runtime::bundled_python_home()
+                    .map(|home| atd_core::runtime::python_executable(&home).into_os_string())
+            })
             .unwrap_or_else(|| if cfg!(windows) { "python" } else { "python3" }.into())
     };
     HostCommand::python_module(python, root.join("src"))
