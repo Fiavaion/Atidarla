@@ -198,13 +198,12 @@ impl AtidarlaApp {
                 .as_ref()
                 .map_or(&atd_core::graph::Network::default(), |e| e.network()),
         );
-        // The untitled demo patch is the app's own; a project opened below
-        // waits for its own choice.
-        atd_py::script::allow(true);
+        // Nothing is allowed until a project's Python is.
+        atd_py::allow::clear();
         if let (Some(engine), Some(dir)) = (engine.as_mut(), open) {
             viewed = project.run(engine, Action::OpenDir(dir));
             if shell.allow_python && project.dir.is_some() {
-                project.allow_python();
+                project.allow_python(atd_py::allow::items(engine.network(), engine.registry()));
             }
             if let Some((msg, true)) = &project.message {
                 log::error!("{msg}");
@@ -606,8 +605,8 @@ impl AtidarlaApp {
             .panels
             .engine
             .as_ref()
-            .map_or_else(Vec::new, |e| crate::project::network_python(e.network()));
-        let blocked = crate::project::python_blocked(self.project.python.as_ref(), &network);
+            .map_or_else(Vec::new, crate::project::blocked_python);
+        let blocked = crate::project::must_ask(self.project.python.as_ref(), &network);
         if ui
             .add_enabled(blocked, egui::Button::new("Allow Python…"))
             .on_hover_text(
@@ -785,10 +784,6 @@ impl AtidarlaApp {
     /// The open project's Python operators: hot reload of saved files
     /// (FR-K4), and asking before they run (docs/python-ops.md).
     fn python_frame(&mut self, ctx: &egui::Context) {
-        // A paste from the clipboard brought in Python: ask before it runs.
-        if std::mem::take(&mut self.panels.patch.pasted_python) {
-            self.project.withdraw_python();
-        }
         if let (Some(engine), Some(python)) = (&mut self.panels.engine, &mut self.project.python)
             // The watcher thread read the files; this applies them (no disk).
             && let Some(reload) = engine.extend(|r, l| python.poll(r, l))
@@ -809,11 +804,15 @@ impl AtidarlaApp {
         if !self.project.python_ask || self.smoke.is_some() {
             return;
         }
-        let scripts: Vec<String> = self
-            .panels
-            .engine
-            .as_ref()
-            .map_or_else(Vec::new, |e| crate::project::network_python(e.network()));
+        let (items, scripts): (Vec<atd_py::allow::Item>, Vec<String>) =
+            match self.panels.engine.as_ref() {
+                Some(e) => {
+                    let items = crate::project::blocked_python(e);
+                    let shown = items.iter().map(|i| i.describe(e.network())).collect();
+                    (items, shown)
+                }
+                None => (Vec::new(), Vec::new()),
+            };
         let files: Vec<String> = self
             .project
             .python
@@ -832,9 +831,14 @@ impl AtidarlaApp {
                  sandbox them. Allow them only if you trust where the project came from.",
             );
             ui.add_space(4.0);
-            for f in &files {
-                ui.monospace(f);
-            }
+            // Everything that will run, in full.
+            egui::ScrollArea::vertical()
+                .max_height(320.0)
+                .show(ui, |ui| {
+                    for f in &files {
+                        ui.monospace(f);
+                    }
+                });
             ui.add_space(4.0);
             ui.weak(
                 "Until you allow them, their nodes do not cook and Python expressions keep \
@@ -859,7 +863,7 @@ impl AtidarlaApp {
             self.project.python_ask = false;
         }
         let Some(remember) = choice else { return };
-        self.project.allow_python();
+        self.project.allow_python(items);
         if remember
             && let Some(python) = &self.project.python
             && !python.is_empty()

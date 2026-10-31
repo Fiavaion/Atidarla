@@ -70,6 +70,10 @@ pub(crate) struct ServeWorkspace {
     save: bool,
     /// `--allow-python-ops`: the project's Python runs (kept on reopen).
     allow_python: bool,
+    /// Python the agent writes is allowed too: `--allow-python-ops` and a
+    /// session with `python.exec` (no dialog headless; without the scope an
+    /// agent cannot write Python at all).
+    allow_agent_python: bool,
     time: f64,
     /// The GPU adapter the engine runs on (`atidarla soak` reports it).
     pub(crate) adapter: wgpu::AdapterInfo,
@@ -92,8 +96,7 @@ impl ServeWorkspace {
         if allow_python {
             loaded.python.allow();
         }
-        // Network Python (Script DATs, Python expressions): the same flag.
-        atd_py::script::allow(allow_python);
+        atd_py::allow::clear();
         let [w, h] = loaded.project.resolution;
         let registry = std::mem::take(&mut loaded.registry);
         let library = std::mem::take(&mut loaded.library);
@@ -117,6 +120,11 @@ impl ServeWorkspace {
             .flatten(&main, engine.registry())
             .map_err(|e| anyhow!("{e}"))?;
         engine.load(flat.network.clone())?;
+        // Network Python (Script DATs, Python expressions): the same flag
+        // allows what the project holds as opened.
+        if allow_python {
+            atd_py::allow::allow_network(engine.network(), engine.registry());
+        }
         Ok(Self {
             dir: dir.to_owned(),
             loaded,
@@ -124,10 +132,17 @@ impl ServeWorkspace {
             flat,
             save,
             allow_python,
+            allow_agent_python: false,
             time: 0.0,
             adapter: gpu.adapter.get_info(),
             history: Vec::new(),
         })
+    }
+
+    /// Lets the Python a `python.exec` session writes run (with
+    /// `--allow-python-ops` only).
+    pub(crate) fn allow_agent_python(&mut self, on: bool) {
+        self.allow_agent_python = on && self.allow_python;
     }
 
     /// The headless engine (the flattened network).
@@ -159,6 +174,9 @@ impl ServeWorkspace {
         self.engine
             .load(flat.network.clone())
             .map_err(|e| e.to_string())?;
+        if self.allow_agent_python {
+            atd_py::allow::allow_network(self.engine.network(), self.engine.registry());
+        }
         self.flat = flat;
         self.loaded
             .project
@@ -323,8 +341,10 @@ impl Workspace for ServeWorkspace {
         let fresh =
             Self::open(&self.dir, self.save, self.allow_python).map_err(|e| format!("{e:#}"))?;
         let history = std::mem::take(&mut self.history);
+        let agent_python = self.allow_agent_python;
         *self = fresh;
         self.history = history;
+        self.allow_agent_python = agent_python;
         Ok(())
     }
 }
@@ -409,6 +429,7 @@ pub fn run(args: ServeArgs) -> Result<()> {
     for s in &args.scope {
         scopes.insert(Scope::parse(s).ok_or_else(|| anyhow!("unknown scope {s:?}"))?);
     }
+    ws.allow_agent_python(scopes.contains(&Scope::PythonExec));
     let lock = ShowLock::load(&args.project).map_err(|e| anyhow!(e))?;
     let mut agent = Agent::new(scopes, lock);
 

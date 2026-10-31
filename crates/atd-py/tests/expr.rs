@@ -108,8 +108,13 @@ const CORPUS: &[&str] = &[
 ];
 
 fn python_results(jobs: &[PyJob]) -> Vec<Result<ExprValue, String>> {
-    // These are the tests' own expressions (gating is `expr_trust.rs`).
-    atd_py::script::allow(true);
+    // These are the tests' own expressions (the allow-list itself is
+    // `expr_trust.rs`).
+    atd_py::allow::allow(jobs.iter().map(|j| atd_py::allow::Item::Expr {
+        node: j.node,
+        param: j.param.to_string(),
+        source: j.source.to_string(),
+    }));
     let mut host = PyExprHost::start().unwrap();
     host.submit(jobs);
     let mut got: Vec<Option<Result<ExprValue, String>>> = vec![None; jobs.len()];
@@ -134,6 +139,7 @@ fn job(key: u64, source: &str) -> PyJob {
         frame: 743.0,
         me: Arc::from("level7"),
         refs: snapshot(),
+        ..PyJob::default()
     }
 }
 

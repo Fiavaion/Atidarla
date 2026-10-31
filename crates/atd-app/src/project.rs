@@ -34,55 +34,19 @@ enum Dialog {
     ComfyWorkflow(Receiver<Option<PathBuf>>),
 }
 
-/// The Python written in `net` itself, as the Allow dialog lists it: Script
-/// nodes and Python-tier parameter expressions (anything outside the native
-/// subset, PRD A22). It runs only on an explicit Allow: the remembered hash
-/// covers `ops/` files, not network code (docs/python-ops.md).
-pub fn network_python(net: &Network) -> Vec<String> {
-    let mut out = Vec::new();
-    for n in net.nodes() {
-        node_python(n, &mut out);
-    }
-    out
+/// Whether the open project has Python that is not allowed to run: `ops/`
+/// files not allowed, or network Python (`blocked`, from
+/// [`atd_py::allow::blocked`]: Python-tier expressions and Script code not
+/// on the allow-list). Opening asks then, and File > Allow Python… is
+/// enabled only then. The remembered hash covers `ops/` files, not network
+/// code, so a project with network Python asks on every open.
+pub fn must_ask(python: Option<&atd_py::ops::PythonOps>, blocked: &[atd_py::allow::Item]) -> bool {
+    python.is_some_and(|p| !p.is_empty() && !p.is_allowed()) || !blocked.is_empty()
 }
 
-/// [`network_python`] for one node, appended to `out`.
-pub fn node_python(n: &atd_core::graph::Node, out: &mut Vec<String>) {
-    if n.type_id == atd_py::script::TYPE_ID {
-        out.push(format!("Script node {}", n.name));
-    }
-    for (param, p) in &n.params {
-        let Some(source) = p.expr.as_deref() else {
-            continue;
-        };
-        if atd_core::expr::Expr::parse(source).is_err() {
-            let short: String = source.chars().take(60).collect();
-            let more = if short.len() < source.len() {
-                "…"
-            } else {
-                ""
-            };
-            out.push(format!(
-                "Python expression {}.{param} = {short}{more}",
-                n.name
-            ));
-        }
-    }
-}
-
-/// Whether the open project has Python that is not allowed to run now:
-/// `ops/` files not allowed, or network Python while the allowance is
-/// withdrawn. File > Allow Python… is enabled only then.
-pub fn python_blocked(python: Option<&atd_py::ops::PythonOps>, network: &[String]) -> bool {
-    python.is_some_and(|p| !p.is_empty() && !p.is_allowed())
-        || (!network.is_empty() && !atd_py::script::allowed())
-}
-
-/// Whether opening a project must ask before its Python runs: `ops/` files
-/// not remembered, or any network Python (never covered by the remembered
-/// hash, so it asks on every open).
-pub fn must_ask(python: &atd_py::ops::PythonOps, network: &[String]) -> bool {
-    (!python.is_empty() && !python.is_allowed()) || !network.is_empty()
+/// Network Python in `engine` that is not allowed (what the dialog lists).
+pub fn blocked_python(engine: &Engine) -> Vec<atd_py::allow::Item> {
+    atd_py::allow::blocked(engine.network(), engine.registry())
 }
 
 /// A ComfyUI workflow import running on its own thread (it reads the
@@ -126,24 +90,16 @@ pub struct ProjectState {
 }
 
 impl ProjectState {
-    /// Withdraws the allowance for network Python and asks again: Python
-    /// that came from somewhere else (a merge, a paste) joined the patch.
-    pub fn withdraw_python(&mut self) {
-        atd_py::script::allow(false);
-        self.python_ask = true;
-    }
-
-    /// Lets the open project's Python run: its `ops/` operators, Script
-    /// nodes and Python expressions (the Allow dialog, or the app's
-    /// `--allow-python-ops` under `atidarla run`).
-    pub fn allow_python(&mut self) {
+    /// Lets the open project's Python run: its `ops/` operators and the
+    /// network Python in `items` (what the Allow dialog listed, or the
+    /// whole project as opened for the app's `--allow-python-ops`). Script
+    /// DATs and Python expressions run only on this explicit choice, never
+    /// from the remembered hash (it covers ops/ files, not network code).
+    pub fn allow_python(&mut self, items: Vec<atd_py::allow::Item>) {
         if let Some(p) = &mut self.python {
             p.allow();
         }
-        // Script DATs and Python expressions run only on this explicit
-        // choice, never from the remembered hash (it covers ops/ files, not
-        // the network's code).
-        atd_py::script::allow(true);
+        atd_py::allow::allow(items);
         self.python_ask = false;
     }
 
@@ -217,8 +173,8 @@ impl ProjectState {
                     atd_ops_pnt::project::clear_custom(r);
                     atd_ops_ai::comfy::clear_custom(r);
                 });
-                // A new project's network Python is the user's own.
-                atd_py::script::allow(true);
+                // An empty network: nothing allowed, nothing to allow.
+                atd_py::allow::clear();
                 let opened = self.opened + 1;
                 *self = Self::untitled(engine.network());
                 self.opened = opened;
@@ -255,7 +211,7 @@ impl ProjectState {
                     // Script DATs and Python expressions are project Python
                     // too: they ask as well. Kept even without any, so a
                     // Python expression typed later can be allowed.
-                    self.python_ask = must_ask(&python, &network_python(engine.network()));
+                    self.python_ask = must_ask(Some(&python), &blocked_python(engine));
                     self.python = Some(python);
                     self.saved_mappings = meta.mappings.clone();
                     self.saved_timeline = meta.timeline.clone();
@@ -631,16 +587,14 @@ pub fn open(engine: &mut Engine, dir: &Path) -> Result<Opened, String> {
     }
     let previous = engine.project_dir().map(Path::to_owned);
     engine.set_project_dir(Some(dir.to_owned()));
-    // The new project's Script DATs and Python expressions wait for its own
-    // choice; withdrawn only now, so a project that does not open leaves the
-    // open one's allowance as it was.
-    let was_allowed = atd_py::script::allowed();
-    atd_py::script::allow(false);
     if let Err(e) = engine.load(net) {
         engine.set_project_dir(previous);
-        atd_py::script::allow(was_allowed);
         return Err(format!("{}: {e}", dir.display()));
     }
+    // The new project's Script DATs and Python expressions wait for its own
+    // choice. Cleared only once it loaded (nothing cooks in between), so a
+    // project that does not open leaves the open one's list as it was.
+    atd_py::allow::clear();
     engine.set_resolution(project.resolution[0], project.resolution[1]);
     let view = view.or_else(|| output_node(engine));
     Ok(Opened {
@@ -751,7 +705,7 @@ pub(crate) mod tests {
     use atd_core::graph::Node;
     use serde_json::json;
 
-    /// The project Python allowance (`atd_py::script::allow`) is
+    /// The network Python allow-list (`atd_py::allow`) is
     /// process-wide; tests that change or read it hold this.
     pub(crate) fn python_flag() -> std::sync::MutexGuard<'static, ()> {
         static FLAG: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -957,27 +911,30 @@ pub(crate) mod tests {
         let python = save("python", "[0.25, 0.5][int(time) % 2]");
         let native = save("native", "0.5 + 0.5 * sin(time)");
         let mut state = ProjectState::untitled(&Network::default());
+        let item = |e: &Engine| atd_py::allow::items(e.network(), e.registry());
 
-        atd_py::script::allow(true);
         let view = state.run(&mut e, Action::OpenDir(python.clone()));
         assert!(view.is_some(), "{:?}", state.message);
-        assert!(
-            !atd_py::script::allowed(),
-            "opening withdraws the allowance"
-        );
         assert!(state.python_ask, "a Python expression asks");
         assert!(state.python.is_some(), "so the dialog can allow it");
-        let listed = network_python(e.network());
+        let listed = blocked_python(&e);
+        assert_eq!(listed.len(), 1);
         assert_eq!(
-            listed,
-            ["Python expression level1.brightness = [0.25, 0.5][int(time) % 2]"]
+            listed[0].describe(e.network()),
+            "Python expression level1.brightness = [0.25, 0.5][int(time) % 2]",
+            "listed in full"
+        );
+        assert!(must_ask(state.python.as_ref(), &listed));
+
+        state.allow_python(listed.clone());
+        assert!(!state.python_ask && blocked_python(&e).is_empty());
+        assert!(atd_py::allow::allows(&listed[0]));
+        assert!(
+            !must_ask(state.python.as_ref(), &[]),
+            "nothing left to allow"
         );
 
-        state.allow_python();
-        assert!(atd_py::script::allowed() && !state.python_ask);
-        assert!(!python_blocked(state.python.as_ref(), &listed));
-
-        // A project that does not open leaves the open one's allowance.
+        // A project that does not open leaves the open one's list.
         let broken =
             std::env::temp_dir().join(format!("atd-app-pyexpr-broken-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&broken);
@@ -989,40 +946,35 @@ pub(crate) mod tests {
             state.message.as_ref().is_some_and(|m| m.1),
             "it does not open"
         );
-        assert!(atd_py::script::allowed(), "still allowed");
+        assert!(atd_py::allow::allows(&listed[0]), "still allowed");
         std::fs::remove_dir_all(&broken).ok();
 
+        // Another project clears it; native expressions need nothing.
         let view = state.run(&mut e, Action::OpenDir(native.clone()));
         assert!(view.is_some(), "{:?}", state.message);
         assert!(!state.python_ask, "native expressions need no Python");
-        assert!(network_python(e.network()).is_empty());
-        assert!(!atd_py::script::allowed(), "another project resets it");
+        assert!(item(&e).is_empty());
         assert!(
-            !python_blocked(state.python.as_ref(), &[]),
-            "nothing to allow"
+            !atd_py::allow::allows(&listed[0]),
+            "another project clears it"
         );
 
-        // A new project is the user's own.
-        state.run(&mut e, Action::New);
-        assert!(atd_py::script::allowed());
+        // Opening the Python project again asks again (not remembered).
+        state.run(&mut e, Action::OpenDir(python.clone()));
+        assert!(state.python_ask && !blocked_python(&e).is_empty());
 
-        // Pasted Python is seen, and withdraws the allowance and asks.
-        let mut pasted = Vec::new();
-        for n in atd_format::load(&python).unwrap().main().unwrap().nodes() {
-            node_python(n, &mut pasted);
-        }
-        assert_eq!(pasted.len(), 1, "the clipboard's Python is seen");
-        state.withdraw_python();
-        assert!(!atd_py::script::allowed() && state.python_ask);
-        atd_py::script::allow(false);
+        // File > New: an empty network, nothing allowed.
+        state.run(&mut e, Action::New);
+        assert!(item(&e).is_empty());
+        assert!(!atd_py::allow::allows(&listed[0]));
 
         // Remembered ops/ files do not cover network Python.
         let mut ops = atd_py::ops::PythonOps::open(
             &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/python-ops.atidarla"),
         );
         ops.allow();
-        assert!(must_ask(&ops, &listed));
-        assert!(!must_ask(&ops, &[]));
+        assert!(must_ask(Some(&ops), &listed));
+        assert!(!must_ask(Some(&ops), &[]));
         std::fs::remove_dir_all(&python).ok();
         std::fs::remove_dir_all(&native).ok();
     }

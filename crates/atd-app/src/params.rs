@@ -50,9 +50,10 @@ pub fn ui(
         ui.colored_label(egui::Color32::from_rgb(230, 80, 80), e);
         if e.contains(atd_core::expr::PYTHON_NOT_ALLOWED) {
             ui.weak(
-                "Python expressions are not evaluated until you allow this project's Python \
-                 (File > Allow Python Operators…); until then the parameter keeps its stored \
-                 value. Native expressions (time, frame, math, op()) still run.",
+                "This Python expression came with the project, a paste, a merge or an agent and \
+                 has not been allowed; until you allow it (File > Allow Python…) the parameter \
+                 keeps its stored value. Native \
+                 expressions (time, frame, math, op()) always run.",
             );
         }
     }
@@ -227,8 +228,11 @@ pub fn ui(
                 if let Some(edit) = edit {
                     let key = format!("{node}:{}", p.name);
                     let label = format!("{name}.{}", p.name);
-                    if let Err(e) = engine.edit_coalesced(&label, &key, [edit]) {
-                        error = Some(e.to_string());
+                    match engine.edit_coalesced(&label, &key, [edit]) {
+                        // Python the user writes here is theirs: it runs
+                        // (docs/python-ops.md).
+                        Ok(()) => allow_typed(engine, node, &p.name),
+                        Err(e) => error = Some(e.to_string()),
                     }
                 }
             }
@@ -240,6 +244,22 @@ pub fn ui(
         engine.seal_history();
     }
     error
+}
+
+/// Adds the network Python of `node`'s `param`, as the user just set it in
+/// this panel, to the allow-list: a direct action in the app, unlike Python
+/// from a file, a paste, a merge or an agent.
+fn allow_typed(engine: &Engine, node: NodeId, param: &str) {
+    let Some(n) = engine.network().node(node) else {
+        return;
+    };
+    let items = atd_py::allow::node_items(n, engine.registry())
+        .into_iter()
+        .filter(|i| match i {
+            atd_py::allow::Item::Expr { param: p, .. } => p == param,
+            atd_py::allow::Item::Script { .. } => param == "code",
+        });
+    atd_py::allow::allow(items);
 }
 
 /// The starting text of a new expression: the current value (a vector's

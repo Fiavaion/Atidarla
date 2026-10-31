@@ -7,18 +7,19 @@
 //! the cook thread (CLAUDE.md rule 1): a node hands its code and inputs
 //! over when either changes and picks the result up on a later frame (an
 //! offline render waits for it). A script is project code, so it runs only
-//! once the project's Python is allowed ([`allow`], set together with the
-//! project's Python operators: `docs/python-ops.md`); until then the node
-//! reports [`NOT_ALLOWED`](crate::ops::NOT_ALLOWED).
+//! while exactly this node's code is allowed ([`crate::allow`],
+//! `docs/python-ops.md`); until then the node reports
+//! [`NOT_ALLOWED`](crate::ops::NOT_ALLOWED). The worker checks again before
+//! it runs a job.
 //!
 //! **Known limit:** there is no timeout yet. A script that never returns
 //! holds the worker: other Script nodes stop updating (the show does not).
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
+use atd_core::graph::NodeId;
 use atd_gpu::engine::{Dat, DatCtx, DatOp, OpLibrary, Table};
 use pyo3::prelude::*;
 use pyo3::types::{PyList, PyModule};
@@ -80,26 +81,6 @@ def _run(source, inputs):
     return ("table", rows)
 "#;
 
-static ALLOWED: AtomicBool = AtomicBool::new(false);
-/// Bumped by every [`allow`] change, so nodes run again when it flips.
-static GENERATION: AtomicU64 = AtomicU64::new(0);
-
-/// Lets the open project's network Python run (`true`) or stops it
-/// (`false`): Script nodes and Python-tier parameter expressions
-/// ([`crate::expr::PyExprHost`]). Process-wide, like Sovereign mode: one
-/// project is open at a time. Set with the project's Python operators
-/// ([`crate::ops::PythonOps::allow`]), but only on an explicit choice:
-/// the remembered `ops/` hash does not cover network code.
-pub fn allow(on: bool) {
-    if ALLOWED.swap(on, Ordering::AcqRel) != on {
-        GENERATION.fetch_add(1, Ordering::AcqRel);
-    }
-}
-
-pub fn allowed() -> bool {
-    ALLOWED.load(Ordering::Acquire)
-}
-
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
@@ -112,6 +93,7 @@ struct Slot {
 }
 
 struct Job {
+    node: NodeId,
     code: String,
     inputs: Vec<Option<Dat>>,
     slot: Arc<Slot>,
@@ -153,7 +135,9 @@ fn work(w: &Worker) {
                 q = w.wake.wait(q).unwrap_or_else(|e| e.into_inner());
             }
         };
+        // Checked again here: the list may have changed since it was queued.
         let result = match &helper {
+            _ if !crate::allow::allows_script(job.node, &job.code) => Err(not_allowed()),
             Ok(h) => Python::attach(|py| run(h.bind(py), &job)),
             Err(e) => Err(e.clone()),
         };
@@ -212,8 +196,18 @@ struct ScriptOp {
     code: String,
     inputs: Vec<Option<Dat>>,
     generation: Option<u64>,
+    /// The code is not on the allow-list (checked when the code, the inputs
+    /// or the list change).
+    blocked: bool,
     error: Option<String>,
     status: String,
+}
+
+fn not_allowed() -> String {
+    format!(
+        "{}: Script nodes run Python from the project once you allow it",
+        crate::ops::NOT_ALLOWED
+    )
 }
 
 impl ScriptOp {
@@ -253,17 +247,10 @@ impl ScriptOp {
 
 impl DatOp for ScriptOp {
     fn cook(&mut self, ctx: &mut DatCtx<'_>) -> Result<(), String> {
-        if !allowed() {
-            self.generation = None;
-            return Err(format!(
-                "{}: Script nodes run Python from the project once you allow it",
-                crate::ops::NOT_ALLOWED
-            ));
-        }
         if self.pending {
             self.take(ctx);
         }
-        let generation = GENERATION.load(Ordering::Acquire);
+        let generation = crate::allow::generation();
         if !self.pending && self.stale(ctx, generation) {
             self.generation = Some(generation);
             self.code.clear();
@@ -271,35 +258,42 @@ impl DatOp for ScriptOp {
             self.inputs.clear();
             self.inputs
                 .extend((0..ctx.inputs.len()).map(|i| ctx.inputs.get(i).cloned()));
-            let w = worker();
-            lock(&w.queue).push_back(Job {
-                code: self.code.clone(),
-                inputs: self.inputs.clone(),
-                slot: self.slot.clone(),
-            });
-            w.wake.notify_one();
-            self.pending = true;
-            if ctx.params.mode().is_offline() {
-                // Offline the frame waits for its script.
-                let deadline = Instant::now() + OFFLINE_TIMEOUT;
-                let mut r = lock(&self.slot.result);
-                while r.is_none() && Instant::now() < deadline {
-                    r = self
-                        .slot
-                        .done
-                        .wait_timeout(r, Duration::from_millis(100))
-                        .map_or_else(|e| e.into_inner().0, |(g, _)| g);
+            self.blocked = !crate::allow::allows_script(ctx.params.node(), &self.code);
+            if !self.blocked {
+                let w = worker();
+                lock(&w.queue).push_back(Job {
+                    node: ctx.params.node(),
+                    code: self.code.clone(),
+                    inputs: self.inputs.clone(),
+                    slot: self.slot.clone(),
+                });
+                w.wake.notify_one();
+                self.pending = true;
+                if ctx.params.mode().is_offline() {
+                    // Offline the frame waits for its script.
+                    let deadline = Instant::now() + OFFLINE_TIMEOUT;
+                    let mut r = lock(&self.slot.result);
+                    while r.is_none() && Instant::now() < deadline {
+                        r = self
+                            .slot
+                            .done
+                            .wait_timeout(r, Duration::from_millis(100))
+                            .map_or_else(|e| e.into_inner().0, |(g, _)| g);
+                    }
+                    let late = r.is_none();
+                    drop(r);
+                    if late {
+                        return Err(format!(
+                            "TimeoutError: the script did not return within {} s",
+                            OFFLINE_TIMEOUT.as_secs()
+                        ));
+                    }
+                    self.take(ctx);
                 }
-                let late = r.is_none();
-                drop(r);
-                if late {
-                    return Err(format!(
-                        "TimeoutError: the script did not return within {} s",
-                        OFFLINE_TIMEOUT.as_secs()
-                    ));
-                }
-                self.take(ctx);
             }
+        }
+        if self.blocked {
+            return Err(not_allowed());
         }
         match &self.error {
             Some(e) => Err(e.clone()),

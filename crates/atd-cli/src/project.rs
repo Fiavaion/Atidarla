@@ -304,8 +304,6 @@ fn check_one(dir: &Path, gpu: Option<&atd_gpu::GpuContext>, opts: CheckOptions) 
     if opts.allow_python_ops {
         python.allow();
     }
-    // Script DATs are project Python too: the same flag runs them.
-    atd_py::script::allow(opts.allow_python_ops);
     let flat = project
         .packs
         .flatten(&main, &registry)
@@ -387,6 +385,12 @@ fn cook(
     engine.set_project_dir(dir.map(Path::to_owned));
     engine.set_python(Box::new(atd_py::expr::PyExprHost::start()?));
     engine.load(flat.network.clone())?;
+    // Network Python (Script DATs, Python expressions): the same flag allows
+    // what the project holds as opened.
+    atd_py::allow::clear();
+    if opts.allow_python_ops {
+        atd_py::allow::allow_network(engine.network(), engine.registry());
+    }
     let ids: Vec<NodeId> = engine.network().nodes().map(|n| n.id).collect();
     // Cook in real time, as the app would: movies, audio and shaders load
     // on worker threads while frames go by.

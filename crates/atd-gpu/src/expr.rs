@@ -51,6 +51,10 @@ pub(crate) struct Entry {
     /// What was wrong with the last Python result the worker gave, so the
     /// error is formatted only when it changes.
     py_fault: Cell<Option<PyFault>>,
+    /// A Python entry's place on the allow-list: `None` until checked
+    /// ([`ExprTable::check_python`]), then whether it may run. Only an
+    /// entry checked and allowed is offered to the worker.
+    allowed: Cell<Option<bool>>,
 }
 
 /// A Python result the parameter cannot take.
@@ -102,9 +106,6 @@ impl Entry {
 pub struct ExprTable {
     nodes: HashMap<NodeId, Vec<Entry>>,
     next_key: u64,
-    /// The Python tier is blocked (the project's Python is not allowed):
-    /// its entries carry [`expr::PYTHON_NOT_ALLOWED`] and no value.
-    blocked: Cell<bool>,
 }
 
 impl ExprTable {
@@ -119,7 +120,6 @@ impl ExprTable {
         let mut table = ExprTable {
             nodes: HashMap::new(),
             next_key: old.next_key,
-            blocked: Cell::new(false),
         };
         let mut extra = HashMap::new();
         let mut changed = Vec::new();
@@ -198,6 +198,7 @@ impl ExprTable {
                     error: RefCell::new(error),
                     last_error: Cell::new(None),
                     py_fault: Cell::new(None),
+                    allowed: Cell::new(None),
                 });
             }
             if !entries.is_empty() {
@@ -244,6 +245,14 @@ impl ExprTable {
             .find_map(|e| std::cell::Ref::filter_map(e.error.borrow(), Option::as_ref).ok())
     }
 
+    /// Whether any expression is Python-tier.
+    pub(crate) fn has_python(&self) -> bool {
+        self.nodes
+            .values()
+            .flatten()
+            .any(|e| matches!(e.tier, Tier::Python { .. }))
+    }
+
     /// Marks Python expressions as unavailable (no worker attached).
     pub(crate) fn no_python(&self) {
         for e in self.nodes.values().flatten() {
@@ -256,36 +265,39 @@ impl ExprTable {
         }
     }
 
-    /// Blocks the Python tier while the project's Python is not allowed:
-    /// each Python entry drops its value (the parameter uses its stored
-    /// value) and reports [`expr::PYTHON_NOT_ALLOWED`]. Formats once per
-    /// table, never per frame.
-    pub(crate) fn block_python(&self) {
-        if self.blocked.replace(true) {
-            return;
-        }
-        for e in self.nodes.values().flatten() {
-            if matches!(e.tier, Tier::Python { .. }) {
-                e.value.set(None);
-                e.py_fault.set(None);
-                e.error.replace(Some(format!(
-                    "expression for `{}`: {}",
-                    e.param,
-                    expr::PYTHON_NOT_ALLOWED
-                )));
-            }
-        }
-    }
-
-    /// Lifts [`Self::block_python`] once the project's Python is allowed;
-    /// values arrive with the worker's next results.
-    pub(crate) fn unblock_python(&self) {
-        if !self.blocked.replace(false) {
-            return;
-        }
-        for e in self.nodes.values().flatten() {
-            if matches!(e.tier, Tier::Python { .. }) {
-                e.error.replace(None);
+    /// Checks every Python entry against the allow-list (`allows(node,
+    /// param, source)`): one that may not run drops its value (the
+    /// parameter uses its stored value) and reports
+    /// [`expr::PYTHON_NOT_ALLOWED`]. Called when the table or the list
+    /// changed, never per frame; formats only on a change.
+    pub(crate) fn check_python(&self, allows: impl Fn(NodeId, &str, &str) -> bool) {
+        for (&node, entries) in &self.nodes {
+            for e in entries {
+                if !matches!(e.tier, Tier::Python { .. }) {
+                    continue;
+                }
+                let ok = allows(node, &e.param, &e.source);
+                if e.allowed.replace(Some(ok)) == Some(ok) {
+                    continue;
+                }
+                if ok {
+                    let stale = e
+                        .error
+                        .borrow()
+                        .as_deref()
+                        .is_some_and(|m| m.contains(expr::PYTHON_NOT_ALLOWED));
+                    if stale {
+                        e.error.replace(None);
+                    }
+                } else {
+                    e.value.set(None);
+                    e.py_fault.set(None);
+                    e.error.replace(Some(format!(
+                        "expression for `{}`: {}",
+                        e.param,
+                        expr::PYTHON_NOT_ALLOWED
+                    )));
+                }
             }
         }
     }
@@ -300,6 +312,9 @@ impl ExprTable {
                 let Tier::Python { key, .. } = &e.tier else {
                     continue;
                 };
+                if e.allowed.get() != Some(true) {
+                    continue;
+                }
                 // The latest result for this key wins.
                 let Some(i) = results.iter().rposition(|(k, _)| k == key) else {
                     continue;
@@ -329,7 +344,8 @@ impl ExprTable {
         }
     }
 
-    /// Rebuilds `jobs` for the Python expressions (when the table changed).
+    /// Rebuilds `jobs` for the Python expressions that are allowed (when
+    /// the table or the allow-list changed).
     pub(crate) fn python_jobs(&self, net: &Network, jobs: &mut Vec<PyJob>) {
         jobs.clear();
         let mut ids: Vec<&NodeId> = self.nodes.keys().collect();
@@ -340,8 +356,13 @@ impl ExprTable {
                 let Tier::Python { key, refs } = &e.tier else {
                     continue;
                 };
+                if e.allowed.get() != Some(true) {
+                    continue;
+                }
                 jobs.push(PyJob {
                     key: *key,
+                    node: *id,
+                    param: e.param.as_str().into(),
                     source: e.source.clone(),
                     time: 0.0,
                     frame: 0.0,

@@ -190,16 +190,11 @@ pub fn apply_to_open(
         .ok_or("the merged project has no main network")?;
     let edits = atd_format::diff::edits_between(engine.network(), net);
     if !edits.is_empty() {
-        let before = crate::project::network_python(engine.network());
+        // Their Python (new or changed) is not on the allow-list, so it
+        // stays blocked until allowed (docs/python-ops.md).
         engine
             .edit("Merge", edits)
             .map_err(|e| format!("the merged patch does not apply: {e}"))?;
-        // Python from the other side has not been allowed: ask, listing it,
-        // before any of the patch's network Python runs again.
-        let after = crate::project::network_python(engine.network());
-        if after.iter().any(|p| !before.contains(p)) {
-            state.withdraw_python();
-        }
     }
     engine.set_resolution(merged.resolution[0], merged.resolution[1]);
     let meta = &mut state.meta;
@@ -759,18 +754,31 @@ params.gamma = 1.2
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// Merging in Python nobody allowed (their Python expression) withdraws
-    /// the allowance and asks; a merge that brings none leaves it.
+    /// Merged Python runs only as allowed, by content: an allowed
+    /// expression the merge leaves alone keeps running; one whose tail the
+    /// other side changed (past what any listing would show) is new content
+    /// and is blocked, as is one the merge brings in.
     #[test]
-    fn merging_in_python_asks_again() {
+    fn merged_python_runs_only_as_allowed() {
         let _flag = crate::project::tests::python_flag();
         let Some(mut engine) = crate::project::tests::engine() else {
             return;
         };
-        let net = atd_format::network_from_str(BASE).unwrap();
+        let ours_src = format!("[2.0, 3.0][int(time) % 2] + 0 * len('{}')", "a".repeat(80));
+        let theirs_src = ours_src.replace("'aaa", "'aab");
+        let with = |src: &str| {
+            BASE.replace(
+                "params.scale = 2.0",
+                &format!("params.scale = {{ value = 2.0, expr = \"{src}\" }}"),
+            )
+        };
+        let net = atd_format::network_from_str(&with(&ours_src)).unwrap();
         engine.load(net.clone()).unwrap();
         let mut state = ProjectState::untitled(&net);
-        atd_py::script::allow(true);
+        atd_py::allow::clear();
+        let ours = crate::project::blocked_python(&engine);
+        assert_eq!(ours.len(), 1);
+        atd_py::allow::allow(ours.clone());
         let merged = |text: &str| {
             let mut p = atd_format::Project::new("show");
             p.networks.insert(
@@ -779,23 +787,25 @@ params.gamma = 1.2
             );
             p
         };
-        let calm = BASE.replace("params.scale = 2.0", "params.scale = 3.0");
+        // Their change elsewhere: ours stays allowed.
+        let calm = with(&ours_src).replace("params.gamma = 1.2", "params.gamma = 1.4");
         apply_to_open(&mut engine, &mut state, merged(&calm)).unwrap();
+        assert!(crate::project::blocked_python(&engine).is_empty());
+        // Their change to the expression's tail: blocked, listed in full.
+        apply_to_open(&mut engine, &mut state, merged(&with(&theirs_src))).unwrap();
+        let blocked = crate::project::blocked_python(&engine);
+        assert_eq!(blocked.len(), 1);
         assert!(
-            atd_py::script::allowed() && !state.python_ask,
-            "no new Python"
+            blocked[0].describe(engine.network()).ends_with(&theirs_src),
+            "the dialog shows all of it"
         );
-        let theirs = BASE.replace(
-            "params.scale = 2.0",
-            "params.scale = { value = 2.0, expr = \"[2.0, 3.0][int(time) % 2]\" }",
-        );
-        apply_to_open(&mut engine, &mut state, merged(&theirs)).unwrap();
         assert!(
-            !atd_py::script::allowed(),
-            "their Python waits for a choice"
+            crate::project::must_ask(None, &blocked),
+            "Allow Python… is enabled"
         );
-        assert!(state.python_ask);
-        assert_eq!(crate::project::network_python(engine.network()).len(), 1);
-        atd_py::script::allow(false);
+        // Undo brings ours back: allowed again.
+        engine.undo().unwrap();
+        assert!(crate::project::blocked_python(&engine).is_empty());
+        atd_py::allow::clear();
     }
 }

@@ -1,5 +1,5 @@
-//! The Script DAT: Python `cook(inputs)` on the shared worker, gated by
-//! the project's Python choice, never waiting on the cook (offline it
+//! The Script DAT: Python `cook(inputs)` on the shared worker, run only
+//! while its exact code is allowed, never waiting on the cook (offline it
 //! waits for its result).
 
 use std::collections::HashMap;
@@ -12,7 +12,7 @@ use atd_gpu::engine::{CookMode, Dat, DatCtx, DatInputs, DatOp, Params, SigInputs
 use atd_py::script;
 use serde_json::json;
 
-/// The gate is process-wide: tests that flip it take turns.
+/// The allow-list is process-wide: tests that change it take turns.
 static GATE: Mutex<()> = Mutex::new(());
 
 struct Rig {
@@ -64,6 +64,17 @@ impl Rig {
             .unwrap();
     }
 
+    /// Allows the code as it is now.
+    fn allow(&self) {
+        atd_py::allow::allow_network(&self.net, &self.registry);
+    }
+
+    /// Sets the code and allows it (the user typed it).
+    fn code_allowed(&mut self, code: &str) {
+        self.code(code);
+        self.allow();
+    }
+
     fn input(&mut self, i: usize, v: Dat) {
         let id = NodeId(100 + i as u64);
         self.dat.insert(id, v);
@@ -105,21 +116,28 @@ impl Rig {
 #[test]
 fn scripts_run_only_once_allowed() {
     let _gate = GATE.lock().unwrap_or_else(|e| e.into_inner());
-    script::allow(false);
+    atd_py::allow::clear();
     let mut rig = Rig::new("def cook(inputs):\n    return 'ran'\n");
     let e = rig.cook_in(CookMode::Live).unwrap_err();
     assert!(e.starts_with(atd_py::ops::NOT_ALLOWED), "{e}");
     assert_eq!(rig.out.as_text(), "");
     // Allowed later: it runs without anything else changing.
-    script::allow(true);
+    rig.allow();
     rig.until(|r, _| r.out.as_text() == "ran").unwrap();
-    script::allow(false);
+    // Changed code is new content: blocked until allowed, then it runs.
+    rig.code("def cook(inputs):\n    return 'changed'\n");
+    let e = rig.until(|_, r| r.is_err()).unwrap_err();
+    assert!(e.starts_with(atd_py::ops::NOT_ALLOWED), "{e}");
+    assert_eq!(rig.out.as_text(), "ran");
+    rig.allow();
+    rig.until(|r, _| r.out.as_text() == "changed").unwrap();
+    atd_py::allow::clear();
 }
 
 #[test]
 fn inputs_become_python_values_and_results_dats() {
     let _gate = GATE.lock().unwrap_or_else(|e| e.into_inner());
-    script::allow(true);
+    atd_py::allow::clear();
     // The default code upper-cases a table.
     let mut rig = Rig::new(
         atd_ops_dat::schemas()
@@ -131,11 +149,12 @@ fn inputs_become_python_values_and_results_dats() {
             .as_str()
             .unwrap(),
     );
+    rig.allow();
     rig.input(0, Dat::table(Table::from_rows([["a", "b"], ["c", "d"]])));
     rig.until(|r, _| r.out.as_text() == "A\tB\nC\tD").unwrap();
     assert!(!rig.out.is_text());
     // Text in, both inputs, a dict out; a new input value runs it again.
-    rig.code(
+    rig.code_allowed(
         "def cook(inputs):\n    text, other = inputs\n    return {'words': len(text.split()), 'other': other}\n",
     );
     rig.input(0, Dat::text("three small words"));
@@ -144,30 +163,30 @@ fn inputs_become_python_values_and_results_dats() {
     rig.input(1, Dat::text("x"));
     rig.until(|r, _| r.out.cell(1, 1) == Some("x")).unwrap();
     // A list of values is one column; None is empty text.
-    rig.code("def cook(inputs):\n    return [1, 2.5, None]\n");
+    rig.code_allowed("def cook(inputs):\n    return [1, 2.5, None]\n");
     rig.until(|r, _| r.out.rows() == 3).unwrap();
     assert_eq!(rig.out.as_text(), "1\n2.5\n");
     // Errors name the line; the last good value stays.
-    rig.code("def cook(inputs):\n    x = 1\n    return 1 / 0\n");
+    rig.code_allowed("def cook(inputs):\n    x = 1\n    return 1 / 0\n");
     let e = rig.until(|_, r| r.is_err()).unwrap_err();
     assert!(
         e.contains("ZeroDivisionError") && e.contains("line 3"),
         "{e}"
     );
     assert_eq!(rig.out.rows(), 3);
-    rig.code("def cook(inputs)\n    return 1\n");
+    rig.code_allowed("def cook(inputs)\n    return 1\n");
     let e = rig
         .until(|_, r| r.as_ref().is_err_and(|e| e.contains("SyntaxError")))
         .unwrap_err();
     assert!(e.contains("line 1"), "{e}");
-    rig.code("x = 1\n");
+    rig.code_allowed("x = 1\n");
     let e = rig
         .until(|_, r| r.as_ref().is_err_and(|e| e.contains("cook")))
         .unwrap_err();
     assert!(e.contains("no cook(inputs)"), "{e}");
     // Offline the frame waits for the script.
-    rig.code("import time\ndef cook(inputs):\n    time.sleep(0.05)\n    return 'slow'\n");
+    rig.code_allowed("import time\ndef cook(inputs):\n    time.sleep(0.05)\n    return 'slow'\n");
     rig.cook_in(CookMode::Offline { fps: 30.0 }).unwrap();
     assert_eq!(rig.out.as_text(), "slow");
-    script::allow(false);
+    atd_py::allow::clear();
 }

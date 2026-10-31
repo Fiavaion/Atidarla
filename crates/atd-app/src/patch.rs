@@ -232,6 +232,35 @@ const COMMENT_HEADER: f32 = 26.0;
 const MIN_COMMENT: Vec2 = Vec2::new(80.0, 40.0);
 const COMMENT_FILL: Color32 = Color32::from_rgba_premultiplied(30, 36, 46, 70);
 
+/// The allow-list items for the pasted copies (`new`, in the fragment's
+/// order) of fragment nodes whose Python, exactly as copied, is already
+/// allowed: the same content keeps running; nothing else is allowed.
+fn copies_of_allowed(
+    engine: &Engine,
+    fragment: &Fragment,
+    new: &[NodeId],
+) -> Vec<atd_py::allow::Item> {
+    use atd_py::allow::Item;
+    let mut out = Vec::new();
+    let registry = engine.registry();
+    for (n, id) in fragment.nodes.iter().zip(new.iter().copied()) {
+        for item in atd_py::allow::node_items(n, registry) {
+            if !atd_py::allow::allows(&item) {
+                continue;
+            }
+            out.push(match item {
+                Item::Expr { param, source, .. } => Item::Expr {
+                    node: id,
+                    param,
+                    source,
+                },
+                Item::Script { code, .. } => Item::Script { node: id, code },
+            });
+        }
+    }
+    out
+}
+
 /// Canvas offset of pasted and duplicated nodes.
 const PASTE_OFFSET: [f32; 2] = [30.0, 30.0];
 
@@ -266,10 +295,6 @@ pub struct PatchEditor {
     /// Draw each wire's type at its middle (a per-user setting).
     pub wire_labels: bool,
     key_wire: Option<KeyWire>,
-    /// A paste brought in Python (Script nodes, Python expressions): the
-    /// app withdraws the allowance and asks
-    /// ([`crate::project::ProjectState::withdraw_python`]). Taken by the app.
-    pub pasted_python: bool,
 }
 
 impl PatchEditor {
@@ -331,7 +356,7 @@ impl PatchEditor {
         engine: &mut Engine,
         fragment: &Fragment,
         offset: [f32; 2],
-    ) -> Vec<Edit> {
+    ) -> (Vec<Edit>, Vec<NodeId>) {
         let mut ids = Vec::with_capacity(fragment.nodes.len());
         for _ in &fragment.nodes {
             ids.push(engine.alloc_id());
@@ -344,7 +369,7 @@ impl PatchEditor {
         );
         self.selection = new_ids.iter().copied().collect();
         self.selected = new_ids.last().copied();
-        edits
+        (edits, new_ids)
     }
 
     /// Shows a transient message at the bottom of the canvas.
@@ -1033,7 +1058,7 @@ impl PatchEditor {
         }
         let keys = !typing && self.search.is_none() && (focused || ui.rect_contains_pointer(rect));
         let mut clipboard: Option<Fragment> = None;
-        let mut paste: Option<(Fragment, [f32; 2], bool)> = None;
+        let mut paste: Option<(Fragment, [f32; 2])> = None;
         let mut delete = false;
         let mut new_comment: Option<Rect> = None;
         if keys {
@@ -1074,12 +1099,8 @@ impl PatchEditor {
                                     [c.x.round() - o[0], c.y.round() - o[1]]
                                 }
                                 None => PASTE_OFFSET,
-                            }; // From the clipboard: it may hold anyone's code.
-                            let mut python = Vec::new();
-                            for n in &f.nodes {
-                                crate::project::node_python(n, &mut python);
-                            }
-                            paste = Some((f, offset, !python.is_empty()));
+                            };
+                            paste = Some((f, offset));
                         }
                         _ => {}
                     },
@@ -1087,7 +1108,7 @@ impl PatchEditor {
                 }
             }
             if duplicate && !self.selection.is_empty() {
-                paste = Some((Fragment::copy(net, &self.selection), PASTE_OFFSET, false));
+                paste = Some((Fragment::copy(net, &self.selection), PASTE_OFFSET));
             }
         }
         if delete && let Some(id) = self.selected_comment.take() {
@@ -1151,15 +1172,24 @@ impl PatchEditor {
             }
         }
         self.comment_editor(ui, engine);
-        if let Some((fragment, offset, python)) = paste {
-            let n = fragment.nodes.len();
-            let edits = self.paste_edits(engine, &fragment, offset);
-            match engine.edit(&format!("paste {n} nodes"), edits) {
-                Ok(()) => self.pasted_python |= python,
-                Err(e) => {
-                    self.select_only(None);
-                    self.status(e.to_string());
-                }
+        if let Some((fragment, offset)) = paste {
+            self.paste(engine, &fragment, offset);
+        }
+    }
+
+    /// Pastes `fragment` moved by `offset` (one undo step) and selects the
+    /// copies. A copy of Python that is already allowed runs too; anything
+    /// else pasted (the clipboard may hold anyone's code) stays blocked until
+    /// allowed.
+    fn paste(&mut self, engine: &mut Engine, fragment: &Fragment, offset: [f32; 2]) {
+        let n = fragment.nodes.len();
+        let (edits, new_ids) = self.paste_edits(engine, fragment, offset);
+        let copies = copies_of_allowed(engine, fragment, &new_ids);
+        match engine.edit(&format!("paste {n} nodes"), edits) {
+            Ok(()) => atd_py::allow::allow(copies),
+            Err(e) => {
+                self.select_only(None);
+                self.status(e.to_string());
             }
         }
     }
@@ -2002,5 +2032,49 @@ mod tests {
                 assert!(ms < 16.0, "{label}: {ms:.2} ms per frame");
             }
         }
+    }
+
+    /// Pasting your own nodes keeps their allowed Python running in the
+    /// copies; pasted Python that was never allowed (from anyone's
+    /// clipboard) stays blocked, and nothing already running stops.
+    #[test]
+    fn pasted_python_runs_only_if_it_was_allowed() {
+        let _flag = crate::project::tests::python_flag();
+        let Some(mut engine) = crate::project::tests::engine() else {
+            return;
+        };
+        let own_src = "[0.25, 0.5][int(time) % 2]";
+        let id = engine.alloc_id();
+        let mut node = Node::new(id, "img.level", "level1");
+        node.params.insert(
+            "brightness".into(),
+            atd_core::graph::Param {
+                value: serde_json::json!(1.0),
+                expr: Some(own_src.into()),
+                bind: None,
+            },
+        );
+        engine.edit("add", [Edit::AddNode { node }]).unwrap();
+        atd_py::allow::clear();
+        atd_py::allow::allow_network(engine.network(), engine.registry());
+        let mut editor = PatchEditor::default();
+
+        // Copy and paste our own node: the copy's Python runs too.
+        let own = Fragment::copy(engine.network(), &BTreeSet::from([id]));
+        editor.paste(&mut engine, &own, PASTE_OFFSET);
+        assert_eq!(engine.network().len(), 2);
+        assert!(crate::project::blocked_python(&engine).is_empty());
+
+        // A clipboard from elsewhere: same node ID, other code. Blocked;
+        // ours keeps running.
+        let mut foreign = own.clone();
+        foreign.nodes[0].params.get_mut("brightness").unwrap().expr =
+            Some("__import__('os').getpid() * 0".into());
+        editor.paste(&mut engine, &foreign, PASTE_OFFSET);
+        let blocked = crate::project::blocked_python(&engine);
+        assert_eq!(blocked.len(), 1, "{blocked:?}");
+        assert!(blocked[0].describe(engine.network()).contains("getpid"));
+        assert!(atd_py::allow::allows_expr(id, "brightness", own_src));
+        atd_py::allow::clear();
     }
 }

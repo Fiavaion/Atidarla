@@ -1,8 +1,8 @@
-//! Python expressions are project code (docs/python-ops.md): none reaches
-//! the worker until the project's Python is allowed. Until then the
-//! parameter keeps its stored value and the node says why; native
-//! expressions keep working. One test, in its own process: the allowance is
-//! process-wide.
+//! Python expressions are project code (docs/python-ops.md): one reaches
+//! the worker only while its exact content (node, parameter, source) is on
+//! the allow-list. Until then the parameter keeps its stored value and the
+//! node says why; other allowed expressions and native ones keep working.
+//! One test, in its own process: the list is process-wide.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -12,6 +12,7 @@ use atd_core::graph::{Edit, Endpoint, Node, NodeId, Param, Wire};
 use atd_core::registry::Registry;
 use atd_gpu::engine::{Engine, EngineConfig, OpLibrary};
 use atd_interop::readback::read_rgba8;
+use atd_py::allow::{self, Item};
 use atd_py::expr::PyExprHost;
 use serde_json::json;
 
@@ -68,118 +69,203 @@ fn writes(marker: &Path) -> String {
 /// In the native subset: evaluated on the cook thread, no Python.
 const NATIVE: &str = "0.5 + 0 * time";
 
-#[test]
-fn python_expressions_wait_for_the_projects_allowance() {
-    assert!(atd_core::expr::Expr::parse(NATIVE).is_ok());
-    assert!(atd_core::expr::Expr::parse(&writes(Path::new("x"))).is_err());
-    // A project opens: its Python waits for the user's choice.
-    atd_py::script::allow(false);
-
-    // The host refuses jobs on its own too: nothing is evaluated.
-    let marker = std::env::temp_dir().join(format!("atd-expr-trust-{}", std::process::id()));
-    let _ = std::fs::remove_file(&marker);
-    let mut host = PyExprHost::start().unwrap();
-    assert!(!host.allowed());
-    let job = PyJob {
-        key: 1,
-        source: writes(&marker).into(),
-        ..PyJob::default()
-    };
-    host.submit(std::slice::from_ref(&job));
-    host.submit_wait(std::slice::from_ref(&job));
-    std::thread::sleep(Duration::from_millis(300));
-    let mut out = Vec::new();
-    host.collect(&mut out);
-    assert!(out.is_empty(), "{out:?}");
-    assert!(!marker.exists(), "a refused job ran");
-    drop(host);
-
-    let Some(mut e) = engine() else { return };
-    e.set_python(Box::new(PyExprHost::start().unwrap()));
-    let (white, py, native) = (e.alloc_id(), e.alloc_id(), e.alloc_id());
+fn level(e: &mut Engine, name: &str, white: NodeId, expr: &str) -> NodeId {
+    let id = e.alloc_id();
     e.edit(
-        "build",
+        "add",
         [
             Edit::AddNode {
-                node: Node::new(white, "img.constant", "white"),
-            },
-            Edit::AddNode {
-                node: Node::new(py, "img.level", "level1"),
-            },
-            Edit::AddNode {
-                node: Node::new(native, "img.level", "level2"),
-            },
-            Edit::SetParam {
-                node: white,
-                param: "colour".into(),
-                value: Some(Param::constant(json!([1.0, 1.0, 1.0, 1.0]))),
+                node: Node::new(id, "img.level", name),
             },
             Edit::Connect {
-                wire: Wire::new(Endpoint::new(white, "out"), Endpoint::new(py, "in")),
-            },
-            Edit::Connect {
-                wire: Wire::new(Endpoint::new(white, "out"), Endpoint::new(native, "in")),
+                wire: Wire::new(Endpoint::new(white, "out"), Endpoint::new(id, "in")),
             },
             Edit::SetParam {
-                node: py,
+                node: id,
                 param: "brightness".into(),
                 value: Some(Param {
                     value: json!(1.0),
-                    expr: Some(writes(&marker)),
-                    bind: None,
-                }),
-            },
-            Edit::SetParam {
-                node: native,
-                param: "brightness".into(),
-                value: Some(Param {
-                    value: json!(1.0),
-                    expr: Some(NATIVE.into()),
+                    expr: Some(expr.into()),
                     bind: None,
                 }),
             },
         ],
     )
     .unwrap();
+    id
+}
 
-    // Not allowed: the stored value, a clear error, nothing ran. The
-    // native expression is unaffected.
-    let mut t = 0.0;
-    frames(&mut e, &[py, native], &mut t, Duration::from_millis(500));
-    assert_eq!(red(&mut e, py, t), 255, "the stored brightness");
-    let err = e.error(py).expect("an error on the node");
-    assert!(err.contains(PYTHON_NOT_ALLOWED), "{err}");
-    assert!(err.contains("brightness"), "{err}");
-    assert!(matches!(red(&mut e, native, t), 127 | 128));
-    assert_eq!(e.error(native), None);
-    assert!(!marker.exists(), "the Python expression ran before allow");
+fn set_expr(e: &mut Engine, node: NodeId, expr: &str) {
+    e.edit(
+        "expr",
+        [Edit::SetParam {
+            node,
+            param: "brightness".into(),
+            value: Some(Param {
+                value: json!(1.0),
+                expr: Some(expr.into()),
+                bind: None,
+            }),
+        }],
+    )
+    .unwrap();
+}
 
-    // Allowed: it runs, a frame or so late.
-    atd_py::script::allow(true);
+fn item(node: NodeId, expr: &str) -> Item {
+    Item::Expr {
+        node,
+        param: "brightness".into(),
+        source: expr.into(),
+    }
+}
+
+/// Cooks until `node`'s red is `want` (20 s at most).
+fn until_red(e: &mut Engine, node: NodeId, t: &mut f64, want: u8) {
     let start = Instant::now();
     loop {
-        t += 1.0 / 60.0;
-        if red(&mut e, py, t) == 64 {
-            break;
+        *t += 1.0 / 60.0;
+        if red(e, node, *t) == want {
+            return;
         }
         assert!(
             start.elapsed() < Duration::from_secs(20),
-            "the result arrives"
+            "red {want} arrives"
         );
         std::thread::sleep(Duration::from_millis(5));
     }
-    assert_eq!(e.error(py), None);
-    assert!(marker.exists(), "the allowed expression ran");
+}
 
-    // Another project opens: the allowance resets, nothing runs again.
-    atd_py::script::allow(false);
-    // A batch already offered may still be with the worker; the worker
-    // refuses it now, so the marker cannot come back after this point.
-    frames(&mut e, &[py, native], &mut t, Duration::from_millis(200));
-    std::fs::remove_file(&marker).unwrap();
-    frames(&mut e, &[py, native], &mut t, Duration::from_millis(500));
-    assert_eq!(red(&mut e, py, t), 255);
-    assert!(e.error(py).is_some_and(|m| m.contains(PYTHON_NOT_ALLOWED)));
+/// Whether the marker was written since the last call (and removes it).
+fn ran(marker: &Path) -> bool {
+    let yes = marker.exists();
+    let _ = std::fs::remove_file(marker);
+    yes
+}
+
+#[test]
+fn python_expressions_run_only_as_allowed() {
+    assert!(atd_core::expr::Expr::parse(NATIVE).is_ok());
+    assert!(atd_core::expr::Expr::parse(&writes(Path::new("x"))).is_err());
+    let dir = std::env::temp_dir().join(format!("atd-expr-trust-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let (m1, m2) = (dir.join("own"), dir.join("foreign"));
+    // A project opens: nothing is allowed.
+    allow::clear();
+
+    // The worker refuses a job that is not allowed, even when offered.
+    let mut host = PyExprHost::start().unwrap();
+    let job = PyJob {
+        key: 1,
+        source: writes(&m2).into(),
+        ..PyJob::default()
+    };
+    assert!(!host.allows(job.node, &job.param, &job.source));
+    host.submit_wait(std::slice::from_ref(&job));
+    let mut out = Vec::new();
+    host.collect(&mut out);
+    assert!(
+        matches!(&out[..], [(1, Err(m))] if m.contains(PYTHON_NOT_ALLOWED)),
+        "{out:?}"
+    );
+    assert!(!ran(&m2), "a refused job ran");
+    drop(host);
+
+    let Some(mut e) = engine() else { return };
+    e.set_python(Box::new(PyExprHost::start().unwrap()));
+    let white = e.alloc_id();
+    e.edit(
+        "white",
+        [
+            Edit::AddNode {
+                node: Node::new(white, "img.constant", "white"),
+            },
+            Edit::SetParam {
+                node: white,
+                param: "colour".into(),
+                value: Some(Param::constant(json!([1.0, 1.0, 1.0, 1.0]))),
+            },
+        ],
+    )
+    .unwrap();
+    let native = level(&mut e, "native1", white, NATIVE);
+    let own_src = writes(&m1);
+    let own = level(&mut e, "own1", white, &own_src);
+    let mut t = 0.0;
+
+    // Not allowed: the stored value, a clear error, nothing ran; the native
+    // expression is unaffected.
+    frames(&mut e, &[own, native], &mut t, Duration::from_millis(400));
+    assert_eq!(red(&mut e, own, t), 255, "the stored brightness");
+    let err = e.error(own).expect("an error on the node");
+    assert!(
+        err.contains(PYTHON_NOT_ALLOWED) && err.contains("brightness"),
+        "{err}"
+    );
     assert!(matches!(red(&mut e, native, t), 127 | 128));
-    assert!(!marker.exists(), "ran after the allowance was withdrawn");
+    assert_eq!(e.error(native), None);
+    assert!(!ran(&m1), "ran before it was allowed");
+
+    // Allowed (the dialog): it runs, a frame or so late.
+    allow::allow([item(own, &own_src)]);
+    until_red(&mut e, own, &mut t, 64);
+    assert_eq!(e.error(own), None);
+    assert!(ran(&m1), "the allowed expression ran");
+
+    // Foreign Python joins (a paste, a merge) and is cooked at once: it is
+    // blocked from the first frame, and the allowed one keeps running.
+    let foreign_src = writes(&m2);
+    let foreign = level(&mut e, "foreign1", white, &foreign_src);
+    for _ in 0..30 {
+        t += 1.0 / 60.0;
+        e.cook(&[own, foreign], t).unwrap();
+    }
+    frames(&mut e, &[own, foreign], &mut t, Duration::from_millis(300));
+    assert!(!ran(&m2), "foreign Python ran");
+    assert!(
+        e.error(foreign)
+            .is_some_and(|m| m.contains(PYTHON_NOT_ALLOWED))
+    );
+    assert_eq!(red(&mut e, own, t), 64, "the allowed one keeps running");
+    assert!(ran(&m1));
+
+    // A change after the first 60 characters is new content: blocked.
+    let tail = format!("{own_src} + 0 * len('{}')", "x".repeat(80));
+    set_expr(&mut e, own, &tail);
+    frames(&mut e, &[own], &mut t, Duration::from_millis(300));
+    let _ = ran(&m1);
+    frames(&mut e, &[own], &mut t, Duration::from_millis(300));
+    assert!(!ran(&m1), "the changed expression ran");
+    assert!(e.error(own).is_some_and(|m| m.contains(PYTHON_NOT_ALLOWED)));
+    assert_eq!(red(&mut e, own, t), 255);
+
+    // Undo brings back the allowed content: it runs. Redo brings back the
+    // changed one: blocked again.
+    e.undo().unwrap();
+    until_red(&mut e, own, &mut t, 64);
+    e.redo().unwrap();
+    until_red(&mut e, own, &mut t, 255);
+    let _ = ran(&m1);
+    frames(&mut e, &[own], &mut t, Duration::from_millis(300));
+    assert!(!ran(&m1), "redo resurrected a blocked expression");
+
+    // Undo the change and the foreign node's addition, redo the addition:
+    // the foreign node is still not allowed.
+    e.undo().unwrap();
+    e.undo().unwrap();
+    e.redo().unwrap();
+    frames(&mut e, &[foreign], &mut t, Duration::from_millis(300));
+    assert!(!ran(&m2), "undo/redo resurrected foreign Python");
+
+    // Another project opens: the list is cleared, nothing runs.
+    until_red(&mut e, own, &mut t, 64);
+    allow::clear();
+    frames(&mut e, &[own, native], &mut t, Duration::from_millis(200));
+    let _ = ran(&m1);
+    frames(&mut e, &[own, native], &mut t, Duration::from_millis(400));
+    assert_eq!(red(&mut e, own, t), 255);
+    assert!(e.error(own).is_some_and(|m| m.contains(PYTHON_NOT_ALLOWED)));
+    assert!(matches!(red(&mut e, native, t), 127 | 128));
+    assert!(!ran(&m1), "ran after the list was cleared");
+    std::fs::remove_dir_all(&dir).ok();
 }

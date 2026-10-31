@@ -38,11 +38,15 @@ fn engine() -> Option<Engine> {
     Some(Engine::new(device, queue, reg, lib, config))
 }
 
-/// A worker for these tests' own expressions: the project's Python is
-/// allowed (gating is `expr_trust.rs`).
 fn host() -> PyExprHost {
-    atd_py::script::allow(true);
     PyExprHost::start().unwrap()
+}
+
+/// Edits and allows the result: these tests' own expressions (the
+/// allow-list itself is `expr_trust.rs`).
+fn edit(e: &mut Engine, label: &str, edits: impl IntoIterator<Item = Edit>) {
+    e.edit(label, edits).unwrap();
+    atd_py::allow::allow_network(e.network(), e.registry());
 }
 
 fn red(e: &mut Engine, node: NodeId, time: f64) -> u8 {
@@ -55,7 +59,8 @@ fn python_expressions_arrive_a_frame_late_without_blocking() {
     let Some(mut e) = engine() else { return };
     e.set_python(Box::new(host()));
     let (white, level, knobs) = (e.alloc_id(), e.alloc_id(), e.alloc_id());
-    e.edit(
+    edit(
+        &mut e,
         "build",
         [
             Edit::AddNode {
@@ -93,8 +98,7 @@ fn python_expressions_arrive_a_frame_late_without_blocking() {
                 }),
             },
         ],
-    )
-    .unwrap();
+    );
     // The first frame cannot have a result yet: the stored value shows.
     let start = Instant::now();
     assert_eq!(red(&mut e, level, 0.0), 255);
@@ -119,7 +123,8 @@ fn python_expressions_arrive_a_frame_late_without_blocking() {
     );
 
     // An error from Python shows on the node; the stored value is used.
-    e.edit(
+    edit(
+        &mut e,
         "expr",
         [Edit::SetParam {
             node: level,
@@ -130,8 +135,7 @@ fn python_expressions_arrive_a_frame_late_without_blocking() {
                 bind: None,
             }),
         }],
-    )
-    .unwrap();
+    );
     loop {
         t += 1.0 / 60.0;
         red(&mut e, level, t);
@@ -155,7 +159,8 @@ fn offline_python_results_are_exactly_one_frame_late() {
     e.set_python(Box::new(host()));
     e.set_mode(atd_gpu::engine::CookMode::Offline { fps: 60.0 });
     let (white, level) = (e.alloc_id(), e.alloc_id());
-    e.edit(
+    edit(
+        &mut e,
         "build",
         [
             Edit::AddNode {
@@ -185,8 +190,7 @@ fn offline_python_results_are_exactly_one_frame_late() {
                 }),
             },
         ],
-    )
-    .unwrap();
+    );
     // Frame 0 has no result yet (the stored value); each later frame has
     // the previous frame's.
     assert_eq!(red(&mut e, level, 0.0), 255);
@@ -213,7 +217,8 @@ fn python_tuples_drive_vectors_one_component_each() {
             bind: None,
         }),
     };
-    e.edit(
+    edit(
+        &mut e,
         "build",
         [
             Edit::AddNode {
@@ -232,8 +237,7 @@ fn python_tuples_drive_vectors_one_component_each() {
                 "tuple([1, 0.5, 0][i] for i in range(3))",
             ),
         ],
-    )
-    .unwrap();
+    );
     let pixel = |e: &mut Engine, node: NodeId, f: f64| {
         e.cook(&[node], f / 60.0).unwrap();
         let px = read_rgba8(e.device(), e.queue(), e.result(node).unwrap()).unwrap();
@@ -244,14 +248,14 @@ fn python_tuples_drive_vectors_one_component_each() {
     assert_eq!((r, b, a), (255, 0, 255));
     assert!(matches!(g, 127 | 128), "{g}");
     assert_eq!(e.error(colour), None);
-    e.edit(
+    edit(
+        &mut e,
         "bad",
         [
             expr(colour, "colour", json!([0.0, 0.0, 0.0, 1.0]), "(1, 0.5)"),
             expr(level, "brightness", json!(0.25), "(1, 2)"),
         ],
-    )
-    .unwrap();
+    );
     pixel(&mut e, level, 2.0);
     assert_eq!(pixel(&mut e, level, 3.0), [0, 0, 0, 255], "stored values");
     assert_eq!(
@@ -274,7 +278,8 @@ fn offline_waits_for_python_expressions_are_bounded() {
     e.set_python(Box::new(host));
     e.set_mode(atd_gpu::engine::CookMode::Offline { fps: 60.0 });
     let (white, level) = (e.alloc_id(), e.alloc_id());
-    e.edit(
+    edit(
+        &mut e,
         "build",
         [
             Edit::AddNode {
@@ -296,8 +301,7 @@ fn offline_waits_for_python_expressions_are_bounded() {
                 }),
             },
         ],
-    )
-    .unwrap();
+    );
     let start = Instant::now();
     red(&mut e, level, 0.0);
     red(&mut e, level, 1.0 / 60.0);
