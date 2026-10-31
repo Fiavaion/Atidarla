@@ -28,6 +28,8 @@
 //! | `pnt.points_from_image`, `points_from_depth` (IMG in) | an image (a depth and a colour image) | `P`, `Cd`, `uv`, `id`; `value`; `depth`, `valid` |
 //! | `pnt.attribute_from_image` (IMG in) | `uv` or `P`, an image | any attribute |
 //! | `pnt.file_in`, `pnt.sensor_in` (M6 capture, `docs/point-caches.md`) | a file (worker thread); a sensor or its test scene | the file's attributes; `P`, `Cd`, `depth`, `valid`, `body`, `id` or joints and bones |
+//! | `pnt.attribute_noise`, `attribute_from_channels` (SIG in), `falloff_field` | `P` or a vector attribute; channels | any attribute (`falloff`) |
+//! | `pnt.attribute_transfer`, `proximity`, `neighbours` (grid hash) | `P` of both inputs, the attribute | the attribute; `dist`, `nearvec`; `nbr`, `nbrdist`, `nbrcount` |
 //! | `img.render_points` (IMG) | `P`, `Cd`, polylines | an image |
 
 mod attr;
@@ -41,6 +43,7 @@ mod fuse;
 mod image_kit;
 mod kernel;
 mod kit;
+mod lookup;
 mod neighbours;
 mod noise;
 mod particles;
@@ -52,6 +55,7 @@ mod sensor;
 mod solver;
 mod sort;
 mod sources;
+mod transfer;
 mod transform;
 
 use atd_core::registry::{OpFamily, OperatorSchema, ParamSchema, Registry, SocketSchema, WireType};
@@ -126,6 +130,12 @@ const OPS: &[(Schema, Factory)] = &[
     (from_image::attribute_schema, from_image::create_attribute),
     (file_in::schema, file_in::create),
     (sensor::schema, sensor::create),
+    (lookup::noise_schema, lookup::create_noise),
+    (lookup::channels_schema, lookup::create_channels),
+    (lookup::falloff_schema, lookup::create_falloff),
+    (transfer::transfer_schema, transfer::create_transfer),
+    (transfer::proximity_schema, transfer::create_proximity),
+    (transfer::neighbours_schema, transfer::create_neighbours),
 ];
 
 /// Every schema this crate registers (PNT operators and Render Points).

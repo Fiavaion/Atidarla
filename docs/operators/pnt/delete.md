@@ -46,3 +46,4 @@ All platforms.
 
 - [PNT Capture](../../../examples/pnt-capture.atidarla/) — `bright_only`
 - [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `hole`, `pick`
+- [PNT Fields](../../../examples/pnt-fields.atidarla/) — `holes`

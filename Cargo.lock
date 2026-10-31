@@ -513,6 +513,7 @@ dependencies = [
  "atd-interop",
  "atd-kernel",
  "atd-ops-img",
+ "atd-ops-sig",
  "log",
  "naga",
  "pollster 0.4.0",

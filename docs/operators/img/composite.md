@@ -43,6 +43,7 @@ All platforms.
 - [Pack: RGB Delay](../../../examples/pack-rgb-delay.atidarla/) — `shapes`
 - [PNT Capture](../../../examples/pnt-capture.atidarla/) — `stage`
 - [PNT Constellation](../../../examples/pnt-constellation.atidarla/) — `sky`
+- [PNT Fields](../../../examples/pnt-fields.atidarla/) — `stage`
 - [Points](../../../examples/points.atidarla/) — `mix`
 - [Signal scope](../../../examples/signal-scope.atidarla/) — `scopes`, `all`
 - [Simulations](../../../examples/simulations.atidarla/) — `screen`, `all`

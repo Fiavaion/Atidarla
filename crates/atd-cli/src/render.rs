@@ -776,7 +776,15 @@ pub fn classify(type_id: &str) -> Option<Class> {
         | "pnt.subset" | "pnt.taper" | "pnt.transform" | "pnt.turbulence" | "pnt.twist"
         | "pnt.vortex" | "pnt.wave" | "pnt.wind" => Pure,
         // M6 capture and lookup operators: GPU work in the frame's encoder.
-        "pnt.attribute_from_image" | "pnt.points_from_depth" | "pnt.points_from_image" => Pure,
+        "pnt.attribute_from_channels"
+        | "pnt.attribute_from_image"
+        | "pnt.attribute_noise"
+        | "pnt.attribute_transfer"
+        | "pnt.falloff_field"
+        | "pnt.neighbours"
+        | "pnt.points_from_depth"
+        | "pnt.points_from_image"
+        | "pnt.proximity" => Pure,
         // Point files are read on a worker thread; Sensor In's recordings
         // too (its test scene is a function of time and frame; live capture
         // outputs nothing offline).

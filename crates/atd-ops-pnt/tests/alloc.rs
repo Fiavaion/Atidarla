@@ -56,7 +56,7 @@ static GLOBAL: Counting = Counting;
 const BOUND: f64 = 90.0;
 
 /// Nodes cooked per frame (all but the static Points source).
-const NODES: usize = 14;
+const NODES: usize = 18;
 
 #[test]
 fn geo_chains_steady_state_allocations() {
@@ -79,9 +79,11 @@ fn geo_chains_steady_state_allocations() {
     let mut reg = Registry::default();
     atd_ops_pnt::register(&mut reg);
     atd_ops_img::register(&mut reg);
+    atd_ops_sig::register(&mut reg);
     let mut lib = OpLibrary::default();
     atd_ops_pnt::library(&mut lib);
     atd_ops_img::library(&mut lib);
+    atd_ops_sig::library(&mut lib);
     let config = EngineConfig {
         width: 64,
         height: 32,
@@ -137,8 +139,19 @@ fn geo_chains_steady_state_allocations() {
     );
     let pfd = node(&mut e, "pnt.points_from_depth", &[("columns", json!(64))]);
     let sensor = node(&mut e, "pnt.sensor_in", &[("columns", json!(64))]);
+    // The M6 attribute operators in the same chain; the neighbour
+    // operators (grid hash: a sort of many dispatches, which wgpu pays for
+    // per dispatch) on a chain of their own, checked for GPU objects only.
+    let falloff = node(&mut e, "pnt.falloff_field", &[]);
+    let anoise = node(&mut e, "pnt.attribute_noise", &[]);
+    let wave = node(&mut e, "sig.pattern", &[("speed", json!(0.5))]);
+    let afc = node(&mut e, "pnt.attribute_from_channels", &[]);
+    let nbrs = node(&mut e, "pnt.neighbours", &[]);
+    let transfer = node(&mut e, "pnt.attribute_transfer", &[]);
+    let prox = node(&mut e, "pnt.proximity", &[]);
     let mix = node(&mut e, "pnt.merge", &[]);
     let r3 = node(&mut e, "img.render_points", &[]);
+    let r4 = node(&mut e, "img.render_points", &[]);
     let wire = |from: NodeId, to: NodeId, socket: &str| Edit::Connect {
         wire: Wire::new(Endpoint::new(from, "out"), Endpoint::new(to, socket)),
     };
@@ -154,7 +167,17 @@ fn geo_chains_steady_state_allocations() {
         wire(pfi, afi, "in"),
         wire(img, afi, "image"),
         wire(img, pfd, "depth"),
-        wire(afi, mix, "a"),
+        wire(afi, falloff, "in"),
+        wire(falloff, anoise, "in"),
+        wire(anoise, afc, "in"),
+        wire(wave, afc, "channels"),
+        wire(afc, nbrs, "in"),
+        wire(nbrs, transfer, "in"),
+        wire(sensor, transfer, "from"),
+        wire(transfer, prox, "in"),
+        wire(pfd, prox, "to"),
+        wire(prox, r4, "geo"),
+        wire(afc, mix, "a"),
         wire(pfd, mix, "b"),
         wire(sensor, mix, "c"),
         wire(mix, r3, "geo"),
@@ -208,7 +231,8 @@ fn geo_chains_steady_state_allocations() {
         "GPU objects still being created after warm-up"
     );
     for n in [
-        pts, n1, n2, r1, ps, force, r2, img, pfi, afi, pfd, sensor, mix, r3,
+        pts, n1, n2, r1, ps, force, r2, img, pfi, afi, pfd, sensor, mix, r3, falloff, anoise, wave,
+        afc,
     ] {
         assert_eq!(e.error(n), None);
     }
@@ -241,6 +265,24 @@ fn geo_chains_steady_state_allocations() {
     assert_eq!(e.buffer_pool().created(), buffers, "no buffers created");
     assert_eq!(bind_groups_created_total(), binds, "no bind groups created");
     assert_eq!(e.pool().created(), textures, "no textures created");
+    // The neighbour operators: after warm-up, no GPU objects either.
+    let all = [r1, r2, r3, r4];
+    let (mut last, mut stable) = (counts(&e), 0);
+    for _ in 0..1200 {
+        e.cook(&all, t).unwrap();
+        t += 1.0 / 60.0;
+        let _ = e.device().poll(wgpu::PollType::wait_indefinitely());
+        let now = counts(&e);
+        stable = if now == last { stable + 1 } else { 0 };
+        last = now;
+        if stable >= 60 {
+            break;
+        }
+    }
+    assert!(stable >= 60, "neighbour operators still create GPU objects");
+    for n in [nbrs, transfer, prox, r4] {
+        assert_eq!(e.error(n), None);
+    }
     if std::env::var_os("ATD_ALLOC_BREAKDOWN").is_some() {
         for (label, req) in [
             ("empty", &[][..]),

@@ -1,0 +1,18 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "PNT Fields"
+description = '''
+Attribute fields on the GPU (M6). A grid of points is weighted by two Falloff Fields (a sphere
+and a half-space, layered with max) and coloured by the weight; Attribute Noise multiplies in
+evolving grain; a SIG pattern scrolls across it through Attribute from Channels, looked up by a
+0-1 `u` across the grid. Five wandering brushes paint their colours onto the grid with
+Attribute Transfer (a distance-weighted average), and Proximity measures how close each grid
+point is to a brush so Delete can punch a hole under each one.
+
+Lower right, a swirling swarm is coloured by how crowded each point is: Neighbours counts the
+points within 0.12 (`nbrcount`) and keeps the four nearest (`nbr`, `nbrdist`).
+
+Try: Falloff Field curve step; Attribute Noise noise curl; Attribute Transfer method nearest
+and fade off; Neighbours radius 0.2.
+'''
+resolution = [1280, 720]

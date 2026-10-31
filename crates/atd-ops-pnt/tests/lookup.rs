@@ -1,0 +1,438 @@
+//! The M6 per-point attribute operators on the GPU: Attribute Noise,
+//! Attribute from Channels and Falloff Field, checked against the same
+//! arithmetic on the CPU. Skips without a GPU unless `ATD_REQUIRE_GPU` is
+//! set.
+
+use atd_core::graph::{Edit, Endpoint, Node, NodeId, Param, Wire};
+use atd_core::registry::Registry;
+use atd_gpu::engine::{Engine, EngineConfig, OpLibrary};
+use atd_gpu::geo::readback::read_blocking;
+use serde_json::{Value, json};
+
+fn engine() -> Option<Engine> {
+    let instance = atd_gpu::primary_instance();
+    let Ok(adapter) =
+        pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+    else {
+        let required = std::env::var("ATD_REQUIRE_GPU").is_ok_and(|v| !v.is_empty() && v != "0");
+        assert!(
+            !required,
+            "ATD_REQUIRE_GPU is set but there is no GPU adapter"
+        );
+        eprintln!("skipping: no GPU adapter");
+        return None;
+    };
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        required_limits: atd_gpu::required_limits(&adapter),
+        ..Default::default()
+    }))
+    .ok()?;
+    let mut reg = Registry::default();
+    atd_ops_pnt::register(&mut reg);
+    atd_ops_sig::register(&mut reg);
+    let mut lib = OpLibrary::default();
+    atd_ops_pnt::library(&mut lib);
+    atd_ops_sig::library(&mut lib);
+    let config = EngineConfig {
+        width: 16,
+        height: 16,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+    };
+    Some(Engine::new(device, queue, reg, lib, config))
+}
+
+struct Build<'a> {
+    e: &'a mut Engine,
+    edits: Vec<Edit>,
+}
+
+impl<'a> Build<'a> {
+    fn new(e: &'a mut Engine) -> Self {
+        Self {
+            e,
+            edits: Vec::new(),
+        }
+    }
+
+    fn node(&mut self, ty: &str, params: &[(&str, Value)]) -> NodeId {
+        let id = self.e.alloc_id();
+        self.edits.push(Edit::AddNode {
+            node: Node::new(id, ty, format!("n{}", id.0)),
+        });
+        for (p, v) in params {
+            self.edits.push(Edit::SetParam {
+                node: id,
+                param: (*p).into(),
+                value: Some(Param::constant(v.clone())),
+            });
+        }
+        id
+    }
+
+    fn wire(&mut self, from: NodeId, to: NodeId, socket: &str) {
+        self.edits.push(Edit::Connect {
+            wire: Wire::new(Endpoint::new(from, "out"), Endpoint::new(to, socket)),
+        });
+    }
+
+    fn done(self) {
+        self.e.edit("build", self.edits).unwrap();
+    }
+}
+
+fn floats(e: &Engine, node: NodeId, name: &str) -> Vec<Vec<f32>> {
+    assert_eq!(e.error(node), None);
+    let g = e.geometry(node).expect("geometry");
+    let a = g.point(name).unwrap_or_else(|| panic!("no {name}"));
+    let bytes = read_blocking(e.device(), e.queue(), e.buffer_pool(), a).unwrap();
+    let stride = a.ty().stride() as usize;
+    let comps = a.ty().comps() as usize;
+    bytes
+        .chunks_exact(stride)
+        .map(|c| {
+            (0..comps)
+                .map(|i| f32::from_le_bytes(c[i * 4..i * 4 + 4].try_into().unwrap()))
+                .collect()
+        })
+        .collect()
+}
+
+fn smoothstep(x: f32) -> f32 {
+    let x = x.clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
+}
+
+#[test]
+fn falloff_fields_weight_points_by_shape_and_layer() {
+    let Some(mut e) = engine() else { return };
+    let mut b = Build::new(&mut e);
+    let line = b.node(
+        "pnt.points",
+        &[
+            ("shape", json!("line")),
+            ("count", json!(41)),
+            ("size", json!([4.0, 0.0, 0.0])),
+        ],
+    );
+    let sphere = b.node(
+        "pnt.falloff_field",
+        &[("radius", json!(1.0)), ("inner", json!(0.5))],
+    );
+    let plane = b.node(
+        "pnt.falloff_field",
+        &[
+            ("shape", json!("plane")),
+            ("direction", json!([1.0, 0.0, 0.0])),
+            ("centre", json!([1.0, 0.0, 0.0])),
+            ("radius", json!(0.0)),
+            ("operation", json!("max")),
+        ],
+    );
+    let boxed = b.node(
+        "pnt.falloff_field",
+        &[
+            ("name", json!("inside")),
+            ("shape", json!("box")),
+            ("size", json!([1.0, 1.0, 1.0])),
+            ("radius", json!(1.0)),
+            ("curve", json!("linear")),
+            ("invert", json!(true)),
+        ],
+    );
+    b.wire(line, sphere, "in");
+    b.wire(sphere, plane, "in");
+    b.wire(plane, boxed, "in");
+    b.done();
+    e.cook(&[boxed], 0.0).unwrap();
+    let p = floats(&e, boxed, "P");
+    let w = floats(&e, boxed, "falloff");
+    let inside = floats(&e, boxed, "inside");
+    for i in 0..41 {
+        let x = p[i][0];
+        let sphere = if x.abs() <= 0.5 {
+            1.0
+        } else {
+            smoothstep(1.0 - (x.abs() - 0.5) / 0.5)
+        };
+        // The half-space x >= 1 has weight 1 (max with the sphere).
+        let expected = if x >= 1.0 { 1.0f32 } else { sphere };
+        assert!(
+            (w[i][0] - expected).abs() < 1e-5,
+            "x {x}: {} vs {expected}",
+            w[i][0]
+        );
+        let outside = (x.abs() - 0.5).max(0.0);
+        let boxed = 1.0 - (1.0 - outside).clamp(0.0, 1.0);
+        assert!((inside[i][0] - boxed).abs() < 1e-5, "x {x}");
+    }
+}
+
+#[test]
+fn attribute_noise_adds_seeded_fractal_noise_in_range() {
+    let Some(mut e) = engine() else { return };
+    let mut b = Build::new(&mut e);
+    let pts = b.node("pnt.points", &[("count", json!(400))]);
+    let n1 = b.node(
+        "pnt.attribute_noise",
+        &[
+            ("name", json!("w")),
+            ("type", json!("float")),
+            ("operation", json!("set")),
+            ("amplitude", json!(0.5)),
+            ("centre", json!(0.5)),
+        ],
+    );
+    let n2 = b.node(
+        "pnt.attribute_noise",
+        &[
+            ("name", json!("w")),
+            ("type", json!("float")),
+            ("operation", json!("set")),
+            ("amplitude", json!(0.5)),
+            ("centre", json!(0.5)),
+        ],
+    );
+    let curl = b.node(
+        "pnt.attribute_noise",
+        &[
+            ("name", json!("v")),
+            ("type", json!("vec3")),
+            ("noise", json!("curl")),
+        ],
+    );
+    b.wire(pts, n1, "in");
+    b.wire(pts, n2, "in");
+    b.wire(pts, curl, "in");
+    b.done();
+    e.cook(&[n1, n2, curl], 0.0).unwrap();
+    let a = floats(&e, n1, "w");
+    let b2 = floats(&e, n2, "w");
+    assert!(a == b2, "same seed and parameters, same values");
+    let (lo, hi) = a
+        .iter()
+        .fold((1.0f32, 0.0f32), |(l, h), v| (l.min(v[0]), h.max(v[0])));
+    assert!(lo >= 0.0 && hi <= 1.0, "{lo}..{hi}");
+    assert!(hi - lo > 0.2, "the noise varies: {lo}..{hi}");
+    let v = floats(&e, curl, "v");
+    assert!(v.iter().any(|v| v.iter().any(|c| c.abs() > 1e-3)));
+    assert!(
+        v.iter()
+            .all(|v| v.len() == 3 && v.iter().all(|c| c.is_finite()))
+    );
+}
+
+#[test]
+fn attribute_from_channels_reads_samples_channels_and_positions() {
+    let Some(mut e) = engine() else { return };
+    let mut b = Build::new(&mut e);
+    let pts = b.node(
+        "pnt.points",
+        &[("shape", json!("line")), ("count", json!(8))],
+    );
+    let wave = b.node(
+        "sig.pattern",
+        &[("shape", json!("ramp")), ("length", json!(4))],
+    );
+    let bank = b.node(
+        "sig.constant",
+        &[
+            ("value1", json!(0.25)),
+            ("name2", json!("b")),
+            ("value2", json!(0.5)),
+            ("name3", json!("c")),
+            ("value3", json!(0.75)),
+        ],
+    );
+    let by_index = b.node("pnt.attribute_from_channels", &[("name", json!("s"))]);
+    let by_channel = b.node(
+        "pnt.attribute_from_channels",
+        &[
+            ("name", json!("c")),
+            ("lookup", json!("channels")),
+            ("wrap", json!(true)),
+            ("scale", json!(2.0)),
+        ],
+    );
+    let u = b.node(
+        "pnt.attribute",
+        &[
+            ("name", json!("u")),
+            ("source", json!("index")),
+            ("value", json!([0.0, 0.0, 0.0, 0.0])),
+            ("value2", json!([1.0, 0.0, 0.0, 0.0])),
+        ],
+    );
+    let by_attr = b.node(
+        "pnt.attribute_from_channels",
+        &[("name", json!("t")), ("lookup", json!("attribute"))],
+    );
+    b.wire(pts, by_index, "in");
+    b.wire(wave, by_index, "channels");
+    b.wire(pts, by_channel, "in");
+    b.wire(bank, by_channel, "channels");
+    b.wire(pts, u, "in");
+    b.wire(u, by_attr, "in");
+    b.wire(wave, by_attr, "channels");
+    b.done();
+    e.cook(&[by_index, by_channel, by_attr], 0.0).unwrap();
+    let ramp: Vec<f32> = e.channels(wave).unwrap().channel(0).to_vec();
+    assert_eq!(ramp.len(), 4);
+    let s = floats(&e, by_index, "s");
+    for i in 0..8 {
+        assert_eq!(s[i][0], ramp[i.min(3)], "held past the last sample");
+    }
+    let c = floats(&e, by_channel, "c");
+    for i in 0..8 {
+        assert_eq!(c[i][0], [0.5, 1.0, 1.5][i % 3], "channel i, wrapped, × 2");
+    }
+    let t = floats(&e, by_attr, "t");
+    for (i, t) in t.iter().enumerate() {
+        let x = i as f32 / 7.0 * 3.0;
+        let (a, f) = (x.floor() as usize, x.fract());
+        let want = ramp[a] + (ramp[(a + 1).min(3)] - ramp[a]) * f;
+        assert!((t[0] - want).abs() < 1e-5, "{} vs {want}", t[0]);
+    }
+}
+
+/// A signed-integer attribute's words.
+fn ints(e: &Engine, node: NodeId, name: &str) -> Vec<i32> {
+    assert_eq!(e.error(node), None);
+    let g = e.geometry(node).expect("geometry");
+    let a = g.point(name).unwrap_or_else(|| panic!("no {name}"));
+    read_blocking(e.device(), e.queue(), e.buffer_pool(), a)
+        .unwrap()
+        .chunks_exact(4)
+        .map(|c| i32::from_le_bytes(c.try_into().unwrap()))
+        .collect()
+}
+
+/// A line of `n` points from x = −1 to 1.
+fn line(b: &mut Build<'_>, n: u32) -> NodeId {
+    b.node(
+        "pnt.points",
+        &[
+            ("shape", json!("line")),
+            ("count", json!(n)),
+            ("size", json!([2.0, 0.0, 0.0])),
+        ],
+    )
+}
+
+#[test]
+fn proximity_and_neighbours_find_the_nearest_points() {
+    let Some(mut e) = engine() else { return };
+    let mut b = Build::new(&mut e);
+    let targets = line(&mut b, 3);
+    let probes = line(&mut b, 21);
+    let lifted = b.node("pnt.transform", &[("translate", json!([0.0, 0.3, 0.0]))]);
+    let prox = b.node("pnt.proximity", &[("radius", json!(1.5))]);
+    let own = b.node("pnt.proximity", &[("radius", json!(0.5))]);
+    let knn = b.node(
+        "pnt.neighbours",
+        &[("k", json!(2)), ("radius", json!(0.45))],
+    );
+    let spaced = line(&mut b, 11);
+    b.wire(probes, lifted, "in");
+    b.wire(lifted, prox, "in");
+    b.wire(targets, prox, "to");
+    b.wire(spaced, own, "in");
+    b.wire(spaced, knn, "in");
+    b.done();
+    e.cook(&[prox, own, knn], 0.0).unwrap();
+    let p = floats(&e, prox, "P");
+    let d = floats(&e, prox, "dist");
+    let v = floats(&e, prox, "nearvec");
+    for i in 0..21 {
+        let x = p[i][0];
+        let near = [-1.0f32, 0.0, 1.0]
+            .into_iter()
+            .min_by(|a, b| (a - x).abs().total_cmp(&(b - x).abs()))
+            .unwrap();
+        let want = ((near - x).powi(2) + 0.09).sqrt();
+        assert!(
+            (d[i][0] - want).abs() < 1e-5,
+            "x {x}: {} vs {want}",
+            d[i][0]
+        );
+        assert!((v[i][0] - (near - x)).abs() < 1e-5 && (v[i][1] + 0.3).abs() < 1e-5);
+    }
+    // Within one cloud a point is not its own nearest: the spacing.
+    for row in floats(&e, own, "dist") {
+        assert!((row[0] - 0.2).abs() < 1e-5, "{row:?}");
+    }
+    let nbr = ints(&e, knn, "nbr");
+    let count = ints(&e, knn, "nbrcount");
+    let nd = floats(&e, knn, "nbrdist");
+    for i in 0..11i32 {
+        let n = &nbr[i as usize * 4..i as usize * 4 + 4];
+        let want = match i {
+            0 => [1, 2],
+            10 => [9, 8],
+            _ => [i - 1, i + 1],
+        };
+        // The two sides are equally near up to rounding: either order.
+        let mut got = [n[0], n[1]];
+        let mut want = want;
+        if i != 0 && i != 10 {
+            got.sort();
+            want.sort();
+        }
+        assert_eq!(got, want, "point {i}");
+        assert!(nd[i as usize][0] <= nd[i as usize][1], "nearest first");
+        assert_eq!(&n[2..], &[-1, -1], "k = 2");
+        assert!((nd[i as usize][0] - 0.2).abs() < 1e-5);
+        let within = (0..11).filter(|j| *j != i && (j - i).abs() <= 2).count() as i32;
+        assert_eq!(count[i as usize], within, "point {i}");
+    }
+}
+
+#[test]
+fn attribute_transfer_carries_values_from_nearby_points() {
+    let Some(mut e) = engine() else { return };
+    let mut b = Build::new(&mut e);
+    let brush = line(&mut b, 2);
+    let paint = b.node(
+        "pnt.attribute",
+        &[
+            ("name", json!("Cd")),
+            ("type", json!("vec4")),
+            ("source", json!("index")),
+            ("value", json!([1.0, 0.0, 0.0, 1.0])),
+            ("value2", json!([0.0, 0.0, 1.0, 1.0])),
+        ],
+    );
+    let canvas = line(&mut b, 21);
+    let hard = b.node(
+        "pnt.attribute_transfer",
+        &[("radius", json!(0.55)), ("fade", json!(false))],
+    );
+    let soft = b.node("pnt.attribute_transfer", &[("radius", json!(0.55))]);
+    b.wire(brush, paint, "in");
+    b.wire(canvas, hard, "in");
+    b.wire(paint, hard, "from");
+    b.wire(canvas, soft, "in");
+    b.wire(paint, soft, "from");
+    b.done();
+    e.cook(&[hard, soft], 0.0).unwrap();
+    let p = floats(&e, hard, "P");
+    let hard = floats(&e, hard, "Cd");
+    let soft = floats(&e, soft, "Cd");
+    for i in 0..21 {
+        let x = p[i][0];
+        let (d, src) = if x < 0.0 {
+            (x + 1.0, [1.0, 0.0, 0.0, 1.0])
+        } else {
+            (1.0 - x, [0.0, 0.0, 1.0, 1.0])
+        };
+        if d <= 0.55 - 1e-4 {
+            assert_eq!(hard[i], src.to_vec(), "x {x}");
+            let w = smoothstep(1.0 - d / 0.55);
+            for c in 0..4 {
+                let want = 1.0 + (src[c] - 1.0) * w;
+                assert!((soft[i][c] - want).abs() < 1e-4, "x {x}: {:?}", soft[i]);
+            }
+        } else if d > 0.55 + 1e-4 {
+            assert_eq!(hard[i], vec![1.0; 4], "out of reach: x {x}");
+        }
+    }
+}

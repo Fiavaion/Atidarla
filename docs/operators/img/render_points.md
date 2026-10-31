@@ -46,6 +46,7 @@ All platforms.
 - [PNT Capture](../../../examples/pnt-capture.atidarla/) — `draw`, `draw_body`
 - [PNT Constellation](../../../examples/pnt-constellation.atidarla/) — `draw`, `draw_stars`
 - [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `draw`
+- [PNT Fields](../../../examples/pnt-fields.atidarla/) — `draw`, `draw_swarm`
 - [PNT For-Each](../../../examples/pnt-foreach.atidarla/) — `draw`
 - [PNT Fountain](../../../examples/pnt-fountain.atidarla/) — `draw`
 - [PNT Solver](../../../examples/pnt-solver.atidarla/) — `draw`

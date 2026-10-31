@@ -39,4 +39,5 @@ All platforms.
 - [Kernel Particles](../../../examples/kernel-particles.atidarla/) — `colour`
 - [PNT Constellation](../../../examples/pnt-constellation.atidarla/) — `shade`
 - [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `height`
+- [PNT Fields](../../../examples/pnt-fields.atidarla/) — `heat`, `by_crowd`
 - [PNT Fountain](../../../examples/pnt-fountain.atidarla/) — `by_speed`
