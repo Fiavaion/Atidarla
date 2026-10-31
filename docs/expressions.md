@@ -66,7 +66,9 @@ and so on); with fewer, its first channel drives them all.
 
 `op('name').par.param[i]` reads component *i* as driven, so other expressions, Python's
 `op('name').par.param` tuple and Timeline tracks that key only some components (the others take
-the driven value) all see what the node cooks with.
+the driven value) all see what the node cooks with. A MIDI or OSC mapping to one component, or an
+OSCQuery route given fewer numbers than components, likewise leaves the other components following
+the binding or expression.
 
 In a project file nothing new is written: a driven vector is the same inline table as a number,
 with the vector it falls back to:

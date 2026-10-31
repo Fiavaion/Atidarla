@@ -79,15 +79,19 @@ pub fn run(gpu: &GpuContext, trials: usize) -> anyhow::Result<Pt8> {
     let tx = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0))?;
 
     let frame = |engine: &mut Engine, rt: &mut MappingRuntime, t: f64| -> anyhow::Result<u8> {
-        rt.update(&maps, |n, p| {
-            mapping::resolve(
-                engine.network(),
-                engine.registry(),
-                n,
-                p,
-                engine.live_values().get(n, p),
-            )
-        });
+        rt.update(
+            &maps,
+            |n, p| {
+                mapping::resolve(
+                    engine.network(),
+                    engine.registry(),
+                    n,
+                    p,
+                    engine.live_values().get(n, p),
+                )
+            },
+            |n, p, i| engine.driven_component(n, p, i),
+        );
         for (n, p, v) in rt.writes() {
             engine.set_live(n, p, Some(v));
         }

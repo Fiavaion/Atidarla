@@ -31,6 +31,8 @@ fn midi_cc(n: u8) -> Source {
 /// runs the runtime and applies its writes as live values would.
 struct Fake {
     params: HashMap<String, (ParamKind, Value)>,
+    /// Components a binding or expression drives: (parameter, index).
+    driven: HashMap<(String, usize), f64>,
 }
 
 impl Fake {
@@ -40,15 +42,24 @@ impl Fake {
                 .iter()
                 .map(|(n, k, v)| ((*n).to_owned(), (k.clone(), v.clone())))
                 .collect(),
+            driven: HashMap::new(),
         }
     }
 
     fn frame(&mut self, rt: &mut MappingRuntime, maps: &Mappings) -> usize {
-        rt.update(maps, |node, p| {
-            (node == N)
-                .then(|| self.params.get(p).map(|(k, v)| (k, v)))
-                .flatten()
-        });
+        rt.update(
+            maps,
+            |node, p| {
+                (node == N)
+                    .then(|| self.params.get(p).map(|(k, v)| (k, v)))
+                    .flatten()
+            },
+            |node, p, i| {
+                (node == N)
+                    .then(|| self.driven.get(&(p.to_owned(), i)).copied())
+                    .flatten()
+            },
+        );
         let writes: Vec<(String, Value)> = rt
             .writes()
             .map(|(_, p, v)| (p.to_owned(), v.clone()))
@@ -532,4 +543,63 @@ fn written_and_released_follow_the_mappings() {
     assert_eq!(released, [(N, "x".to_owned(), json!(1.0))]);
     fake.frame(&mut rt, &maps);
     assert_eq!(rt.released().count(), 0, "released once");
+}
+
+#[test]
+fn a_mapped_component_leaves_the_others_following_their_binding() {
+    let mut maps = Mappings::default();
+    maps.add(midi_cc(1), target("scale", Some(0)), [0.0, 1.0]);
+    maps.mappings[0].pickup = false;
+    let mut rt = MappingRuntime::new();
+    let mut fake = Fake::new(&[("scale", ParamKind::Vec { n: 2 }, json!([1.0, 1.0]))]);
+    // An LFO bound to the whole vector drives both components.
+    let lfo = |t: f64| (t * 0.7).sin();
+    let drive = |fake: &mut Fake, t: f64| {
+        for c in 0..2 {
+            fake.driven.insert(("scale".into(), c), lfo(t));
+        }
+    };
+    drive(&mut fake, 0.0);
+    fake.frame(&mut rt, &maps);
+    rt.hub().push_midi("k", cc(1, 1, 127));
+    assert_eq!(fake.frame(&mut rt, &maps), 1);
+    assert_eq!(fake.get("scale"), &json!([1.0, lfo(0.0)]));
+    for f in 1..5 {
+        let t = f64::from(f);
+        drive(&mut fake, t);
+        assert_eq!(fake.frame(&mut rt, &maps), 1, "the LFO moved");
+        assert_eq!(
+            fake.get("scale"),
+            &json!([1.0, lfo(t)]),
+            "the knob holds [0], [1] follows the LFO"
+        );
+    }
+    assert_eq!(fake.frame(&mut rt, &maps), 0, "nothing moved: no write");
+    // The knob moves again: [1] is still the LFO's.
+    drive(&mut fake, 9.0);
+    rt.hub().push_midi("k", cc(1, 1, 0));
+    assert_eq!(fake.frame(&mut rt, &maps), 1, "one write per parameter");
+    assert_eq!(fake.get("scale"), &json!([0.0, lfo(9.0)]));
+}
+
+#[test]
+fn a_route_fills_components_it_does_not_set_from_their_binding() {
+    let mut rt = MappingRuntime::new();
+    rt.set_routes(vec![Route {
+        address: "/s".into(),
+        node: N,
+        param: "scale".into(),
+        kind: ParamKind::Vec { n: 3 },
+    }]);
+    let maps = Mappings::default();
+    let mut fake = Fake::new(&[("scale", ParamKind::Vec { n: 3 }, json!([1.0, 1.0, 1.0]))]);
+    fake.driven.insert(("scale".into(), 0), 0.25);
+    fake.driven.insert(("scale".into(), 2), 0.75);
+    rt.hub().push_osc("/s", &[0.5]);
+    assert_eq!(fake.frame(&mut rt, &maps), 1);
+    assert_eq!(
+        fake.get("scale"),
+        &json!([0.5, 1.0, 0.75]),
+        "[0] from OSC, [1] stored, [2] driven"
+    );
 }

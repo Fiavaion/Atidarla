@@ -613,6 +613,9 @@ pub struct MappingRuntime {
     /// Values of parameters no mapping drives any more, to release this
     /// frame (see [`Self::released`]).
     released: Vec<(NodeId, String, Value)>,
+    /// Indices into `held` whose driven components changed this frame
+    /// with no mapping writing (see [`Self::writes`]).
+    refreshed: Vec<usize>,
 }
 
 impl MappingRuntime {
@@ -811,13 +814,20 @@ impl MappingRuntime {
 
     /// Takes what arrived since the last frame and computes this frame's
     /// live values (see [`Self::writes`]). `lookup` gives a parameter's
-    /// kind and current value ([`resolve`] over the engine).
+    /// kind and current value ([`resolve`] over the engine). `driven`
+    /// gives component `i` of a vector or colour as its binding or
+    /// expression drives it, `None` when neither does
+    /// (`Engine::driven_component`): a live vector a mapping sets on one
+    /// component fills the others from it, every frame, so they keep
+    /// following their binding or expression (PRD A66).
     pub fn update<'e>(
         &mut self,
         maps: &Mappings,
         lookup: impl Fn(NodeId, &str) -> Option<(&'e ParamKind, &'e Value)>,
+        driven: impl Fn(NodeId, &str, usize) -> Option<f64>,
     ) {
         self.released.clear();
+        self.refreshed.clear();
         self.sync(maps);
         self.out.clear();
         {
@@ -858,11 +868,19 @@ impl MappingRuntime {
             let Some(y) = step(m, &mut self.state[i], slot, cur) else {
                 continue;
             };
-            let Some(value) = live_value(kind, current, t.component, y) else {
+            let Some(mut value) = live_value(kind, current, t.component, y) else {
                 continue;
             };
             self.state[i].written = as_number(kind, &value, t.component);
             self.state[i].sent = Some(y);
+            fill_driven(
+                &self.synced,
+                &self.state,
+                (t.node, &t.param),
+                &mut value,
+                0,
+                &driven,
+            );
             match pending {
                 Some(p) => self.out[p].value = value,
                 None => self.out.push(Write {
@@ -873,6 +891,12 @@ impl MappingRuntime {
             }
         }
         self.hold();
+        for k in 0..self.held.len() {
+            let (node, param, value) = &mut self.held[k];
+            if fill_driven(&self.synced, &self.state, (*node, param), value, 0, &driven) {
+                self.refreshed.push(k);
+            }
+        }
         for r in 0..self.route_snap.len().min(self.routes.len()) {
             let slot = self.route_snap[r];
             if !slot.fresh || slot.n == 0 {
@@ -889,7 +913,16 @@ impl MappingRuntime {
                     for (v, x) in a.iter_mut().zip(&slot.args[..usize::from(slot.n)]) {
                         *v = Value::from(*x);
                     }
-                    Some(Value::Array(a))
+                    let mut a = Value::Array(a);
+                    fill_driven(
+                        &self.synced,
+                        &self.state,
+                        (route.node, &route.param),
+                        &mut a,
+                        usize::from(slot.n),
+                        &driven,
+                    );
+                    Some(a)
                 }
                 kind => live_value(kind, current, None, slot.args[0]),
             };
@@ -946,6 +979,7 @@ impl MappingRuntime {
         }
         self.held.clear();
         self.released.clear();
+        self.refreshed.clear();
     }
 
     fn param(&self, from: Origin) -> &str {
@@ -957,15 +991,59 @@ impl MappingRuntime {
 
     /// This frame's live values: (node, parameter, value).
     pub fn writes(&self) -> impl Iterator<Item = (NodeId, &str, &Value)> {
+        let refreshed = self.refreshed.iter().map(|&k| {
+            let (n, p, v) = &self.held[k];
+            (*n, p.as_str(), v)
+        });
         self.out
             .iter()
             .map(|w| (w.node, self.param(w.from), &w.value))
+            .chain(refreshed)
     }
 
     /// The mapped parameters (for write-back on save and for the UI).
     pub fn targets(&self) -> impl Iterator<Item = &Target> {
         self.synced.iter().map(|m| &m.target)
     }
+}
+
+/// Sets the components of `value` (a vector or colour on `target`) from
+/// `from` on that no mapping has written to what `driven` gives for them,
+/// so a live vector does not freeze the components its binding or
+/// expression drives. Returns whether a component changed. Allocates
+/// nothing.
+fn fill_driven(
+    maps: &[Mapping],
+    state: &[MapState],
+    target: (NodeId, &str),
+    value: &mut Value,
+    from: usize,
+    driven: &impl Fn(NodeId, &str, usize) -> Option<f64>,
+) -> bool {
+    let Value::Array(a) = value else {
+        return false;
+    };
+    let (node, param) = target;
+    let mut changed = false;
+    for (c, v) in a.iter_mut().enumerate().skip(from) {
+        let mapped = maps.iter().zip(state).any(|(m, st)| {
+            st.sent.is_some()
+                && m.target.node == node
+                && m.target.param == param
+                && m.target.component.is_none_or(|k| k == c)
+        });
+        if mapped {
+            continue;
+        }
+        if let Some(d) = driven(node, param, c)
+            && d.is_finite()
+            && v.as_f64() != Some(d)
+        {
+            *v = Value::from(d);
+            changed = true;
+        }
+    }
+    changed
 }
 
 /// One mapping's output for what arrived (`None`: nothing to write, e.g.
