@@ -146,3 +146,55 @@ fn python_needs_the_python_exec_scope() {
         &json!({"node": "script1", "param": "code", "value": "def cook(i):\n    return 'x'"}),
     ));
 }
+
+/// A Pack that already promotes a Script's code (made by someone with
+/// `python.exec`, or shipped with the project): an agent without the scope
+/// cannot write Python through the instance's parameter.
+#[test]
+fn promoted_script_code_needs_python_exec() {
+    let mut ws = NetworkWorkspace::new(registry());
+    let mut p = agent(true);
+    ok(&p.call(
+        &mut ws,
+        "create_node",
+        &json!({"type": "dat.script", "name": "script1"}),
+    ));
+    ok(&p.call(&mut ws, "accept_changes", &json!({"label": "setup"})));
+    ok(&p.call(
+        &mut ws,
+        "create_pack",
+        &json!({"name": "box", "nodes": ["script1"], "promote": [{"node": "script1", "param": "code"}]}),
+    ));
+    ok(&p.call(&mut ws, "accept_changes", &json!({"label": "pack"})));
+    let promoted = ws.pack("box").expect("the Pack").params[0].name.clone();
+    let box_type = atd_core::pack::type_id("box");
+    let instance = ws
+        .network()
+        .nodes()
+        .find(|n| n.type_id == box_type)
+        .expect("an instance")
+        .name
+        .clone();
+
+    let mut a = agent(false);
+    let e = refused(&a.call(
+        &mut ws,
+        "set_param",
+        &json!({"node": instance, "param": promoted, "value": "def cook(i):\n    return 'x'"}),
+    ));
+    assert!(e.contains("python.exec"), "{e}");
+    let mut params = serde_json::Map::new();
+    params.insert(promoted.clone(), json!("def cook(i): pass"));
+    let e = refused(&a.call(
+        &mut ws,
+        "create_node",
+        &json!({"type": box_type, "name": "box2", "params": params}),
+    ));
+    assert!(e.contains("python.exec"), "{e}");
+    // With the scope it is allowed.
+    ok(&p.call(
+        &mut ws,
+        "set_param",
+        &json!({"node": instance, "param": promoted, "value": "def cook(i):\n    return 'y'"}),
+    ));
+}

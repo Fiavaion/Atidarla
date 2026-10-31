@@ -53,6 +53,11 @@ pub trait Workspace {
         Ok(())
     }
     /// Runs Python in the project's interpreter (scope `python.exec`).
+    /// The project's Pack named `name`, so a Pack instance's parameters can
+    /// be resolved to the inner ones they set.
+    fn pack(&self, _name: &str) -> Option<&PackDef> {
+        None
+    }
     fn python_exec(&mut self, _code: &str) -> Result<String, String> {
         Err("Python is not available in this workspace".into())
     }
@@ -82,6 +87,9 @@ impl NetworkWorkspace {
 }
 
 impl Workspace for NetworkWorkspace {
+    fn pack(&self, name: &str) -> Option<&PackDef> {
+        self.packs.get(name)
+    }
     fn network(&self) -> &Network {
         &self.network
     }
