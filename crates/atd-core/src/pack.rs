@@ -1143,14 +1143,10 @@ pub fn fit_instance(
             ));
             continue;
         };
-        let numeric = matches!(
-            ps.kind,
-            ParamKind::Float { .. } | ParamKind::Int { .. } | ParamKind::Toggle
-        );
         let driven = p.bind.is_some() || p.expr.is_some();
-        if driven && !numeric {
+        if driven && !ps.kind.can_follow() {
             fit.notes.push(format!(
-                "`{name}` = {shown} reset: only number and toggle parameters follow channels or expressions"
+                "`{name}` = {shown} reset: only number, toggle, vector and colour parameters follow channels or expressions"
             ));
             continue;
         }

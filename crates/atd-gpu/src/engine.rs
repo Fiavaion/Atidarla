@@ -39,8 +39,8 @@ use std::time::Instant;
 
 use atd_core::cook::{CookStat, PlanError, Scheduler};
 pub use atd_core::dat::{Dat, Table};
-use atd_core::expr::{PyJob, PythonHost};
-use atd_core::graph::{Edit, GraphError, Network, NodeId, assign_value};
+use atd_core::expr::{ExprValue, PyJob, PythonHost};
+use atd_core::graph::{ChannelRef, Edit, GraphError, Network, NodeId, assign_value};
 use atd_core::history::History;
 use atd_core::registry::{Registry, WireType};
 use serde_json::Value;
@@ -465,10 +465,46 @@ impl<'a> Params<'a> {
             .is_some_and(|p| p.bind.is_some() || p.expr.is_some())
     }
 
-    /// The value the parameter's expression gave this frame, if it has
-    /// one that evaluated.
+    /// The number the parameter's expression gave this frame, if it has
+    /// one that evaluated to a number.
     pub fn expr(&self, name: &str) -> Option<f64> {
+        self.expr_value(name)?.number()
+    }
+
+    /// What the parameter's expression gave this frame: a number, or for a
+    /// vector or colour possibly a tuple (Python only).
+    pub fn expr_value(&self, name: &str) -> Option<ExprValue> {
         self.exprs?.value(self.node, name)
+    }
+
+    /// What drives a vector or colour parameter this frame, with the number
+    /// of components it drives; `None` when it is not driven or a live
+    /// vector overrides it. Allocates nothing.
+    fn vector_drive(&self, name: &str) -> Option<(VectorDrive<'a>, usize)> {
+        if self.live(name).is_some_and(Value::is_array) {
+            return None;
+        }
+        let param = self.net.node(self.node)?.params.get(name)?;
+        if param.bind.is_none() && param.expr.is_none() {
+            return None;
+        }
+        let n = components(self.net, self.registry, self.node, name)?;
+        if let Some(bind) = &param.bind {
+            return Some((VectorDrive::Bound(self.sig, bind), n));
+        }
+        Some((VectorDrive::Expr(self.expr_value(name)?), n))
+    }
+
+    /// Component `i` of a vector or colour parameter as [`Self::vec4`]
+    /// reads it (live vector, else binding or expression, else the stored
+    /// value), at full precision; `None` past its last component.
+    pub fn component(&self, name: &str, i: usize) -> Option<f64> {
+        if let Some((drive, n)) = self.vector_drive(name)
+            && let Some(v) = drive.component(i, n)
+        {
+            return Some(v);
+        }
+        self.value(name)?.as_array()?.get(i)?.as_f64()
     }
 
     /// A number parameter: its bound channel, else its expression, else
@@ -520,7 +556,11 @@ impl<'a> Params<'a> {
     }
 
     /// A `Vec`/`Colour` parameter as 4 floats (missing components are 0,
-    /// except alpha, which defaults to 1 for 3-component values).
+    /// except alpha, which defaults to 1 for 3-component values). A live
+    /// vector wins; else a binding or expression drives the components
+    /// (PRD A66): one number every component (a colour's red, green and
+    /// blue), a Python tuple or a whole-node binding ([`bound_component`])
+    /// one each; the rest keep their stored values.
     pub fn vec4(&self, name: &str) -> [f32; 4] {
         let mut out = [0.0, 0.0, 0.0, 1.0];
         if let Some(a) = self.value(name).and_then(Value::as_array) {
@@ -528,8 +568,69 @@ impl<'a> Params<'a> {
                 *o = v.as_f64().unwrap_or(0.0) as f32;
             }
         }
+        if let Some((drive, n)) = self.vector_drive(name) {
+            for (i, o) in out.iter_mut().enumerate().take(n) {
+                if let Some(v) = drive.component(i, n) {
+                    *o = v as f32;
+                }
+            }
+        }
         out
     }
+}
+
+/// What drives a vector or colour parameter (see [`Params::vec4`]).
+#[derive(Debug, Clone, Copy)]
+enum VectorDrive<'a> {
+    Bound(&'a HashMap<NodeId, Channels>, &'a ChannelRef),
+    Expr(ExprValue),
+}
+
+impl VectorDrive<'_> {
+    fn component(self, i: usize, n: usize) -> Option<f64> {
+        match self {
+            Self::Bound(sig, bind) => bound_component(sig, bind, i, n).map(f64::from),
+            Self::Expr(v) => (i < n).then(|| v.component(i)).flatten(),
+        }
+    }
+}
+
+/// How many components a binding or expression drives on `node`'s
+/// `param` ([`atd_core::registry::ParamKind::components`]); `None` for a
+/// parameter that is not a vector or colour.
+pub(crate) fn components(
+    net: &Network,
+    registry: &Registry,
+    node: NodeId,
+    param: &str,
+) -> Option<usize> {
+    let schema = registry.get(&net.node(node)?.type_id)?;
+    schema
+        .params
+        .iter()
+        .find(|p| p.name == param)?
+        .kind
+        .components()
+}
+
+/// Component `i` of a vector or colour bound to `bind` that drives `n`
+/// components (PRD A66): bound to a whole SIG node (no channel name) with
+/// at least `n` channels, component `i` follows channel `i`; otherwise the
+/// one channel (the first, for a whole node) drives every component.
+pub(crate) fn bound_component(
+    sig: &HashMap<NodeId, Channels>,
+    bind: &ChannelRef,
+    i: usize,
+    n: usize,
+) -> Option<f32> {
+    if i >= n {
+        return None;
+    }
+    let ch = sig.get(&bind.node)?;
+    if bind.channel.is_empty() && n > 1 && ch.len() >= n {
+        return Some(ch.last(i));
+    }
+    ch.value(&bind.channel)
 }
 
 /// Everything an IMG operator needs to cook one frame.
@@ -1297,7 +1398,7 @@ pub struct Engine {
     /// The Python worker for expressions outside the native subset.
     python: Option<Box<dyn PythonHost>>,
     py_jobs: Vec<PyJob>,
-    py_results: Vec<(u64, Result<f64, String>)>,
+    py_results: Vec<(u64, Result<ExprValue, String>)>,
     mode: CookMode,
 }
 
@@ -1458,8 +1559,32 @@ impl Engine {
 
     /// The value `param`'s expression gave on `node`'s last cook (for
     /// display; `None` without an expression or while it fails).
-    pub fn expression_value(&self, node: NodeId, param: &str) -> Option<f64> {
+    pub fn expression_value(&self, node: NodeId, param: &str) -> Option<ExprValue> {
         self.exprs.value(node, param)
+    }
+
+    /// Component `i` of a vector or colour parameter as `node` reads it
+    /// now ([`Params::component`]): with bindings and expressions from the
+    /// last cook, and live values unless `with_live` is false (a timeline
+    /// filling the components it does not key).
+    pub fn param_component(
+        &self,
+        node: NodeId,
+        param: &str,
+        i: usize,
+        with_live: bool,
+    ) -> Option<f64> {
+        let params = Params {
+            net: &self.net,
+            registry: &self.registry,
+            sig: &self.sig,
+            node,
+            project_dir: None,
+            exprs: Some(&self.exprs),
+            live: with_live.then_some(&self.live),
+            mode: self.mode,
+        };
+        params.component(param, i)
     }
 
     /// Attaches the Python worker that evaluates expressions outside the
@@ -1471,7 +1596,7 @@ impl Engine {
     /// Recompiles expressions after the network changed; returns nodes whose
     /// expressions now read different nodes.
     fn rebuild_exprs(&mut self) -> Vec<NodeId> {
-        let (table, extra, changed) = ExprTable::build(&self.net, &mut self.exprs);
+        let (table, extra, changed) = ExprTable::build(&self.net, &self.registry, &mut self.exprs);
         self.exprs = table;
         self.scheduler.set_extra(extra);
         self.exprs.python_jobs(&self.net, &mut self.py_jobs);

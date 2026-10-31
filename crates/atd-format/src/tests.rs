@@ -160,6 +160,84 @@ fn random_networks_round_trip_exactly_and_byte_stable() {
     }
 }
 
+/// Vectors and colours that follow an expression or a channel (A66) save
+/// as the same inline table as numbers and round-trip exactly.
+#[test]
+fn driven_vectors_and_colours_round_trip() {
+    let reg = registry();
+    let mut net = Network::default();
+    let add = |net: &mut Network, ty: &str, name: &str| {
+        let id = net.alloc_id();
+        net.apply(
+            &reg,
+            Edit::AddNode {
+                node: Node::new(id, ty, name),
+            },
+        )
+        .unwrap();
+        id
+    };
+    let lfo = add(&mut net, "sig.lfo", "lfo1");
+    let rgb = add(&mut net, "sig.constant", "rgb");
+    let t = add(&mut net, "img.transform", "transform1");
+    let c = add(&mut net, "img.constant", "constant1");
+    let r = add(&mut net, "img.ramp", "ramp1");
+    let set = |net: &mut Network, node, param: &str, value: Param| {
+        net.apply(
+            &reg,
+            Edit::SetParam {
+                node,
+                param: param.into(),
+                value: Some(value),
+            },
+        )
+        .unwrap();
+    };
+    set(
+        &mut net,
+        t,
+        "scale",
+        Param::bound(json!([1.0, 1.0]), lfo, "lfo"),
+    );
+    set(
+        &mut net,
+        t,
+        "translate",
+        Param {
+            value: json!([0.0, 0.25]),
+            expr: Some("(0.1 * sin(time), 0)".into()),
+            bind: None,
+        },
+    );
+    set(
+        &mut net,
+        c,
+        "colour",
+        Param::bound(json!([0.0, 0.0, 0.0, 0.5]), rgb, ""),
+    );
+    set(
+        &mut net,
+        r,
+        "colour_a",
+        Param {
+            value: json!([1.0, 0.0, 0.0, 1.0]),
+            expr: Some("0.5 + 0.5 * sin(time)".into()),
+            bind: None,
+        },
+    );
+    let text = network_to_string(&net).unwrap();
+    assert!(
+        text.contains(
+            "params.scale = { value = [1.0, 1.0], bind = { node = 0, channel = \"lfo\" } }"
+        ),
+        "{text}"
+    );
+    let back = network_from_str(&text).unwrap();
+    assert_eq!(back, net, "{text}");
+    assert_eq!(network_to_string(&back).unwrap(), text);
+    back.validated(&reg).unwrap();
+}
+
 /// DAT nodes (A64): table and script text in parameters (tabs, quotes,
 /// `'''`, CRLF) and DAT wires, including a SIG node's DAT output, round-trip
 /// exactly and byte-stable.

@@ -114,6 +114,28 @@ pub enum ParamKind {
     Path,
 }
 
+impl ParamKind {
+    /// Whether a parameter of this kind can follow a channel binding or an
+    /// expression: numbers, toggles, vectors and colours (PRD A66).
+    pub fn can_follow(&self) -> bool {
+        matches!(
+            self,
+            Self::Float { .. } | Self::Int { .. } | Self::Toggle | Self::Vec { .. } | Self::Colour
+        )
+    }
+
+    /// For a vector or colour, the components a binding or an expression
+    /// drives: a vector's first four, a colour's red, green and blue (its
+    /// alpha stays the stored one). `None` for other kinds.
+    pub fn components(&self) -> Option<usize> {
+        match self {
+            Self::Vec { n } => Some(usize::from(*n).min(4)),
+            Self::Colour => Some(3),
+            _ => None,
+        }
+    }
+}
+
 /// One parameter of an operator.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ParamSchema {

@@ -244,12 +244,12 @@ fn fill(
                 }
             }
             ParamKind::Colour | ParamKind::Vec { .. } => {
-                let nums = params
+                // Each component as driven (binding, expression; A66).
+                let len = params
                     .value(&p.name)
                     .and_then(Json::as_array)
-                    .into_iter()
-                    .flatten()
-                    .map(|v| v.as_f64().unwrap_or(0.0));
+                    .map_or(0, Vec::len);
+                let nums = (0..len).map(|i| params.component(&p.name, i).unwrap_or(0.0));
                 match value {
                     Value::Nums(v) => {
                         v.clear();
