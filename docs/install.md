@@ -128,7 +128,7 @@ replaces an older one (major upgrade); installing an older one over a newer one 
 ### Building the installers
 
 On Windows with Rust (MSVC), the .NET SDK and WiX v5 (`dotnet tool install --global wix
---version 5.0.2`; the script adds the `WixToolset.Bal.wixext` and `WixToolset.Util.wixext`
+--version 5.0.2`; the script adds the `WixToolset.BootstrapperApplications.wixext` and `WixToolset.Util.wixext`
 5.0.2 extensions itself):
 
 ```powershell

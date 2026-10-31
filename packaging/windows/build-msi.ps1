@@ -11,7 +11,7 @@
 #
 # Needs: Rust (MSVC), the .NET SDK and WiX v5 with two extensions:
 #   dotnet tool install --global wix --version 5.0.2
-#   wix extension add -g WixToolset.Bal.wixext/5.0.2 WixToolset.Util.wixext/5.0.2
+#   wix extension add -g WixToolset.BootstrapperApplications.wixext/5.0.2 WixToolset.Util.wixext/5.0.2
 # (the script adds the extensions itself when they are missing).
 #
 # Environment (all optional):
@@ -125,7 +125,7 @@ if (-not (Get-Command wix -ErrorAction SilentlyContinue)) {
 }
 # The bundle's extensions, in WiX's per-user cache (adding one already there
 # does nothing).
-foreach ($ext in 'WixToolset.Bal.wixext', 'WixToolset.Util.wixext') {
+foreach ($ext in 'WixToolset.BootstrapperApplications.wixext', 'WixToolset.Util.wixext') {
     wix extension add -g "$ext/5.0.2"
     if ($LASTEXITCODE) { throw "wix extension add $ext failed" }
 }
@@ -179,7 +179,7 @@ Sign $msi
 
 $setup = "$dist\Atidarla-$version-windows-x64-setup.exe"
 wix build packaging\windows\bundle.wxs -arch x64 `
-    -ext WixToolset.Bal.wixext -ext WixToolset.Util.wixext `
+    -ext WixToolset.BootstrapperApplications.wixext -ext WixToolset.Util.wixext `
     -d "Version=$msiVersion" -d "Msi=$msi" -d "VcRedist=$vcRedist" -d "VcRedistBld=$vcBld" -o $setup
 if ($LASTEXITCODE) { throw "wix build (bundle) failed" }
 if ($signing) {

@@ -3,7 +3,7 @@
   Atidarla setup (FR-H5, PRD A68), a WiX v5 Burn bundle: installs the
   Microsoft Visual C++ 2015-2022 runtime (x64), then the Atidarla MSI, so a
   new machine needs nothing else. Built by packaging/windows/build-msi.ps1:
-    wix build bundle.wxs -ext WixToolset.Bal.wixext -ext WixToolset.Util.wixext
+    wix build bundle.wxs -ext WixToolset.BootstrapperApplications.wixext -ext WixToolset.Util.wixext
   with
     -d Version=1.2.3    numeric version (the MSI's)
     -d Msi=...          the MSI built from atidarla.wxs
