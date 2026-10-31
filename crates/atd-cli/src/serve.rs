@@ -53,6 +53,12 @@ pub struct ServeArgs {
     /// Stop after this many seconds (tests).
     #[arg(long)]
     pub seconds: Option<f64>,
+    /// Run the project's Python: operators (ops/*.py), Script nodes and
+    /// Python parameter expressions. They are code with your user's
+    /// privileges; without this flag they do not run (expressions keep
+    /// their stored values). See docs/python-ops.md.
+    #[arg(long)]
+    pub allow_python_ops: bool,
 }
 
 /// The project as the agent sees it, cooked by a headless engine.
@@ -62,6 +68,12 @@ pub(crate) struct ServeWorkspace {
     engine: Engine,
     flat: Flat,
     save: bool,
+    /// `--allow-python-ops`: the project's Python runs (kept on reopen).
+    allow_python: bool,
+    /// Python the agent writes is allowed too: `--allow-python-ops` and a
+    /// session with `python.exec` (no dialog headless; without the scope an
+    /// agent cannot write Python at all).
+    allow_agent_python: bool,
     time: f64,
     /// The GPU adapter the engine runs on (`atidarla soak` reports it).
     pub(crate) adapter: wgpu::AdapterInfo,
@@ -69,7 +81,9 @@ pub(crate) struct ServeWorkspace {
 }
 
 impl ServeWorkspace {
-    pub(crate) fn open(dir: &Path, save: bool) -> Result<Self> {
+    /// Opens `dir`; its Python (operators, Script nodes, Python
+    /// expressions) runs only with `allow_python` (`--allow-python-ops`).
+    pub(crate) fn open(dir: &Path, save: bool, allow_python: bool) -> Result<Self> {
         if !dir.join("project.toml").exists() {
             let name = dir
                 .file_stem()
@@ -79,6 +93,10 @@ impl ServeWorkspace {
         }
         let gpu = atd_gpu::GpuContext::headless().map_err(|e| anyhow!("no GPU: {e}"))?;
         let mut loaded = load_checked(dir)?;
+        if allow_python {
+            loaded.python.allow();
+        }
+        atd_py::allow::clear();
         let [w, h] = loaded.project.resolution;
         let registry = std::mem::take(&mut loaded.registry);
         let library = std::mem::take(&mut loaded.library);
@@ -102,16 +120,29 @@ impl ServeWorkspace {
             .flatten(&main, engine.registry())
             .map_err(|e| anyhow!("{e}"))?;
         engine.load(flat.network.clone())?;
+        // Network Python (Script DATs, Python expressions): the same flag
+        // allows what the project holds as opened.
+        if allow_python {
+            atd_py::allow::allow_network(engine.network(), engine.registry());
+        }
         Ok(Self {
             dir: dir.to_owned(),
             loaded,
             engine,
             flat,
             save,
+            allow_python,
+            allow_agent_python: false,
             time: 0.0,
             adapter: gpu.adapter.get_info(),
             history: Vec::new(),
         })
+    }
+
+    /// Lets the Python a `python.exec` session writes run (with
+    /// `--allow-python-ops` only).
+    pub(crate) fn allow_agent_python(&mut self, on: bool) {
+        self.allow_agent_python = on && self.allow_python;
     }
 
     /// The headless engine (the flattened network).
@@ -143,6 +174,9 @@ impl ServeWorkspace {
         self.engine
             .load(flat.network.clone())
             .map_err(|e| e.to_string())?;
+        if self.allow_agent_python {
+            atd_py::allow::allow_network(self.engine.network(), self.engine.registry());
+        }
         self.flat = flat;
         self.loaded
             .project
@@ -156,6 +190,9 @@ impl ServeWorkspace {
 }
 
 impl Workspace for ServeWorkspace {
+    fn pack(&self, name: &str) -> Option<&PackDef> {
+        self.loaded.project.packs.get(name)
+    }
     fn network(&self) -> &Network {
         static EMPTY: std::sync::OnceLock<Network> = std::sync::OnceLock::new();
         self.loaded
@@ -304,10 +341,13 @@ impl Workspace for ServeWorkspace {
         if self.save {
             atd_format::save(&self.dir, &self.loaded.project).map_err(|e| e.to_string())?;
         }
-        let fresh = Self::open(&self.dir, self.save).map_err(|e| format!("{e:#}"))?;
+        let fresh =
+            Self::open(&self.dir, self.save, self.allow_python).map_err(|e| format!("{e:#}"))?;
         let history = std::mem::take(&mut self.history);
+        let agent_python = self.allow_agent_python;
         *self = fresh;
         self.history = history;
+        self.allow_agent_python = agent_python;
         Ok(())
     }
 }
@@ -373,6 +413,33 @@ fn osc(port: u16, tx: Sender<Request>) -> Result<()> {
     Ok(())
 }
 
+/// The OSC session's scopes: edits (and accepting them with
+/// `--auto-accept`), never `python.exec`.
+fn osc_scopes(auto_accept: bool) -> BTreeSet<Scope> {
+    let mut s: BTreeSet<Scope> = [Scope::Edit].into_iter().collect();
+    if auto_accept {
+        s.insert(Scope::Accept);
+    }
+    s
+}
+
+/// Handles one OSC request on its own session; with `--auto-accept` the
+/// change it staged is accepted at once.
+fn osc_call(
+    agent: &mut Agent,
+    ws: &mut ServeWorkspace,
+    msg: &serde_json::Value,
+    auto_accept: bool,
+) -> Option<serde_json::Value> {
+    let answer = mcp::handle(agent, ws, msg);
+    if auto_accept {
+        let accept = json!({"jsonrpc": "2.0", "id": 0, "method": "tools/call", "params": {
+            "name": "accept_changes", "arguments": {"label": "OSC"}}});
+        let _ = mcp::handle(agent, ws, &accept);
+    }
+    answer
+}
+
 fn flatten(p: rosc::OscPacket, out: &mut Vec<rosc::OscMessage>) {
     match p {
         rosc::OscPacket::Message(m) => out.push(m),
@@ -384,7 +451,7 @@ pub fn run(args: ServeArgs) -> Result<()> {
     if !args.mcp_stdio && args.http.is_none() && args.osc.is_none() {
         bail!("nothing to serve: give --mcp-stdio, --http <addr> and/or --osc <port>");
     }
-    let mut ws = ServeWorkspace::open(&args.project, !args.no_save)?;
+    let mut ws = ServeWorkspace::open(&args.project, !args.no_save, args.allow_python_ops)?;
     let mut scopes: BTreeSet<Scope> = Scope::defaults();
     if args.auto_accept {
         scopes.insert(Scope::Accept);
@@ -392,8 +459,14 @@ pub fn run(args: ServeArgs) -> Result<()> {
     for s in &args.scope {
         scopes.insert(Scope::parse(s).ok_or_else(|| anyhow!("unknown scope {s:?}"))?);
     }
+    ws.allow_agent_python(scopes.contains(&Scope::PythonExec));
     let lock = ShowLock::load(&args.project).map_err(|e| anyhow!(e))?;
-    let mut agent = Agent::new(scopes, lock);
+    let mut agent = Agent::new(scopes, lock.clone());
+    // OSC (UDP, any host on the LAN, no authentication) is its own session
+    // with only the scopes it needs: never `python.exec`, so it cannot write
+    // Python, whatever the MCP session was granted. It accepts its own
+    // changes only with --auto-accept (Show Lock moves apply at once).
+    let mut osc_agent = Agent::new(osc_scopes(args.auto_accept), lock);
 
     let (tx, rx): (Sender<Request>, Receiver<Request>) = channel();
     let stdio = args.mcp_stdio.then(mcp::read_stdio);
@@ -408,8 +481,9 @@ pub fn run(args: ServeArgs) -> Result<()> {
         );
         mcp::serve_http(listener, tx.clone());
     }
+    let (osc_tx, osc_rx): (Sender<Request>, Receiver<Request>) = channel();
     if let Some(port) = args.osc {
-        osc(port, tx.clone())?;
+        osc(port, osc_tx)?;
         eprintln!("atidarla serve: OSC on udp port {port} (/atd/<node>/<param>)");
     }
     let start = Instant::now();
@@ -433,6 +507,9 @@ pub fn run(args: ServeArgs) -> Result<()> {
                     }
                 }
             }
+        }
+        while let Ok((msg, reply)) = osc_rx.try_recv() {
+            let _ = reply.send(osc_call(&mut osc_agent, &mut ws, &msg, args.auto_accept));
         }
         ws.frame();
         // In-show cues (FR-G5) fire as the clock passes their beat.
@@ -459,7 +536,7 @@ pub fn run(args: ServeArgs) -> Result<()> {
 /// For tests: a session over a project folder.
 #[cfg(test)]
 pub(crate) fn session(dir: &Path, scopes: BTreeSet<Scope>) -> Result<(Agent, ServeWorkspace)> {
-    let ws = ServeWorkspace::open(dir, true)?;
+    let ws = ServeWorkspace::open(dir, true, false)?;
     let lock = ShowLock::load(dir).map_err(|e| anyhow!(e))?;
     Ok((Agent::new(scopes, lock), ws))
 }
@@ -552,5 +629,62 @@ mod tests {
         assert_eq!(net.len(), 2);
         assert!(net.node_by_name("blur1").is_some());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// OSC is its own session without `python.exec`: even when the MCP
+    /// session was granted it, an OSC message cannot write a Script's code
+    /// (and with --auto-accept a plain value still goes through).
+    #[test]
+    fn osc_cannot_write_python() {
+        let Ok(gpu) = atd_gpu::GpuContext::headless() else {
+            return;
+        };
+        drop(gpu);
+        let dir =
+            std::env::temp_dir().join(format!("atd-serve-osc-{}.atidarla", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let scopes = Scope::defaults()
+            .into_iter()
+            .chain([Scope::Accept, Scope::PythonExec])
+            .collect();
+        let (mut agent, mut ws) = session(&dir, scopes).unwrap();
+        for (t, n) in [("dat.script", "script1"), ("img.noise", "noise1")] {
+            agent.call(&mut ws, "create_node", &json!({"type": t, "name": n}));
+        }
+        agent.call(&mut ws, "accept_changes", &json!({"label": "setup"}));
+        let before = ws
+            .network()
+            .node_by_name("script1")
+            .unwrap()
+            .params
+            .get("code")
+            .cloned();
+        let mut osc = Agent::new(osc_scopes(true), ShowLock::default());
+        let set = |node: &str, param: &str, value: Value| {
+            json!({"jsonrpc": "2.0", "id": 0, "method": "tools/call", "params": {
+                "name": "set_param", "arguments": {"node": node, "param": param, "value": value}}})
+        };
+        let answer = osc_call(
+            &mut osc,
+            &mut ws,
+            &set("script1", "code", json!("def cook(i):\n    return 'pwned'")),
+            true,
+        );
+        assert!(text(&answer).contains("python.exec"), "{answer:?}");
+        assert_eq!(
+            ws.network()
+                .node_by_name("script1")
+                .unwrap()
+                .params
+                .get("code")
+                .cloned(),
+            before
+        );
+        osc_call(&mut osc, &mut ws, &set("noise1", "scale", json!(3.0)), true);
+        assert_eq!(
+            ws.network().node_by_name("noise1").unwrap().params["scale"].value,
+            json!(3.0)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

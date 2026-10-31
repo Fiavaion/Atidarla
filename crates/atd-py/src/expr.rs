@@ -8,6 +8,12 @@
 //! An offline render (FR-H1) waits for each frame's results instead
 //! (`submit_wait`), so they are always exactly one frame late.
 //!
+//! Expressions are project code: one is evaluated only while its exact
+//! content (node, parameter, source) is on the allow-list
+//! ([`crate::allow`], `docs/python-ops.md`). The engine offers no other job
+//! ([`PythonHost::allows`]), and the worker checks each job again before it
+//! evaluates it.
+//!
 //! Expressions see the same names as the native tier (`time`, `frame`,
 //! `me`, `op('name').par.x`, `op('name')['channel']`, the `math` module's
 //! functions, `clamp` and `lerp`), plus the rest of Python.
@@ -163,6 +169,14 @@ impl Drop for PyExprHost {
 }
 
 impl PythonHost for PyExprHost {
+    fn generation(&self) -> u64 {
+        crate::allow::generation()
+    }
+
+    fn allows(&self, node: atd_core::graph::NodeId, param: &str, source: &str) -> bool {
+        crate::allow::allows_expr(node, param, source)
+    }
+
     fn submit(&mut self, jobs: &[PyJob]) {
         // The worker holds the lock only to swap buffers; if it has it now,
         // this frame's jobs are skipped.
@@ -263,9 +277,15 @@ fn run(shared: &Shared) {
         };
         Python::attach(|py| {
             for job in &jobs {
-                let result = match &helper {
-                    Some(h) => evaluate(h.bind(py), job),
-                    None => Err("the Python expression helper did not load".into()),
+                // Checked again here: the list may have changed (another
+                // project opened) since the job was offered.
+                let result = if !crate::allow::allows_expr(job.node, &job.param, &job.source) {
+                    Err(atd_core::expr::PYTHON_NOT_ALLOWED.to_owned())
+                } else {
+                    match &helper {
+                        Some(h) => evaluate(h.bind(py), job),
+                        None => Err("the Python expression helper did not load".into()),
+                    }
                 };
                 done.push((job.key, result));
             }

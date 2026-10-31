@@ -11,6 +11,7 @@
 
 use pyo3::prelude::*;
 
+pub mod allow;
 pub mod expr;
 pub mod ops;
 pub mod script;

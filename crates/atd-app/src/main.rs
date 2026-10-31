@@ -48,6 +48,13 @@ fn main() -> ExitCode {
         .position(|a| a == "--kiosk")
         .map(|i| args.remove(i))
         .is_some();
+    // Run the opened project's Python without asking (unattended shows,
+    // `atidarla run --allow-python-ops`; docs/python-ops.md).
+    let allow_python = args
+        .iter()
+        .position(|a| a == "--allow-python-ops")
+        .map(|i| args.remove(i))
+        .is_some();
     let heartbeat = match args.iter().position(|a| a == "--heartbeat") {
         Some(i) if i + 1 < args.len() => {
             args.remove(i);
@@ -63,7 +70,7 @@ fn main() -> ExitCode {
         Ok(smoke) => smoke,
         Err(e) => {
             eprintln!(
-                "error: {e}\nusage: atidarla-app [project.atidarla] [--oscquery] [--kiosk] [--heartbeat file] [--smoke [frames]] [--screenshot out.png]"
+                "error: {e}\nusage: atidarla-app [project.atidarla] [--oscquery] [--kiosk] [--allow-python-ops] [--heartbeat file] [--smoke [frames]] [--screenshot out.png]"
             );
             return ExitCode::from(2);
         }
@@ -99,7 +106,11 @@ fn main() -> ExitCode {
             .inspect_err(|e| eprintln!("warning: heartbeat: {e}"))
             .ok()
     });
-    let shell = app::Shell { kiosk, heartbeat };
+    let shell = app::Shell {
+        kiosk,
+        heartbeat,
+        allow_python,
+    };
     let result = eframe::run_native(
         "Atidarla",
         options,

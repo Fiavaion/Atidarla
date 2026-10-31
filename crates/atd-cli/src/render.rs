@@ -274,6 +274,9 @@ pub struct Renderer {
     supervisor: &'static atd_ai::supervisor::Supervisor,
     /// What [`Self::load_variant`] starts from.
     source: Option<Source>,
+    /// `--allow-python-ops` for the loaded project: its network Python (and
+    /// its variants') is allowed as loaded.
+    allow_python: bool,
 }
 
 /// The loaded project's main network and what expands it, kept so a
@@ -325,6 +328,7 @@ impl Renderer {
             kernels: None,
             supervisor,
             source: None,
+            allow_python: false,
         })
     }
 
@@ -354,9 +358,12 @@ impl Renderer {
             .extend(|r, l| crate::project::python_ops(dir, r, l))?;
         if opts.allow_python_ops {
             python.allow();
+        } else {
+            // Not allowed: nothing runs. Allowed loads only add to the list
+            // (below): a batch's parallel workers share it, so clearing here
+            // would take other workers' items away.
+            atd_py::allow::clear();
         }
-        // Script DATs are project Python too: the same flag runs them.
-        atd_py::script::allow(opts.allow_python_ops);
         // Kernel files are read once, as they are when the render starts.
         let kernels = self
             .engine
@@ -408,6 +415,12 @@ impl Renderer {
                 other => other.into(),
             })
             .with_context(|| format!("{}", dir.display()))?;
+        // Network Python (Script DATs, Python expressions): the same flag
+        // allows what the project holds as opened.
+        self.allow_python = opts.allow_python_ops;
+        if self.allow_python {
+            atd_py::allow::allow_network(self.engine.network(), self.engine.registry());
+        }
         self.python = Some(python);
         // Live values belong to the project they were set for.
         self.engine.clear_live();
@@ -478,6 +491,11 @@ impl Renderer {
         place(&mut cooked, &src.registry)?;
         let timeline = src.timeline.clone();
         self.engine.load(cooked)?;
+        // Network Python (Script DATs, Python expressions): the same flag
+        // allows what the project holds as opened.
+        if self.allow_python {
+            atd_py::allow::allow_network(self.engine.network(), self.engine.registry());
+        }
         self.engine.clear_live();
         self.timeline = timeline.map(|doc| atd_timeline::Player::offline(doc, &self.engine));
         self.output = output;

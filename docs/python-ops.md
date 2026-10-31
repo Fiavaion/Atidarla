@@ -173,9 +173,20 @@ allow them:
   new file) asks again.
 - While a project is open and allowed, your own edits hot-reload without asking (you are the
   one editing). They do not update the remembered hash, so the next open asks again.
-- **Headless:** `atidarla check` and `atidarla render` run a project's Python operators only
-  with `--allow-python-ops` (for that run; nothing is remembered). Without it, `check` reports
-  the nodes it did not run and still passes, and `render` fails if the rendered image needs one.
+- **Headless:** `atidarla check`, `render`, `bake`, `batch`, `serve`, `soak` and `agent ask` /
+  `agent eval` run a project's Python (operators, Script nodes and Python expressions) only with
+  `--allow-python-ops` (for that run; nothing is remembered). Without it, `check` reports the
+  nodes and expressions it did not run and still passes, `render` fails if the rendered image
+  needs one, and `serve` cooks the show without them. With it, the network Python the project
+  holds as opened is allowed (see below); under `serve`, Python that an agent with the
+  `python.exec` scope writes later is allowed too, since there is no dialog headless (an agent
+  without the scope cannot write Python at all). `atidarla run --allow-python-ops` (an
+  unattended show, which cannot answer the Allow dialog) passes the flag on to the app
+  (`atidarla-app <project> --allow-python-ops`), which allows the opened project's Python after
+  every restart without asking.
+- **Agents** need the `python.exec` scope to write Python expressions or Script code, or to
+  promote a Script's code to a Pack parameter ([`agent.md`](agent.md)). In the app, Python an
+  agent writes is not allowed until you allow it in the dialog.
 
 **Threat model.** In scope: a project file from someone else running code when you open it.
 Out of scope: anything that can already write to your disk (it can change Atidarla itself);
@@ -184,26 +195,45 @@ expressions can exhaust Python's parser; files over 1 MB are refused). Files are
 `ops/` itself (not subfolders); `ops/` is not on Python's import path, so a stray `.pyc` or
 module there is never imported.
 
-**Script DATs** (`dat.script`, `crates/atd-py/src/script.rs`) are project Python too, written in a
-node's `code` parameter rather than in `ops/`. They run on their own worker thread and only after an
-explicit choice: the app's Allow dialog, which also opens for a project whose network has Script
-nodes and lists them ("Allow this time" or "Allow and remember"; the remembered hash covers `ops/`
-files, not network code, so it never allows scripts by itself and the dialog asks again on the
-next open), or `--allow-python-ops` for `check` and `render`. Opening another project stops them
-until it is allowed. Until then their nodes report the same "not allowed" error as Python
-operators. Known limit: a script that never returns holds the Script worker (no timeout yet; the
-show is not affected).
+**Network Python** is the Python written in the network itself: a Script DAT's `code`
+(`dat.script`, `crates/atd-py/src/script.rs`) and any parameter expression outside the native
+subset (a Python-tier expression, PRD A22). It runs only from an **allow-list by content**
+(`crates/atd-py/src/allow.rs`, PRD A67): each item is a node of the network the engine cooks
+(Packs expanded, so a promoted parameter is its inner target) with its parameter and full text,
+and only an item whose exact content is on the list runs. Everything else keeps its stored value
+(an expression) or does not cook (a Script), and its node reports "Python expressions in this
+project are not allowed to run" or the "not allowed" error of Python operators. Native-tier
+expressions are evaluated in Rust and always run.
 
-**Known gap (not closed by this work):** Python *expressions* in parameters (A22) run as soon
-as a project opens, without asking. Until they go through the same gate, opening an untrusted
-project is not safe even with its Python operators blocked. Raised with Mark.
+- **Opening a project clears the list.** The Allow dialog opens when the project has network
+  Python and lists every item in full (scrollable); *Allow* adds exactly those items. "Allow and
+  remember" remembers the `ops/` files only: network Python asks on every open (hashing network
+  text would make every edit a new trust decision, and the same code under another node would
+  look trusted or not by accident).
+- **Any path works the same way**, because the check is on content, not on how it got there: an
+  expression or script that a merge or a paste brings in or changes (even past the first
+  characters), one an undo or redo brings back, or one an agent writes, is a new item and is
+  blocked on its own until you allow it (File > Allow Python…, enabled while anything is
+  blocked). Items already allowed keep running. A copy you paste of your own allowed Python
+  runs too (the same content); the project's own Python is not stopped by any of this.
+- **Python you type** in the parameter panel (an expression, or a Script's code) is your own
+  action and is added to the list as you commit it, so it runs at once.
+- **File > New** and the patch the app starts with have no network Python; the list is empty.
+- **Checked twice:** the engine checks an item when the expressions or the list change (never
+  per frame, allocating nothing per frame) and offers only allowed items to the Python worker;
+  the expression worker and the Script worker check each job again before running it, so a job
+  queued before the list changed (another project opened) does not run.
+
+Known limit: a script that never returns holds the Script worker (no timeout yet; the show is
+not affected).
 
 ## Where it lives
 
 `crates/atd-py/src/ops/`: `read.rs` (the `ast` reader, no execution), `host.rs` (worker,
 supervisor, slots), `node.rs` (the engine side: SIG and IMG nodes), `trust.rs` (the remembered
 hashes), `mod.rs` (`PythonOps`: registration, hot reload, `stale_edits`); the Python half is
-`crates/atd-py/src/ops_host.py`. The registry knows these operators by their `py.` type IDs and
+`crates/atd-py/src/ops_host.py`. The allow-list for network Python (Script DATs, Python
+expressions) is `crates/atd-py/src/allow.rs`. The registry knows these operators by their `py.` type IDs and
 `python.custom` provenance (`Registry::replace_custom`, `Registry::provenance`). Tests:
 `crates/atd-py/tests/ops.rs` and `ops_alloc.rs`, plus `check`/`render` tests in `atd-cli` and
 the open/palette tests in `atd-app`.

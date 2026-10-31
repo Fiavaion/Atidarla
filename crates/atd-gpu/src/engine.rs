@@ -417,6 +417,11 @@ impl<'a> Params<'a> {
         self.mode
     }
 
+    /// The node these are the parameters of.
+    pub fn node(&self) -> NodeId {
+        self.node
+    }
+
     /// A path parameter's text as a file path: absolute paths as they are,
     /// relative ones relative to the project folder (PRD §5.5). This
     /// allocates, so operators call it when the text changes, not per frame.
@@ -1417,6 +1422,9 @@ pub struct Engine {
     revision: u64,
     /// The Python worker for expressions outside the native subset.
     python: Option<Box<dyn PythonHost>>,
+    /// The allow-list generation the expressions were last checked against
+    /// (`None`: not since the table was rebuilt).
+    py_checked: Option<u64>,
     py_jobs: Vec<PyJob>,
     py_results: Vec<(u64, Result<ExprValue, String>)>,
     mode: CookMode,
@@ -1506,6 +1514,7 @@ impl Engine {
             live: LiveValues::default(),
             revision: 0,
             python: None,
+            py_checked: None,
             py_jobs: Vec::new(),
             py_results: Vec::new(),
             mode: CookMode::Live,
@@ -1649,7 +1658,10 @@ impl Engine {
         let (table, extra, changed) = ExprTable::build(&self.net, &self.registry, &mut self.exprs);
         self.exprs = table;
         self.scheduler.set_extra(extra);
-        self.exprs.python_jobs(&self.net, &mut self.py_jobs);
+        // Python entries are offered to the worker once checked against the
+        // allow-list (next cook).
+        self.py_checked = None;
+        self.py_jobs.clear();
         changed
     }
 
@@ -1896,12 +1908,24 @@ impl Engine {
             exprs,
             live,
             python,
+            py_checked,
             py_jobs,
             py_results,
             mode,
             ..
         } = self;
         let mode = *mode;
+        // The allow-list: each Python expression is offered to the worker
+        // only while its exact content is allowed. Checked when the table or
+        // the list changed, never per frame.
+        if let Some(py) = python.as_ref() {
+            let generation = py.generation();
+            if *py_checked != Some(generation) {
+                *py_checked = Some(generation);
+                exprs.check_python(|node, param, source| py.allows(node, param, source));
+                exprs.python_jobs(net, py_jobs);
+            }
+        }
         // Python results computed from the last frame's values (offline,
         // every one of them: the previous frame waited for the worker).
         match python.as_mut() {
@@ -1909,7 +1933,7 @@ impl Engine {
                 py.collect(py_results);
                 exprs.apply_python(py_results);
             }
-            None if !py_jobs.is_empty() => exprs.no_python(),
+            None if exprs.has_python() => exprs.no_python(),
             None => {}
         }
         for (&id, op) in gpu_ops.iter() {

@@ -943,10 +943,14 @@ impl fmt::Display for ExprValue {
 }
 
 /// A Python expression for the Python worker, refreshed every frame.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PyJob {
     /// Identifies the parameter; its result comes back under this key.
     pub key: u64,
+    /// The node and parameter it drives (the worker checks the allow-list
+    /// by them and `source` before evaluating).
+    pub node: crate::graph::NodeId,
+    pub param: Arc<str>,
     pub source: Arc<str>,
     pub time: f64,
     pub frame: f64,
@@ -954,6 +958,21 @@ pub struct PyJob {
     pub me: Arc<str>,
     /// Nodes the source names as `op('…')`, with their values.
     pub refs: Vec<PyRef>,
+}
+
+impl Default for PyJob {
+    fn default() -> Self {
+        Self {
+            key: 0,
+            node: crate::graph::NodeId(0),
+            param: Arc::from(""),
+            source: Arc::from(""),
+            time: 0.0,
+            frame: 0.0,
+            me: Arc::from(""),
+            refs: Vec::new(),
+        }
+    }
 }
 
 /// A node an expression refers to, as seen this frame.
@@ -967,8 +986,23 @@ pub struct PyRef {
     pub channels: Vec<(Arc<str>, f64)>,
 }
 
+/// Why a Python-tier expression gives no value: this expression, as it is
+/// written, has not been allowed (`docs/python-ops.md`). Its parameter
+/// keeps its stored value.
+pub const PYTHON_NOT_ALLOWED: &str = "Python expressions in this project are not allowed to run";
+
 /// The Python worker (`atd-py`), as the engine sees it.
 pub trait PythonHost: Send {
+    /// Changes whenever what [`Self::allows`] answers may have changed.
+    /// Read once per frame: it must be cheap.
+    fn generation(&self) -> u64 {
+        0
+    }
+    /// Whether the expression `source` on `node`'s `param` may run. The
+    /// engine asks when its expressions or [`Self::generation`] change, never
+    /// per frame; one that may not is offered to no worker and reports
+    /// [`PYTHON_NOT_ALLOWED`]. No default: every host decides.
+    fn allows(&self, node: crate::graph::NodeId, param: &str, source: &str) -> bool;
     /// Offers this frame's jobs. Never blocks: when the worker is busy they
     /// are skipped, and results arrive a frame later.
     fn submit(&mut self, jobs: &[PyJob]);

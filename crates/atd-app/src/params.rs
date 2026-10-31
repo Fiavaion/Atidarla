@@ -9,7 +9,9 @@
 //! on the cook path, anything else in Python a frame late. One number
 //! drives every component of a vector (a colour's red, green and blue); a
 //! Python tuple, or a binding to a whole SIG node with enough channels,
-//! drives them one each (PRD A66). Errors show at the top of the panel,
+//! drives them one each (PRD A66). Python ones run only once the
+//! project's Python is allowed (docs/python-ops.md); until then the panel
+//! says so. Errors show at the top of the panel,
 //! with the operator's status line if it has one (e.g. Share Out's
 //! published name).
 
@@ -46,6 +48,14 @@ pub fn ui(
     ui.label(&schema.summary);
     if let Some(e) = engine.error(node) {
         ui.colored_label(egui::Color32::from_rgb(230, 80, 80), e);
+        if e.contains(atd_core::expr::PYTHON_NOT_ALLOWED) {
+            ui.weak(
+                "This Python expression came with the project, a paste, a merge or an agent and \
+                 has not been allowed; until you allow it (File > Allow Python…) the parameter \
+                 keeps its stored value, also after you edit it. Native \
+                 expressions (time, frame, math, op()) always run.",
+            );
+        }
     }
     if let Some(status) = engine.status(node) {
         ui.label(status);
@@ -218,8 +228,19 @@ pub fn ui(
                 if let Some(edit) = edit {
                     let key = format!("{node}:{}", p.name);
                     let label = format!("{name}.{}", p.name);
-                    if let Err(e) = engine.edit_coalesced(&label, &key, [edit]) {
-                        error = Some(e.to_string());
+                    // Python the user writes here is theirs and runs
+                    // (docs/python-ops.md), but only if what they edited was
+                    // theirs too: one keystroke in a foreign expression or
+                    // script does not allow the rest of it.
+                    let ours = typed_items(engine, node, &p.name)
+                        .iter()
+                        .all(atd_py::allow::allows);
+                    match engine.edit_coalesced(&label, &key, [edit]) {
+                        Ok(()) if ours => {
+                            atd_py::allow::allow(typed_items(engine, node, &p.name));
+                        }
+                        Ok(()) => {}
+                        Err(e) => error = Some(e.to_string()),
                     }
                 }
             }
@@ -231,6 +252,23 @@ pub fn ui(
         engine.seal_history();
     }
     error
+}
+
+/// The network Python of `node`'s `param` as it is now. What the user sets
+/// in this panel is added to the allow-list (a direct action in the app,
+/// unlike Python from a file, a paste, a merge or an agent) when what they
+/// changed was already allowed or was not Python.
+fn typed_items(engine: &Engine, node: NodeId, param: &str) -> Vec<atd_py::allow::Item> {
+    let Some(n) = engine.network().node(node) else {
+        return Vec::new();
+    };
+    atd_py::allow::node_items(n, engine.registry())
+        .into_iter()
+        .filter(|i| match i {
+            atd_py::allow::Item::Expr { param: p, .. } => p == param,
+            atd_py::allow::Item::Script { .. } => param == "code",
+        })
+        .collect()
 }
 
 /// The starting text of a new expression: the current value (a vector's

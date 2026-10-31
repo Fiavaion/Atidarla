@@ -23,6 +23,9 @@ use crate::cues::{self, CueContext, CueQueue, Move, Quantum};
 use crate::lock::{Refusal, Scope, ShowLock};
 use crate::workspace::Workspace;
 
+/// The Script DAT (`atd_py::script::TYPE_ID`): its `code` is Python.
+const SCRIPT_TYPE: &str = "dat.script";
+
 /// A tool as offered to a model: name, description, argument schema.
 #[derive(Debug, Clone)]
 pub struct ToolSpec {
@@ -451,6 +454,7 @@ impl Agent {
                             ignored.push(p.clone());
                             continue;
                         }
+                        self.python_gate_script(&*ws, &op.type_id, p)?;
                         edits.push(Edit::SetParam {
                             node: id,
                             param: p.clone(),
@@ -717,6 +721,12 @@ impl Agent {
         }
         if let Some(e) = a.get("expression").and_then(Value::as_str) {
             p.expr = (!e.trim().is_empty()).then(|| e.to_owned());
+            if let Some(e) = &p.expr {
+                self.python_gate_expr(&node.name, param, e)?;
+            }
+        }
+        if a.get("value").is_some() {
+            self.python_gate_script(&*ws, &node.type_id, param)?;
         }
         if let Some(b) = a.get("bind").and_then(Value::as_object) {
             let src = find(
@@ -754,6 +764,77 @@ impl Agent {
         }
         self.stage(ws, net, vec![edit], note)?;
         Ok(Output::Json(json!({"staged": true})))
+    }
+
+    /// Rule 9: an expression outside the native subset is Python (PRD A22),
+    /// arbitrary code once the project's Python runs. Only a session with
+    /// `python.exec` may write one.
+    fn python_gate_expr(&self, node: &str, param: &str, expr: &str) -> Result<(), String> {
+        if self.scopes.contains(&Scope::PythonExec) || atd_core::expr::Expr::parse(expr).is_ok() {
+            return Ok(());
+        }
+        Err(format!(
+            "{node}.{param}: `{expr}` is a Python expression (outside the native subset); \
+             writing Python needs the `python.exec` scope, which this session does not have. \
+             Use the native subset: numbers, + - * / % **, comparisons, `a if c else b`, math \
+             functions (sin, cos, floor, …), clamp, lerp, time, frame, me.digits, \
+             op('node').par.name and op('node')['channel']"
+        ))
+    }
+
+    /// Rule 9: a Script DAT's code is Python; only with `python.exec`. A
+    /// Pack instance's parameter is resolved to the inner parameters it
+    /// sets (through nested Packs), so a promoted `code` is refused too.
+    fn python_gate_script(
+        &self,
+        ws: &dyn Workspace,
+        type_id: &str,
+        param: &str,
+    ) -> Result<(), String> {
+        if self.writes_script_code(ws, type_id, param, 0)
+            && !self.scopes.contains(&Scope::PythonExec)
+        {
+            return Err(format!(
+                "a Script node's `code` is Python, so writing it needs `python.exec`: {}",
+                Refusal::Scope("python.exec")
+            ));
+        }
+        Ok(())
+    }
+
+    /// Whether setting `param` on a node of `type_id` sets a Script's code.
+    fn writes_script_code(
+        &self,
+        ws: &dyn Workspace,
+        type_id: &str,
+        param: &str,
+        depth: u8,
+    ) -> bool {
+        if type_id == SCRIPT_TYPE {
+            return param == "code";
+        }
+        // Packs nest a few levels; deeper is a loop, refused to be safe.
+        if depth > 16 {
+            return true;
+        }
+        let def = pack::pack_name(type_id).and_then(|name| {
+            self.staged_packs
+                .iter()
+                .find(|d| d.name == name)
+                .or_else(|| ws.pack(name))
+        });
+        let Some(def) = def else {
+            return false;
+        };
+        def.params
+            .iter()
+            .filter(|p| p.name == param)
+            .flat_map(|p| &p.targets)
+            .any(|t| {
+                def.network
+                    .node(t.node)
+                    .is_some_and(|n| self.writes_script_code(ws, &n.type_id, &t.param, depth + 1))
+            })
     }
 
     /// `create_pack`: Make Pack (`atd_core::pack::make_pack`) on the preview,
@@ -806,6 +887,11 @@ impl Agent {
             let id = find(&net, node)?;
             if !selection.contains(&id) {
                 return Err(format!("`{node}` is not one of `nodes`"));
+            }
+            // Promoting a Script node's code would let the instance's
+            // parameter write Python: the same scope as writing it directly.
+            if let Some(n) = net.node(id) {
+                self.python_gate_script(&*ws, &n.type_id, param)?;
             }
             let t = ParamTarget::new(id, param);
             if promote.contains(&t) {

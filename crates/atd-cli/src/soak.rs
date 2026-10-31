@@ -55,6 +55,10 @@ pub struct SoakArgs {
     /// Launch the next column of the Stage deck every this many seconds.
     #[arg(long)]
     pub cycle_seconds: Option<f64>,
+    /// Run the project's Python (ops/*.py operators, Script nodes, Python
+    /// expressions); see docs/python-ops.md.
+    #[arg(long)]
+    pub allow_python_ops: bool,
 }
 
 /// What a soak run does, independent of the command line.
@@ -650,7 +654,7 @@ pub(crate) fn soak(
 pub fn run(args: &SoakArgs) -> Result<()> {
     let opts = args.options()?;
     std::fs::create_dir_all(&args.out).with_context(|| format!("create {}", args.out.display()))?;
-    let mut ws = ServeWorkspace::open(&args.project, false)?;
+    let mut ws = ServeWorkspace::open(&args.project, false, args.allow_python_ops)?;
     let name = args.project.file_name().map_or_else(
         || args.project.display().to_string(),
         |n| n.to_string_lossy().into_owned(),
@@ -748,6 +752,7 @@ mod tests {
             out: PathBuf::new(),
             sample: 1.0,
             cycle_seconds: None,
+            allow_python_ops: false,
         };
         assert_eq!(
             args(None, None, None).options().unwrap().duration,
@@ -791,7 +796,7 @@ mod tests {
         let out = std::env::temp_dir().join(format!("atd-soak-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&out);
         std::fs::create_dir_all(&out).unwrap();
-        let mut ws = ServeWorkspace::open(&project, false).unwrap();
+        let mut ws = ServeWorkspace::open(&project, false, false).unwrap();
         let opts = SoakOptions {
             duration: Duration::from_secs(3),
             warmup: Duration::from_secs(1),

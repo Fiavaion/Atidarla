@@ -58,6 +58,9 @@ pub struct Shell {
     pub kiosk: bool,
     /// Beats for the supervisor while the UI draws frames.
     pub heartbeat: Option<crate::heartbeat::Heartbeat>,
+    /// `--allow-python-ops` (`atidarla run --allow-python-ops`): the opened
+    /// project's Python runs without asking, for unattended shows.
+    pub allow_python: bool,
 }
 
 pub struct AtidarlaApp {
@@ -195,8 +198,13 @@ impl AtidarlaApp {
                 .as_ref()
                 .map_or(&atd_core::graph::Network::default(), |e| e.network()),
         );
+        // Nothing is allowed until a project's Python is.
+        atd_py::allow::clear();
         if let (Some(engine), Some(dir)) = (engine.as_mut(), open) {
             viewed = project.run(engine, Action::OpenDir(dir));
+            if shell.allow_python && project.dir.is_some() {
+                project.allow_python(atd_py::allow::items(engine.network(), engine.registry()));
+            }
             if let Some((msg, true)) = &project.message {
                 log::error!("{msg}");
                 if smoke.is_some() {
@@ -593,14 +601,18 @@ impl AtidarlaApp {
         if item(ui, "Save As…", &SAVE_AS) {
             self.project.save_as();
         }
-        let blocked = self
-            .project
-            .python
+        let network = self
+            .panels
+            .engine
             .as_ref()
-            .is_some_and(|p| !p.is_allowed());
+            .map_or_else(Vec::new, crate::project::blocked_python);
+        let blocked = crate::project::must_ask(self.project.python.as_ref(), &network);
         if ui
-            .add_enabled(blocked, egui::Button::new("Allow Python Operators…"))
-            .on_hover_text("Run this project's ops/*.py (docs/python-ops.md)")
+            .add_enabled(blocked, egui::Button::new("Allow Python…"))
+            .on_hover_text(
+                "Run this project's Python: its operators (ops/*.py), Script nodes and Python \
+                 expressions (docs/python-ops.md)",
+            )
             .clicked()
         {
             self.project.python_ask = true;
@@ -772,12 +784,10 @@ impl AtidarlaApp {
     /// The open project's Python operators: hot reload of saved files
     /// (FR-K4), and asking before they run (docs/python-ops.md).
     fn python_frame(&mut self, ctx: &egui::Context) {
-        let (Some(engine), Some(python)) = (&mut self.panels.engine, &mut self.project.python)
-        else {
-            return;
-        };
-        // The watcher thread read the files; this applies them (no disk).
-        if let Some(reload) = engine.extend(|r, l| python.poll(r, l)) {
+        if let (Some(engine), Some(python)) = (&mut self.panels.engine, &mut self.project.python)
+            // The watcher thread read the files; this applies them (no disk).
+            && let Some(reload) = engine.extend(|r, l| python.poll(r, l))
+        {
             let (edits, notes) = atd_py::ops::stale_edits(engine.network(), engine.registry());
             let mut message = match reload.errors.first() {
                 Some(e) => (e.to_string(), true),
@@ -794,38 +804,47 @@ impl AtidarlaApp {
         if !self.project.python_ask || self.smoke.is_some() {
             return;
         }
-        let scripts: Vec<String> = self.panels.engine.as_ref().map_or_else(Vec::new, |e| {
-            e.network()
-                .nodes()
-                .filter(|n| n.type_id == atd_py::script::TYPE_ID)
-                .map(|n| format!("Script node {}", n.name))
-                .collect()
-        });
-        let Some(python) = &mut self.project.python else {
-            return;
-        };
-        let files: Vec<String> = python
-            .files()
+        let (items, scripts): (Vec<atd_py::allow::Item>, Vec<String>) =
+            match self.panels.engine.as_ref() {
+                Some(e) => {
+                    let items = crate::project::blocked_python(e);
+                    let shown = items.iter().map(|i| i.describe(e.network())).collect();
+                    (items, shown)
+                }
+                None => (Vec::new(), Vec::new()),
+            };
+        let files: Vec<String> = self
+            .project
+            .python
+            .iter()
+            .flat_map(|p| p.files())
             .map(|f| format!("{}/{}.py", atd_py::ops::OPS_DIR, f.stem))
             .chain(scripts)
             .collect();
         let mut choice = None;
         let modal = egui::Modal::new(egui::Id::unique("allow_python_ops")).show(ctx, |ui| {
-            ui.heading("Run this project's Python operators?");
+            ui.heading("Run this project's Python?");
             ui.label(
-                "This project contains operators written in Python. They are programs: once \
-                 they run they can do anything your user account can (read and change files, \
-                 use the network). Atidarla does not sandbox them. Allow them only if you \
-                 trust where the project came from.",
+                "This project contains Python: operators, Script nodes or parameter \
+                 expressions. They are programs: once they run they can do anything your user \
+                 account can (read and change files, use the network). Atidarla does not \
+                 sandbox them. Allow them only if you trust where the project came from.",
             );
             ui.add_space(4.0);
-            for f in &files {
-                ui.monospace(f);
-            }
+            // Everything that will run, in full.
+            egui::ScrollArea::vertical()
+                .max_height(320.0)
+                .show(ui, |ui| {
+                    for f in &files {
+                        ui.monospace(f);
+                    }
+                });
             ui.add_space(4.0);
             ui.weak(
-                "Until you allow them, their nodes do not cook. \"Remember\" applies to these \
-                 files exactly as they are; any change asks again.",
+                "Until you allow them, their nodes do not cook and Python expressions keep \
+                 their parameters' stored values. \"Remember\" applies to the ops/ files \
+                 exactly as they are (any change asks again); Script nodes and expressions ask \
+                 on every open.",
             );
             ui.add_space(8.0);
             ui.horizontal(|ui| {
@@ -844,12 +863,11 @@ impl AtidarlaApp {
             self.project.python_ask = false;
         }
         let Some(remember) = choice else { return };
-        self.project.python_ask = false;
-        python.allow();
-        // Script DATs run only on this explicit choice, never from the
-        // remembered hash (it covers ops/ files, not the network's code).
-        atd_py::script::allow(true);
-        if remember {
+        self.project.allow_python(items);
+        if remember
+            && let Some(python) = &self.project.python
+            && !python.is_empty()
+        {
             let stored = atd_py::ops::TrustStore::user()
                 .ok_or_else(|| "no settings folder".to_owned())
                 .and_then(|s| {

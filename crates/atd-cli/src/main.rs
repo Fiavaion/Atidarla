@@ -85,9 +85,10 @@ enum Command {
         /// viewer shows first (the last IMG node nothing reads from).
         #[arg(long)]
         node: Option<String>,
-        /// Run the project's Python operators (ops/*.py). They are code
-        /// with your user's privileges; without this flag a render that
-        /// needs one fails. See docs/python-ops.md.
+        /// Run the project's Python: operators (ops/*.py), Script nodes and
+        /// Python parameter expressions. They are code with your user's
+        /// privileges; without this flag a render that needs one fails. See
+        /// docs/python-ops.md.
         #[arg(long)]
         allow_python_ops: bool,
         /// Movie codec for --out *.mov / *.mp4: prores (422, default for
@@ -152,6 +153,12 @@ enum Command {
         /// Seconds the app gets from launch to its first heartbeat.
         #[arg(long, default_value_t = 90.0)]
         startup_grace: f64,
+        /// Run the project's Python (ops/*.py operators, Script nodes, Python
+        /// expressions) without the app's Allow dialog, which an unattended
+        /// show cannot answer. They are code with your user's privileges.
+        /// See docs/python-ops.md.
+        #[arg(long)]
+        allow_python_ops: bool,
     },
     /// Bake one node's output to disk with the offline render engine: a GEO/MSH node
     /// to mesh files (mesh.ply once if every frame is the same, else
@@ -178,7 +185,8 @@ enum Command {
         /// Write one file per frame even when every frame is the same.
         #[arg(long)]
         sequence: bool,
-        /// Run the project's Python operators (ops/*.py); see docs/python-ops.md.
+        /// Run the project's Python (ops/*.py operators, Script nodes, Python
+        /// expressions); see docs/python-ops.md.
         #[arg(long)]
         allow_python_ops: bool,
     },
@@ -205,9 +213,10 @@ enum Command {
         /// Frames to cook with --gpu, at 60 per second.
         #[arg(long, default_value_t = 60)]
         frames: u32,
-        /// With --gpu, also run the projects' Python operators (ops/*.py).
-        /// They are code with your user's privileges; without this flag
-        /// their nodes are listed as not run. See docs/python-ops.md.
+        /// With --gpu, also run the projects' Python: operators (ops/*.py),
+        /// Script nodes and Python parameter expressions. They are code with
+        /// your user's privileges; without this flag they are listed as not
+        /// run. See docs/python-ops.md.
         #[arg(long)]
         allow_python_ops: bool,
     },
@@ -501,6 +510,7 @@ fn main() -> ExitCode {
             restart_delay,
             heartbeat_timeout,
             startup_grace,
+            allow_python_ops,
         } => supervise::run(
             &project,
             &supervise::RunOptions {
@@ -509,6 +519,7 @@ fn main() -> ExitCode {
                 restart_delay,
                 heartbeat_timeout,
                 startup_grace,
+                allow_python_ops,
             },
         ),
         Command::Bake {
