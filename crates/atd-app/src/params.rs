@@ -301,6 +301,14 @@ fn expr_widget(
     (commit.then_some(s), false, toggled)
 }
 
+/// Whether a whole-node binding to SIG node `sig` drives a vector of
+/// `components` one channel per component: the node has at least as many
+/// channels (else its first channel drives every component; see
+/// `atd_gpu::engine::Params::vec4`).
+fn per_component(engine: &Engine, sig: NodeId, components: Option<usize>) -> bool {
+    components.is_some_and(|n| n > 1 && engine.channels(sig).is_some_and(|c| c.len() >= n))
+}
+
 /// The channel-binding dropdown (FR-P2 channel export). Returns
 /// `Some(new binding)` when the user changes it.
 fn bind_widget(
@@ -314,11 +322,12 @@ fn bind_widget(
         ui.label("");
         return None;
     }
-    let vector = p.kind.components().is_some();
+    let components = p.kind.components();
+    let vector = components.is_some();
     let net = engine.network();
     let label = |r: &ChannelRef| {
         let n = net.node(r.node).map_or("?", |n| n.name.as_str());
-        if r.channel.is_empty() && vector {
+        if r.channel.is_empty() && per_component(engine, r.node, components) {
             format!("{n} (per component)")
         } else if r.channel.is_empty() {
             n.to_owned()
