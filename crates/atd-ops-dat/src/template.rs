@@ -73,9 +73,15 @@ impl Values<'_> {
     }
 }
 
-/// Fills `template`; `missing` is a menu entry of the schema.
-fn fill(template: &str, values: &Values<'_>, missing: &str) -> Result<String, String> {
-    let mut out = String::with_capacity(template.len() + 64);
+/// Fills `template` into `out` (cleared first); `missing` is a menu entry
+/// of the schema.
+fn fill(
+    template: &str,
+    values: &Values<'_>,
+    missing: &str,
+    out: &mut String,
+) -> Result<(), String> {
+    out.clear();
     let mut rest = template;
     while let Some(i) = rest.find(['{', '}']) {
         out.push_str(&rest[..i]);
@@ -96,7 +102,7 @@ fn fill(template: &str, values: &Values<'_>, missing: &str) -> Result<String, St
             break;
         };
         let name = tail[1..end].trim();
-        if !values.get(name, &mut out) {
+        if !values.get(name, out) {
             match missing {
                 "empty" => {}
                 "error" => return Err(format!("no value for `{{{name}}}`")),
@@ -106,11 +112,15 @@ fn fill(template: &str, values: &Values<'_>, missing: &str) -> Result<String, St
         rest = &tail[end + 1..];
     }
     out.push_str(rest);
-    Ok(out)
+    Ok(())
 }
 
-#[derive(Debug)]
-struct TemplateOp;
+/// Fills into a buffer it keeps, so a frame whose text did not change
+/// (channels steady, or rounding to the same digits) allocates nothing.
+#[derive(Debug, Default)]
+struct TemplateOp {
+    buf: String,
+}
 
 impl DatOp for TemplateOp {
     fn cook(&mut self, ctx: &mut DatCtx<'_>) -> Result<(), String> {
@@ -125,16 +135,16 @@ impl DatOp for TemplateOp {
             sig: ctx.sig_inputs.get(2),
             precision: p.i64("precision").clamp(0, 9) as usize,
         };
-        let filled = fill(p.str("template"), &values, p.str("missing"))?;
-        if !(ctx.output.is_text() && ctx.output.as_text() == filled) {
-            *ctx.output = Dat::text(filled);
+        fill(p.str("template"), &values, p.str("missing"), &mut self.buf)?;
+        if !(ctx.output.is_text() && ctx.output.as_text() == self.buf) {
+            *ctx.output = Dat::text(self.buf.as_str());
         }
         Ok(())
     }
 }
 
 pub fn create() -> Box<dyn DatOp> {
-    Box::new(TemplateOp)
+    Box::<TemplateOp>::default()
 }
 
 #[cfg(test)]
