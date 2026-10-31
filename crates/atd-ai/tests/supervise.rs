@@ -180,6 +180,29 @@ fn offline_with_no_host_fails_fast() {
     assert!(link.status().unreachable);
 }
 
+/// A host that refuses to load the model is not final (it may still be
+/// downloading it): the offline wait keeps trying instead of failing fast.
+#[test]
+fn a_refused_model_load_is_retried_not_final() {
+    let sup = leak(Supervisor::new());
+    sup.set(HostSpec {
+        name: "local".into(),
+        kind: HostKind::Local(support::ref_host()),
+    });
+    let mut cfg = config("local", None);
+    cfg.model.model_id = "builtin.no_such_model".into();
+    let link = Link::new(sup, cfg);
+    let (seq, _) = offer_offline(&link, 1);
+    let t0 = Instant::now();
+    let r = link.wait_result(seq, Duration::from_secs(3), |_| {});
+    println!("refused model: {r:?} after {:?}", t0.elapsed());
+    assert!(
+        !matches!(r, Err(NoResult::Unreachable(_))),
+        "a refused model load must not be final: {r:?}"
+    );
+    assert!(!link.status().unreachable);
+}
+
 /// A remote host that refuses the connection (nothing listens) is out of
 /// reach too; a route with every target out fails fast.
 #[test]

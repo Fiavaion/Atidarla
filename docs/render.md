@@ -180,8 +180,9 @@ settings an operator cooks under (project folder, expressions), so every context
    nodes wait for their host's answer to the previous frame (`Link::wait_result`, at most 120 s)
    only while a host on the route is connected or still starting, so a slow host still answers
    frame `i - 1` on frame `i`. When no host on the route can run the node (none configured, it
-   failed to start or refused the connection, it cannot load the model) or the host is lost
-   before it answers, the node errors at once with what to do.
+   failed to start or refused the connection, it lacks the node's adapter) or the host is lost
+   before it answers, the node errors at once with what to do. A host that refuses to load the
+   model is tried again (it may still be downloading it) until the 30 s give-up.
 3. **Fixed latency for readbacks.** Analyze reads back on the GPU asynchronously. Offline it waits
    (`device.poll(wait)`) for the previous frame's readback before reading it, so its channels are
    always the measurement of the frame before: exactly one frame late, as Python expressions.

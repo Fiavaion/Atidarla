@@ -478,9 +478,6 @@ struct Worker {
     sent_seq: u64,
     /// Targets passed over for a while (failed, over budget), with until when.
     excluded: Vec<(Target, Instant)>,
-    /// Targets whose host refused to load the model (until it loads there
-    /// or the configuration changes).
-    no_model: Vec<Target>,
     over_budget_since: Option<Instant>,
     last_result: Option<Instant>,
     /// Inline frames are copied out of the mailbox before sending.
@@ -498,7 +495,6 @@ impl Worker {
             flight: VecDeque::new(),
             sent_seq: 0,
             excluded: Vec::new(),
-            no_model: Vec::new(),
             over_budget_since: None,
             last_result: None,
             scratch: Vec::new(),
@@ -531,7 +527,6 @@ impl Worker {
                     self.config_gen = c.0;
                     self.config = Some(c.1.clone());
                     drop(c);
-                    self.no_model.clear();
                     self.drop_session(None);
                 }
             }
@@ -613,16 +608,12 @@ impl Worker {
             options: cfg.model.options.clone(),
         };
         if let Err(e) = client.load_model(&load) {
-            // The host answered and will not load it (not busy, not gone).
-            if matches!(&e, ClientError::Rpc(r) if r.code != codes::BUSY)
-                && !self.no_model.contains(&choice.target)
-            {
-                self.no_model.push(choice.target.clone());
-            }
+            // Not final, even offline: the model may still be downloading
+            // or the host may free memory (Mark, 2026-10-31). Offline
+            // renders keep trying until the give-up time.
             self.exclude(&choice.target, Duration::from_secs(5), e.to_string());
             return false;
         }
-        self.no_model.retain(|t| *t != choice.target);
         let vram = self
             .supervisor
             .host(&host)
@@ -655,14 +646,13 @@ impl Worker {
 
     /// Whether no target on the route can run the node and none is on its
     /// way: each is refused by policy, not configured, failed to start or
-    /// to connect, cannot run the adapter, or refused to load the model. A
-    /// host that is idle, starting, restarting or ready may still serve.
+    /// to connect, or cannot run the adapter. A host that is idle,
+    /// starting, restarting or ready may still serve, and one that refused
+    /// to load the model may load it on a later try.
     fn out_of_reach(&self, cfg: &LinkConfig) -> bool {
         let hosts = self.supervisor.snapshot();
         cfg.route.0.iter().all(|t| {
-            if self.no_model.contains(t)
-                || t.is_cloud() && (crate::egress::sovereign() || router::spend().cap_reached())
-            {
+            if t.is_cloud() && (crate::egress::sovereign() || router::spend().cap_reached()) {
                 return true;
             }
             let name = t.host_name();
