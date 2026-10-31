@@ -159,8 +159,14 @@ fn python_sig_cooks_allocate_no_more_than_builtin_ones() {
     )
     .unwrap();
     let frames = 200;
-    let python = measure(&mut e, py, frames);
-    let reference = measure(&mut e, builtin, frames);
+    // Under load the worker's results arrive unevenly, which can add a few
+    // one-time allocations to one run: noise only adds, so the least of a
+    // few runs is the cook's own count.
+    let (mut python, mut reference) = (usize::MAX, usize::MAX);
+    for _ in 0..3 {
+        python = python.min(measure(&mut e, py, frames));
+        reference = reference.min(measure(&mut e, builtin, frames));
+    }
     eprintln!(
         "cook-thread allocations over {frames} frames: Python SIG node {python}, built-in SIG node {reference}"
     );
