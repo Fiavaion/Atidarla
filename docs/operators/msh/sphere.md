@@ -35,3 +35,4 @@ All platforms.
 - [Mesh Modelling](../../../examples/mesh-modelling.atidarla/) — `ball`
 - [Mesh Primitives](../../../examples/mesh-primitives.atidarla/) — `ball`
 - [Scatter to Iso Surface](../../../examples/mesh-scatter-iso.atidarla/) — `base`
+- [Mesh Shaping](../../../examples/mesh-shaping.atidarla/) — `ball`

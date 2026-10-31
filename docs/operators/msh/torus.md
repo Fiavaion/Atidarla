@@ -32,3 +32,4 @@ All platforms.
 
 - [Mesh Modelling](../../../examples/mesh-modelling.atidarla/) — `donut`
 - [Mesh Primitives](../../../examples/mesh-primitives.atidarla/) — `ring`
+- [Mesh Shaping](../../../examples/mesh-shaping.atidarla/) — `ring`

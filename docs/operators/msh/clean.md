@@ -34,4 +34,4 @@ All platforms.
 
 ## Examples
 
-No example project uses it yet.
+- [Mesh Shaping](../../../examples/mesh-shaping.atidarla/) — `tidy`
