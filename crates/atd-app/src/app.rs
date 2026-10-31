@@ -58,6 +58,9 @@ pub struct Shell {
     pub kiosk: bool,
     /// Beats for the supervisor while the UI draws frames.
     pub heartbeat: Option<crate::heartbeat::Heartbeat>,
+    /// `--allow-python-ops` (`atidarla run --allow-python-ops`): the opened
+    /// project's Python runs without asking, for unattended shows.
+    pub allow_python: bool,
 }
 
 pub struct AtidarlaApp {
@@ -200,6 +203,9 @@ impl AtidarlaApp {
         atd_py::script::allow(true);
         if let (Some(engine), Some(dir)) = (engine.as_mut(), open) {
             viewed = project.run(engine, Action::OpenDir(dir));
+            if shell.allow_python && project.dir.is_some() {
+                project.allow_python();
+            }
             if let Some((msg, true)) = &project.message {
                 log::error!("{msg}");
                 if smoke.is_some() {
@@ -596,14 +602,18 @@ impl AtidarlaApp {
         if item(ui, "Save As…", &SAVE_AS) {
             self.project.save_as();
         }
-        let blocked = self
-            .project
-            .python
+        let network = self
+            .panels
+            .engine
             .as_ref()
-            .is_some_and(|p| !p.is_allowed() || !atd_py::script::allowed());
+            .map_or_else(Vec::new, |e| crate::project::network_python(e.network()));
+        let blocked = crate::project::python_blocked(self.project.python.as_ref(), &network);
         if ui
-            .add_enabled(blocked, egui::Button::new("Allow Python Operators…"))
-            .on_hover_text("Run this project's ops/*.py (docs/python-ops.md)")
+            .add_enabled(blocked, egui::Button::new("Allow Python…"))
+            .on_hover_text(
+                "Run this project's Python: its operators (ops/*.py), Script nodes and Python \
+                 expressions (docs/python-ops.md)",
+            )
             .clicked()
         {
             self.project.python_ask = true;
@@ -775,12 +785,14 @@ impl AtidarlaApp {
     /// The open project's Python operators: hot reload of saved files
     /// (FR-K4), and asking before they run (docs/python-ops.md).
     fn python_frame(&mut self, ctx: &egui::Context) {
-        let (Some(engine), Some(python)) = (&mut self.panels.engine, &mut self.project.python)
-        else {
-            return;
-        };
-        // The watcher thread read the files; this applies them (no disk).
-        if let Some(reload) = engine.extend(|r, l| python.poll(r, l)) {
+        // A paste from the clipboard brought in Python: ask before it runs.
+        if std::mem::take(&mut self.panels.patch.pasted_python) {
+            self.project.withdraw_python();
+        }
+        if let (Some(engine), Some(python)) = (&mut self.panels.engine, &mut self.project.python)
+            // The watcher thread read the files; this applies them (no disk).
+            && let Some(reload) = engine.extend(|r, l| python.poll(r, l))
+        {
             let (edits, notes) = atd_py::ops::stale_edits(engine.network(), engine.registry());
             let mut message = match reload.errors.first() {
                 Some(e) => (e.to_string(), true),
@@ -802,11 +814,11 @@ impl AtidarlaApp {
             .engine
             .as_ref()
             .map_or_else(Vec::new, |e| crate::project::network_python(e.network()));
-        let Some(python) = &mut self.project.python else {
-            return;
-        };
-        let files: Vec<String> = python
-            .files()
+        let files: Vec<String> = self
+            .project
+            .python
+            .iter()
+            .flat_map(|p| p.files())
             .map(|f| format!("{}/{}.py", atd_py::ops::OPS_DIR, f.stem))
             .chain(scripts)
             .collect();
@@ -847,13 +859,11 @@ impl AtidarlaApp {
             self.project.python_ask = false;
         }
         let Some(remember) = choice else { return };
-        self.project.python_ask = false;
-        python.allow();
-        // Script DATs and Python expressions run only on this explicit
-        // choice, never from the remembered hash (it covers ops/ files, not
-        // the network's code).
-        atd_py::script::allow(true);
-        if remember && !python.is_empty() {
+        self.project.allow_python();
+        if remember
+            && let Some(python) = &self.project.python
+            && !python.is_empty()
+        {
             let stored = atd_py::ops::TrustStore::user()
                 .ok_or_else(|| "no settings folder".to_owned())
                 .and_then(|s| {

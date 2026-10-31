@@ -41,28 +41,41 @@ enum Dialog {
 pub fn network_python(net: &Network) -> Vec<String> {
     let mut out = Vec::new();
     for n in net.nodes() {
-        if n.type_id == atd_py::script::TYPE_ID {
-            out.push(format!("Script node {}", n.name));
-        }
-        for (param, p) in &n.params {
-            let Some(source) = p.expr.as_deref() else {
-                continue;
-            };
-            if atd_core::expr::Expr::parse(source).is_err() {
-                let short: String = source.chars().take(60).collect();
-                let more = if short.len() < source.len() {
-                    "…"
-                } else {
-                    ""
-                };
-                out.push(format!(
-                    "Python expression {}.{param} = {short}{more}",
-                    n.name
-                ));
-            }
-        }
+        node_python(n, &mut out);
     }
     out
+}
+
+/// [`network_python`] for one node, appended to `out`.
+pub fn node_python(n: &atd_core::graph::Node, out: &mut Vec<String>) {
+    if n.type_id == atd_py::script::TYPE_ID {
+        out.push(format!("Script node {}", n.name));
+    }
+    for (param, p) in &n.params {
+        let Some(source) = p.expr.as_deref() else {
+            continue;
+        };
+        if atd_core::expr::Expr::parse(source).is_err() {
+            let short: String = source.chars().take(60).collect();
+            let more = if short.len() < source.len() {
+                "…"
+            } else {
+                ""
+            };
+            out.push(format!(
+                "Python expression {}.{param} = {short}{more}",
+                n.name
+            ));
+        }
+    }
+}
+
+/// Whether the open project has Python that is not allowed to run now:
+/// `ops/` files not allowed, or network Python while the allowance is
+/// withdrawn. File > Allow Python… is enabled only then.
+pub fn python_blocked(python: Option<&atd_py::ops::PythonOps>, network: &[String]) -> bool {
+    python.is_some_and(|p| !p.is_empty() && !p.is_allowed())
+        || (!network.is_empty() && !atd_py::script::allowed())
 }
 
 /// Whether opening a project must ask before its Python runs: `ops/` files
@@ -113,6 +126,27 @@ pub struct ProjectState {
 }
 
 impl ProjectState {
+    /// Withdraws the allowance for network Python and asks again: Python
+    /// that came from somewhere else (a merge, a paste) joined the patch.
+    pub fn withdraw_python(&mut self) {
+        atd_py::script::allow(false);
+        self.python_ask = true;
+    }
+
+    /// Lets the open project's Python run: its `ops/` operators, Script
+    /// nodes and Python expressions (the Allow dialog, or the app's
+    /// `--allow-python-ops` under `atidarla run`).
+    pub fn allow_python(&mut self) {
+        if let Some(p) = &mut self.python {
+            p.allow();
+        }
+        // Script DATs and Python expressions run only on this explicit
+        // choice, never from the remembered hash (it covers ops/ files, not
+        // the network's code).
+        atd_py::script::allow(true);
+        self.python_ask = false;
+    }
+
     /// An untitled project holding `net`, counted as saved.
     pub fn untitled(net: &Network) -> Self {
         Self {
@@ -515,9 +549,6 @@ pub fn open(engine: &mut Engine, dir: &Path) -> Result<Opened, String> {
         log::warn!("{}: shader {name} not imported: {e}", dir.display());
     }
     let mut python = atd_py::ops::PythonOps::open(dir);
-    // A new project's Script DATs and Python expressions wait for its own
-    // choice.
-    atd_py::script::allow(false);
     for e in python.errors() {
         log::warn!("{}: {e}", dir.display());
     }
@@ -600,8 +631,14 @@ pub fn open(engine: &mut Engine, dir: &Path) -> Result<Opened, String> {
     }
     let previous = engine.project_dir().map(Path::to_owned);
     engine.set_project_dir(Some(dir.to_owned()));
+    // The new project's Script DATs and Python expressions wait for its own
+    // choice; withdrawn only now, so a project that does not open leaves the
+    // open one's allowance as it was.
+    let was_allowed = atd_py::script::allowed();
+    atd_py::script::allow(false);
     if let Err(e) = engine.load(net) {
         engine.set_project_dir(previous);
+        atd_py::script::allow(was_allowed);
         return Err(format!("{}: {e}", dir.display()));
     }
     engine.set_resolution(project.resolution[0], project.resolution[1]);
@@ -714,6 +751,13 @@ pub(crate) mod tests {
     use atd_core::graph::Node;
     use serde_json::json;
 
+    /// The project Python allowance (`atd_py::script::allow`) is
+    /// process-wide; tests that change or read it hold this.
+    pub(crate) fn python_flag() -> std::sync::MutexGuard<'static, ()> {
+        static FLAG: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        FLAG.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     pub(crate) fn engine() -> Option<Engine> {
         let instance = atd_gpu::primary_instance();
         let adapter =
@@ -757,6 +801,7 @@ pub(crate) mod tests {
 
     #[test]
     fn save_writes_portable_paths_and_save_as_keeps_media_found() {
+        let _flag = python_flag();
         let Some(mut e) = engine() else { return };
         let root = std::env::temp_dir().join(format!("atd-app-project-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -836,6 +881,7 @@ pub(crate) mod tests {
     /// current patch alone.
     #[test]
     fn opening_python_operators_loads_without_running_them() {
+        let _flag = python_flag();
         let Some(mut e) = engine() else { return };
         let example =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/python-ops.atidarla");
@@ -872,6 +918,7 @@ pub(crate) mod tests {
     /// project with only native expressions does not ask.
     #[test]
     fn opening_python_expressions_asks_like_script_nodes() {
+        let _flag = python_flag();
         let Some(mut e) = engine() else { return };
         let save = |name: &str, source: &str| {
             let mut reg = atd_core::Registry::default();
@@ -911,8 +958,13 @@ pub(crate) mod tests {
         let native = save("native", "0.5 + 0.5 * sin(time)");
         let mut state = ProjectState::untitled(&Network::default());
 
+        atd_py::script::allow(true);
         let view = state.run(&mut e, Action::OpenDir(python.clone()));
         assert!(view.is_some(), "{:?}", state.message);
+        assert!(
+            !atd_py::script::allowed(),
+            "opening withdraws the allowance"
+        );
         assert!(state.python_ask, "a Python expression asks");
         assert!(state.python.is_some(), "so the dialog can allow it");
         let listed = network_python(e.network());
@@ -921,10 +973,48 @@ pub(crate) mod tests {
             ["Python expression level1.brightness = [0.25, 0.5][int(time) % 2]"]
         );
 
+        state.allow_python();
+        assert!(atd_py::script::allowed() && !state.python_ask);
+        assert!(!python_blocked(state.python.as_ref(), &listed));
+
+        // A project that does not open leaves the open one's allowance.
+        let broken =
+            std::env::temp_dir().join(format!("atd-app-pyexpr-broken-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&broken);
+        let example =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/python-ops.atidarla");
+        atd_format::save(&broken, &atd_format::load(&example).unwrap()).unwrap();
+        state.run(&mut e, Action::OpenDir(broken.clone()));
+        assert!(
+            state.message.as_ref().is_some_and(|m| m.1),
+            "it does not open"
+        );
+        assert!(atd_py::script::allowed(), "still allowed");
+        std::fs::remove_dir_all(&broken).ok();
+
         let view = state.run(&mut e, Action::OpenDir(native.clone()));
         assert!(view.is_some(), "{:?}", state.message);
         assert!(!state.python_ask, "native expressions need no Python");
         assert!(network_python(e.network()).is_empty());
+        assert!(!atd_py::script::allowed(), "another project resets it");
+        assert!(
+            !python_blocked(state.python.as_ref(), &[]),
+            "nothing to allow"
+        );
+
+        // A new project is the user's own.
+        state.run(&mut e, Action::New);
+        assert!(atd_py::script::allowed());
+
+        // Pasted Python is seen, and withdraws the allowance and asks.
+        let mut pasted = Vec::new();
+        for n in atd_format::load(&python).unwrap().main().unwrap().nodes() {
+            node_python(n, &mut pasted);
+        }
+        assert_eq!(pasted.len(), 1, "the clipboard's Python is seen");
+        state.withdraw_python();
+        assert!(!atd_py::script::allowed() && state.python_ask);
+        atd_py::script::allow(false);
 
         // Remembered ops/ files do not cover network Python.
         let mut ops = atd_py::ops::PythonOps::open(
@@ -942,6 +1032,7 @@ pub(crate) mod tests {
     /// them.
     #[test]
     fn opening_kernel_files_registers_their_operators() {
+        let _flag = python_flag();
         let Some(mut e) = engine() else { return };
         let example =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/kernel-pixels.atidarla");
@@ -967,6 +1058,7 @@ pub(crate) mod tests {
     /// clears it.
     #[test]
     fn opening_comfy_workflows_registers_their_operators() {
+        let _flag = python_flag();
         let Some(mut e) = engine() else { return };
         let example =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/comfy-invert.atidarla");
@@ -996,6 +1088,7 @@ pub(crate) mod tests {
 
     #[test]
     fn open_reports_errors_and_keeps_the_patch() {
+        let _flag = python_flag();
         let Some(mut e) = engine() else { return };
         let dir = std::env::temp_dir().join(format!("atd-app-bad-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -1029,6 +1122,7 @@ pub(crate) mod tests {
     /// Pack's output, and is not saved over (FR-P4, first step in the app).
     #[test]
     fn projects_with_packs_open_expanded_and_refuse_to_save() {
+        let _flag = python_flag();
         let Some(mut e) = engine() else { return };
         let src = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../examples/pack-chromatic-aberration.atidarla");
@@ -1061,6 +1155,7 @@ pub(crate) mod tests {
     /// The Models window's "commercial-safe only" toggle is a project edit.
     #[test]
     fn ai_settings_are_unsaved_changes_until_saved() {
+        let _flag = python_flag();
         let Some(mut e) = engine() else { return };
         let dir = std::env::temp_dir().join(format!("atd-app-ai-{}.atidarla", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);

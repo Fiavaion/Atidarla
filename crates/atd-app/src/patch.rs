@@ -266,6 +266,10 @@ pub struct PatchEditor {
     /// Draw each wire's type at its middle (a per-user setting).
     pub wire_labels: bool,
     key_wire: Option<KeyWire>,
+    /// A paste brought in Python (Script nodes, Python expressions): the
+    /// app withdraws the allowance and asks
+    /// ([`crate::project::ProjectState::withdraw_python`]). Taken by the app.
+    pub pasted_python: bool,
 }
 
 impl PatchEditor {
@@ -1029,7 +1033,7 @@ impl PatchEditor {
         }
         let keys = !typing && self.search.is_none() && (focused || ui.rect_contains_pointer(rect));
         let mut clipboard: Option<Fragment> = None;
-        let mut paste: Option<(Fragment, [f32; 2])> = None;
+        let mut paste: Option<(Fragment, [f32; 2], bool)> = None;
         let mut delete = false;
         let mut new_comment: Option<Rect> = None;
         if keys {
@@ -1070,8 +1074,12 @@ impl PatchEditor {
                                     [c.x.round() - o[0], c.y.round() - o[1]]
                                 }
                                 None => PASTE_OFFSET,
-                            };
-                            paste = Some((f, offset));
+                            }; // From the clipboard: it may hold anyone's code.
+                            let mut python = Vec::new();
+                            for n in &f.nodes {
+                                crate::project::node_python(n, &mut python);
+                            }
+                            paste = Some((f, offset, !python.is_empty()));
                         }
                         _ => {}
                     },
@@ -1079,7 +1087,7 @@ impl PatchEditor {
                 }
             }
             if duplicate && !self.selection.is_empty() {
-                paste = Some((Fragment::copy(net, &self.selection), PASTE_OFFSET));
+                paste = Some((Fragment::copy(net, &self.selection), PASTE_OFFSET, false));
             }
         }
         if delete && let Some(id) = self.selected_comment.take() {
@@ -1143,12 +1151,15 @@ impl PatchEditor {
             }
         }
         self.comment_editor(ui, engine);
-        if let Some((fragment, offset)) = paste {
+        if let Some((fragment, offset, python)) = paste {
             let n = fragment.nodes.len();
             let edits = self.paste_edits(engine, &fragment, offset);
-            if let Err(e) = engine.edit(&format!("paste {n} nodes"), edits) {
-                self.select_only(None);
-                self.status(e.to_string());
+            match engine.edit(&format!("paste {n} nodes"), edits) {
+                Ok(()) => self.pasted_python |= python,
+                Err(e) => {
+                    self.select_only(None);
+                    self.status(e.to_string());
+                }
             }
         }
     }

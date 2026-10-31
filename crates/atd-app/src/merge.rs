@@ -190,9 +190,16 @@ pub fn apply_to_open(
         .ok_or("the merged project has no main network")?;
     let edits = atd_format::diff::edits_between(engine.network(), net);
     if !edits.is_empty() {
+        let before = crate::project::network_python(engine.network());
         engine
             .edit("Merge", edits)
             .map_err(|e| format!("the merged patch does not apply: {e}"))?;
+        // Python from the other side has not been allowed: ask, listing it,
+        // before any of the patch's network Python runs again.
+        let after = crate::project::network_python(engine.network());
+        if after.iter().any(|p| !before.contains(p)) {
+            state.withdraw_python();
+        }
     }
     engine.set_resolution(merged.resolution[0], merged.resolution[1]);
     let meta = &mut state.meta;
@@ -701,6 +708,7 @@ params.gamma = 1.2
     /// Merging into the open project is one undo step.
     #[test]
     fn merging_into_the_open_project_is_one_undo_step() {
+        let _flag = crate::project::tests::python_flag();
         let Some(mut engine) = crate::project::tests::engine() else {
             return;
         };
@@ -749,5 +757,45 @@ params.gamma = 1.2
             "one undo step reverts the merge"
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Merging in Python nobody allowed (their Python expression) withdraws
+    /// the allowance and asks; a merge that brings none leaves it.
+    #[test]
+    fn merging_in_python_asks_again() {
+        let _flag = crate::project::tests::python_flag();
+        let Some(mut engine) = crate::project::tests::engine() else {
+            return;
+        };
+        let net = atd_format::network_from_str(BASE).unwrap();
+        engine.load(net.clone()).unwrap();
+        let mut state = ProjectState::untitled(&net);
+        atd_py::script::allow(true);
+        let merged = |text: &str| {
+            let mut p = atd_format::Project::new("show");
+            p.networks.insert(
+                atd_format::MAIN.to_owned(),
+                atd_format::network_from_str(text).unwrap(),
+            );
+            p
+        };
+        let calm = BASE.replace("params.scale = 2.0", "params.scale = 3.0");
+        apply_to_open(&mut engine, &mut state, merged(&calm)).unwrap();
+        assert!(
+            atd_py::script::allowed() && !state.python_ask,
+            "no new Python"
+        );
+        let theirs = BASE.replace(
+            "params.scale = 2.0",
+            "params.scale = { value = 2.0, expr = \"[2.0, 3.0][int(time) % 2]\" }",
+        );
+        apply_to_open(&mut engine, &mut state, merged(&theirs)).unwrap();
+        assert!(
+            !atd_py::script::allowed(),
+            "their Python waits for a choice"
+        );
+        assert!(state.python_ask);
+        assert_eq!(crate::project::network_python(engine.network()).len(), 1);
+        atd_py::script::allow(false);
     }
 }
