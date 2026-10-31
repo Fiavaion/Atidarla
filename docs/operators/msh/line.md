@@ -28,4 +28,5 @@ All platforms.
 
 ## Examples
 
+- [Mesh Construction](../../../examples/mesh-construction.atidarla/) — `profile`
 - [Mesh Primitives](../../../examples/mesh-primitives.atidarla/) — `horizon`

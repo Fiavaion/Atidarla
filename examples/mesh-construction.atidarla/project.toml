@@ -1,0 +1,15 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "Mesh Construction"
+description = '''
+The M6 construction operators, each cooking on a worker thread. Top: "Atidarla" as extruded
+letters (Text 3D), unwrapped into charts (UV Unwrap) and coloured by their texture
+coordinates. Left: an icosphere broken into Voronoi pieces with a gap between them
+(Fracture), one colour per primitive. Middle: a cup turned on a lathe (Revolve) from a line
+whose length grows and shrinks over time (Carve). Right: the convex hull of points scattered
+on a torus (Convex Hull).
+
+Try: raise the fracture's pieces or its seed; set the unwrap's method to planar or lower its
+chart angle; change the text; give the revolve an end angle of 270.
+'''
+resolution = [1280, 720]

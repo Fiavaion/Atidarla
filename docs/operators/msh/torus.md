@@ -30,5 +30,6 @@ All platforms.
 
 ## Examples
 
+- [Mesh Construction](../../../examples/mesh-construction.atidarla/) — `ring`
 - [Mesh Modelling](../../../examples/mesh-modelling.atidarla/) — `donut`
 - [Mesh Primitives](../../../examples/mesh-primitives.atidarla/) — `ring`

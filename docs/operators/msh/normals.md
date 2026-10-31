@@ -31,3 +31,4 @@ All platforms.
 ## Examples
 
 - [Mesh Files](../../../examples/mesh-files.atidarla/) — `edges`
+- [VAT Playback](../../../examples/mesh-vat.atidarla/) — `flat`

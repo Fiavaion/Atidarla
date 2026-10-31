@@ -30,6 +30,8 @@ All platforms.
 
 ## Examples
 
+- [Mesh Construction](../../../examples/mesh-construction.atidarla/) — `uv_colour`, `piece_colour`
 - [Mesh Files](../../../examples/mesh-files.atidarla/) — `vase_colour`, `loft_colour`
 - [Mesh Modelling](../../../examples/mesh-modelling.atidarla/) — `smooth_colour`, `cut_colour`, `reduce_colour`
 - [Mesh Primitives](../../../examples/mesh-primitives.atidarla/) — `tint`
+- [VAT Playback](../../../examples/mesh-vat.atidarla/) — `ripple_colour`
