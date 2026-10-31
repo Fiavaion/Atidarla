@@ -1184,7 +1184,7 @@ pub trait SigOp: Send {
 /// readback (GEO inputs, PRD A65). GPU access to its inputs, recording into
 /// the frame's command encoder, and channels out.
 #[derive(Debug)]
-pub struct ImgToSigCtx<'a> {
+pub struct GpuToSigCtx<'a> {
     pub device: &'a wgpu::Device,
     pub queue: &'a wgpu::Queue,
     pub encoder: &'a mut wgpu::CommandEncoder,
@@ -1210,13 +1210,13 @@ pub struct ImgToSigCtx<'a> {
 /// frame's commands are submitted, where readback buffers may be mapped.
 /// Live it never waits for them (rule 1); offline it may submit the encoder
 /// recorded so far and wait, so frame `i` reads frame `i`'s values.
-pub trait ImgToSigOp: Send {
-    fn cook(&mut self, ctx: &mut ImgToSigCtx<'_>) -> Result<(), String>;
+pub trait GpuToSigOp: Send {
+    fn cook(&mut self, ctx: &mut GpuToSigCtx<'_>) -> Result<(), String>;
     fn after_submit(&mut self) {}
 }
 
-/// Creates an IMG→SIG operator instance.
-pub type ImgToSigFactory = Box<dyn Fn(&wgpu::Device) -> Box<dyn ImgToSigOp> + Send + Sync>;
+/// Creates a GPU→SIG operator instance (IMG or GEO inputs, SIG outputs).
+pub type GpuToSigFactory = Box<dyn Fn(&wgpu::Device) -> Box<dyn GpuToSigOp> + Send + Sync>;
 
 /// Creates an IMG operator instance for the engine's device and output format.
 pub type OpFactory =
@@ -1230,7 +1230,7 @@ pub type SigFactory = Box<dyn Fn() -> Box<dyn SigOp> + Send + Sync>;
 pub struct OpLibrary {
     factories: HashMap<String, OpFactory>,
     sig_factories: HashMap<String, SigFactory>,
-    analysis_factories: HashMap<String, ImgToSigFactory>,
+    analysis_factories: HashMap<String, GpuToSigFactory>,
     geo_factories: HashMap<String, GeoFactory>,
     mat_factories: HashMap<String, MatFactory>,
     dat_factories: HashMap<String, DatFactory>,
@@ -1274,10 +1274,10 @@ impl OpLibrary {
 
     /// Registers a GPU→SIG operator implementation: image analysis (IMG
     /// inputs) or point readback (GEO inputs).
-    pub fn add_img_to_sig(
+    pub fn add_gpu_to_sig(
         &mut self,
         type_id: impl Into<String>,
-        factory: impl Fn(&wgpu::Device) -> Box<dyn ImgToSigOp> + Send + Sync + 'static,
+        factory: impl Fn(&wgpu::Device) -> Box<dyn GpuToSigOp> + Send + Sync + 'static,
     ) {
         self.analysis_factories
             .insert(type_id.into(), Box::new(factory));
@@ -1369,7 +1369,7 @@ pub struct Engine {
     scheduler: Scheduler,
     gpu_ops: HashMap<NodeId, Box<dyn GpuOp>>,
     sig_ops: HashMap<NodeId, Box<dyn SigOp>>,
-    analysis_ops: HashMap<NodeId, Box<dyn ImgToSigOp>>,
+    analysis_ops: HashMap<NodeId, Box<dyn GpuToSigOp>>,
     geo_ops: HashMap<NodeId, Box<dyn GeoOp>>,
     mat_ops: HashMap<NodeId, Box<dyn MatOp>>,
     dat_ops: HashMap<NodeId, Box<dyn DatOp>>,
@@ -2413,7 +2413,7 @@ impl Engine {
                     geo_sources.push(src.filter(|_| socket.wire == WireType::Geo));
                 }
                 let mut out = sig.remove(&id).unwrap_or_default();
-                let mut ctx = ImgToSigCtx {
+                let mut ctx = GpuToSigCtx {
                     device,
                     queue,
                     encoder: &mut encoder,

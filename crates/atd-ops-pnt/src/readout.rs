@@ -9,7 +9,7 @@
 //! reused (rule 2).
 
 use atd_core::registry::{OpFamily, OperatorSchema, ParamSchema, SocketSchema, WireType};
-use atd_gpu::engine::{ImgToSigCtx, ImgToSigOp};
+use atd_gpu::engine::{GpuToSigCtx, GpuToSigOp};
 use atd_gpu::geo::AttrClass;
 use atd_gpu::geo::readback::{PointReadback, Recorded};
 use atd_io::fixture::Mapping;
@@ -118,7 +118,7 @@ impl Reader {
     /// Takes arrived values and records a new copy when the points may have
     /// changed. `Ok(false)` when there are no points to read (no input, or
     /// an empty one).
-    fn read(&mut self, ctx: &mut ImgToSigCtx<'_>, attr: &str, max: u32) -> Result<bool, String> {
+    fn read(&mut self, ctx: &mut GpuToSigCtx<'_>, attr: &str, max: u32) -> Result<bool, String> {
         let offline = ctx.params.mode().is_offline();
         if !offline {
             self.rb.receive(ctx.device)?;
@@ -199,7 +199,7 @@ struct ToChannels {
     shape: Option<(String, bool, u32, u8)>,
 }
 
-pub fn create_to_channels(_: &wgpu::Device) -> Box<dyn ImgToSigOp> {
+pub fn create_to_channels(_: &wgpu::Device) -> Box<dyn GpuToSigOp> {
     Box::new(ToChannels {
         reader: Reader::default(),
         names: Vec::new(),
@@ -240,8 +240,8 @@ impl ToChannels {
     }
 }
 
-impl ImgToSigOp for ToChannels {
-    fn cook(&mut self, ctx: &mut ImgToSigCtx<'_>) -> Result<(), String> {
+impl GpuToSigOp for ToChannels {
+    fn cook(&mut self, ctx: &mut GpuToSigCtx<'_>) -> Result<(), String> {
         let p = ctx.params;
         let attr = p.str("attr");
         let max = p.i64("max").clamp(1, MAX_POINTS) as u32;
@@ -330,7 +330,7 @@ struct PixelOut {
     filled: Option<u64>,
 }
 
-pub fn create_pixel_out(_: &wgpu::Device) -> Box<dyn ImgToSigOp> {
+pub fn create_pixel_out(_: &wgpu::Device) -> Box<dyn GpuToSigOp> {
     Box::new(PixelOut {
         reader: Reader::default(),
         watcher: None,
@@ -343,7 +343,7 @@ pub fn create_pixel_out(_: &wgpu::Device) -> Box<dyn ImgToSigOp> {
 
 impl PixelOut {
     /// Picks up new versions of the patch file from its watcher thread.
-    fn watch_patch(&mut self, ctx: &mut ImgToSigCtx<'_>) {
+    fn watch_patch(&mut self, ctx: &mut GpuToSigCtx<'_>) {
         let p = ctx.params;
         let file = p.str("patch");
         if file.is_empty() {
@@ -399,8 +399,8 @@ impl PixelOut {
     }
 }
 
-impl ImgToSigOp for PixelOut {
-    fn cook(&mut self, ctx: &mut ImgToSigCtx<'_>) -> Result<(), String> {
+impl GpuToSigOp for PixelOut {
+    fn cook(&mut self, ctx: &mut GpuToSigCtx<'_>) -> Result<(), String> {
         self.watch_patch(ctx);
         if let Some(e) = &self.patch_error {
             ctx.output.set_single(&[], &[]);

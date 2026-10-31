@@ -158,7 +158,7 @@ driver and build** give byte-identical frames. That is the promise; nothing more
 `bench`) or `CookMode::Offline { fps }` (`render` only), set with `Engine::set_mode`. Operators
 read it from their `Params` (`params.mode()`), which already carries the other engine-wide
 settings an operator cooks under (project folder, expressions), so every context (`CookCtx`,
-`SigCtx`, `ImgToSigCtx`) and `GpuOp::output_size` see it without new fields. Offline:
+`SigCtx`, `GpuToSigCtx`) and `GpuOp::output_size` see it without new fields. Offline:
 
 1. **Fixed time.** The renderer calls `Engine::set_frame(i)` and cooks at `i / fps`; the engine
    gives every SIG operator `dt = 1 / fps`, the first frame included. Operators that measured

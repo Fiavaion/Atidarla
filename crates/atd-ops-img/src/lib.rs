@@ -164,8 +164,8 @@ pub fn library(library: &mut OpLibrary) {
     library.add(share::in_schema().type_id, share::create_in);
     library.add(stage::layer_schema().type_id, stage::create_layer);
     library.add(stage::mixer_schema().type_id, stage::create_mixer);
-    library.add_img_to_sig(analyze::schema().type_id, analyze::create);
-    library.add_img_to_sig(pixel_map::schema().type_id, pixel_map::create);
+    library.add_gpu_to_sig(analyze::schema().type_id, analyze::create);
+    library.add_gpu_to_sig(pixel_map::schema().type_id, pixel_map::create);
     for (schema, factory) in STATEFUL {
         library.add(schema().type_id, factory);
     }

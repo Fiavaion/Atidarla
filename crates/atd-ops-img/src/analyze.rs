@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
 use atd_core::registry::{OpFamily, OperatorSchema, SocketSchema, WireType};
-use atd_gpu::engine::{ImgToSigCtx, ImgToSigOp};
+use atd_gpu::engine::{GpuToSigCtx, GpuToSigOp};
 
 const NAMES: [&str; 7] = ["r", "g", "b", "a", "luma", "min", "max"];
 /// Workgroups in the first pass.
@@ -160,7 +160,7 @@ enum AnalyzeOp {
     Failed(String),
 }
 
-pub fn create(device: &wgpu::Device) -> Box<dyn ImgToSigOp> {
+pub fn create(device: &wgpu::Device) -> Box<dyn GpuToSigOp> {
     let (tx, rx) = std::sync::mpsc::channel();
     let device = device.clone();
     let spawned = std::thread::Builder::new()
@@ -183,8 +183,8 @@ pub fn create(device: &wgpu::Device) -> Box<dyn ImgToSigOp> {
     })
 }
 
-impl ImgToSigOp for AnalyzeOp {
-    fn cook(&mut self, ctx: &mut ImgToSigCtx<'_>) -> Result<(), String> {
+impl GpuToSigOp for AnalyzeOp {
+    fn cook(&mut self, ctx: &mut GpuToSigCtx<'_>) -> Result<(), String> {
         if let AnalyzeOp::Building(rx) = self {
             // Offline the first cook waits for the pipelines (FR-H1).
             match ctx.params.mode().receive(rx) {
@@ -301,7 +301,7 @@ fn build(device: &wgpu::Device) -> Analyze {
 }
 
 impl Analyze {
-    fn cook(&mut self, ctx: &mut ImgToSigCtx<'_>) -> Result<(), String> {
+    fn cook(&mut self, ctx: &mut GpuToSigCtx<'_>) -> Result<(), String> {
         // Let finished maps report, without waiting. Offline, wait for the
         // previous frame's readback, so the values are always exactly one
         // frame late (FR-H1).

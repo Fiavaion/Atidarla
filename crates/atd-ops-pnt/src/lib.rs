@@ -184,11 +184,11 @@ pub fn library(library: &mut OpLibrary) {
         library.add_geo(schema().type_id, *create);
     }
     library.add(render::schema().type_id, render::create);
-    library.add_img_to_sig(
+    library.add_gpu_to_sig(
         readout::to_channels_schema().type_id,
         readout::create_to_channels,
     );
-    library.add_img_to_sig(
+    library.add_gpu_to_sig(
         readout::pixel_out_schema().type_id,
         readout::create_pixel_out,
     );

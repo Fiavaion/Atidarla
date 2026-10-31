@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
 use atd_core::registry::{OpFamily, OperatorSchema, ParamSchema, SocketSchema, WireType};
-use atd_gpu::engine::{ImgToSigCtx, ImgToSigOp, Params};
+use atd_gpu::engine::{GpuToSigCtx, GpuToSigOp, Params};
 use atd_io::dmx::{DmxSender, Protocol};
 use atd_io::fixture::Mapping;
 
@@ -167,7 +167,7 @@ impl std::fmt::Debug for PixelMap {
     }
 }
 
-pub fn create(device: &wgpu::Device) -> Box<dyn ImgToSigOp> {
+pub fn create(device: &wgpu::Device) -> Box<dyn GpuToSigOp> {
     let (tx, rx) = std::sync::mpsc::channel();
     let device = device.clone();
     // Shader compilers such as FXC can take seconds (rule 1).
@@ -366,7 +366,7 @@ impl Senders {
 
 impl PixelMap {
     /// Picks up new versions of the patch file from the watcher.
-    fn watch_patch(&mut self, ctx: &mut ImgToSigCtx<'_>) {
+    fn watch_patch(&mut self, ctx: &mut GpuToSigCtx<'_>) {
         let p = ctx.params;
         let file = p.str("patch");
         if file.is_empty() {
@@ -422,8 +422,8 @@ impl PixelMap {
     }
 }
 
-impl ImgToSigOp for PixelMap {
-    fn cook(&mut self, ctx: &mut ImgToSigCtx<'_>) -> Result<(), String> {
+impl GpuToSigOp for PixelMap {
+    fn cook(&mut self, ctx: &mut GpuToSigCtx<'_>) -> Result<(), String> {
         if let Build::Building(rx) = &self.build {
             match ctx.params.mode().receive(rx) {
                 Ok(Ok(p)) => self.build = Build::Ready(p),
