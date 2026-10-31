@@ -19,11 +19,13 @@ used from the next frame on (one frame late), and the render thread never waits 
 Python sees the same names as the native tier, the rest of the language, and the functions of
 Python's `math` module.
 
-A Python expression is a program, so it runs only once the open project's Python is allowed:
-the same choice as its Python operators and Script nodes ([`python-ops.md`](python-ops.md#trust-running-code-from-a-project)).
-Until then nothing is sent to the Python worker, the parameter keeps its stored value, and the
-node reports "Python expressions in this project are not allowed to run". Native expressions
-are not affected. Headless commands evaluate Python expressions only with `--allow-python-ops`.
+A Python expression is a program, so it runs only while its exact text is allowed for that
+node and parameter: the same choice as the project's Python operators and Script nodes
+([`python-ops.md`](python-ops.md#trust-running-code-from-a-project)). Until then nothing is sent
+to the Python worker, the parameter keeps its stored value, and the node reports "Python
+expressions in this project are not allowed to run". One you type in the parameter panel is
+allowed as you commit it. Native expressions are not affected. Headless commands evaluate Python
+expressions only with `--allow-python-ops`.
 
 Every native expression is also valid Python and gives the same result in both tiers (a test
 compares them on a corpus of expressions, errors included).

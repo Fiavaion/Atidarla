@@ -107,13 +107,15 @@ name all report an error.
   `params.segments = { value = 8, expr = "6 + 2 * floor(time / 4 % 3)" }`.
 - **Safety.** A Python expression is a program. Opening a project never runs one: the app asks
   first, in the same dialog as Python operators and Script nodes
-  ([chapter 6](06-kernels-python-packs.md)), and lists each Python expression. Until you allow
-  it, the parameter keeps its saved value and the node says "Python expressions in this project
-  are not allowed to run"; native expressions keep working. "Allow and remember" remembers the
-  `ops/` files only, so a project with Python expressions asks every time it opens. Typing a
-  Python expression into a new project, or one you have allowed, works straight away. Headless,
-  `atidarla check`, `render`, `serve` and the other commands run them only with
-  `--allow-python-ops`.
+  ([chapter 6](06-kernels-python-packs.md)), and lists each Python expression in full. Until you
+  allow it, the parameter keeps its saved value and the node says "Python expressions in this
+  project are not allowed to run"; native expressions keep working. Only exactly what you allowed
+  runs: an expression that is changed, pasted in, merged in or brought back by Undo, or written
+  by the assistant, waits for **File, Allow Python...** on its own, while the rest keeps running.
+  "Allow and remember" remembers the `ops/` files only, so a project with Python expressions
+  asks every time it opens. A Python expression you type yourself in the parameter panel runs
+  straight away. Headless, `atidarla check`, `render`, `serve` and the other commands run them
+  only with `--allow-python-ops`.
 
 Full reference: [`docs/expressions.md`](../expressions.md). Another example:
 [`live-control`](../../examples/live-control.atidarla/) uses a Python expression on Contrast.

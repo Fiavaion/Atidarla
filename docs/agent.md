@@ -6,9 +6,12 @@ the same rules. There is no arbitrary code execution: `python_exec` exists only 
 user granted `python.exec` (CLAUDE.md rule 9). The same scope is needed to write any other Python:
 an expression outside the native subset (a Python-tier expression, PRD A22: lists, strings,
 Python built-ins, …) or a Script node's `code`. Without it `set_param`, `create_node` and
-`build_network` refuse them and say so; native expressions (`0.5 + 0.5 * sin(time)`,
-`op('lfo1')['lfo']`) are always allowed. Even with the scope, Python in the network runs only once
-the project's Python is allowed ([`python-ops.md`](python-ops.md)).
+`build_network` refuse them and say so, and `create_pack` refuses to promote a Script's `code`
+(which would let the instance's parameter write Python); native expressions
+(`0.5 + 0.5 * sin(time)`, `op('lfo1')['lfo']`) are always allowed. Even with the scope, Python an
+agent writes runs only once it is on the allow-list ([`python-ops.md`](python-ops.md)): in the app
+you allow it in the Allow dialog; headless, `serve --allow-python-ops` with a `python.exec`
+session allows it as it is written (there is no dialog).
 
 ## Tools
 
