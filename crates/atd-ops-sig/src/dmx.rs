@@ -161,6 +161,7 @@ mod tests {
         let mut op = DmxOut::default();
         let mut out = Channels::default();
         let mut ctx = SigCtx {
+            dat: atd_gpu::engine::DatIo::none(),
             inputs: SigInputs::new(&sources, &sig),
             output: &mut out,
             params: Params::new(&net, &reg, &sig, id),

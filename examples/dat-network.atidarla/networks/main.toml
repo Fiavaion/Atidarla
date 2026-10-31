@@ -1,0 +1,44 @@
+# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 5
+
+[[node]]
+id = 0
+name = "state"
+type = "dat.text"
+pos = [0.0, 0.0]
+params.text = '{"cue": 3, "scene": "chorus"}'
+
+[[node]]
+id = 1
+name = "server"
+type = "dat.web_server"
+pos = [220.0, 0.0]
+inputs.content = { node = 0, output = "out" }
+params.content_type = "json"
+
+[[node]]
+id = 2
+name = "client"
+type = "dat.web_client"
+pos = [0.0, 160.0]
+params.interval_s = 0.5
+params.url = "http://127.0.0.1:9980/state"
+
+[[node]]
+id = 3
+name = "cue"
+type = "dat.json"
+pos = [220.0, 160.0]
+inputs.in = { node = 2, output = "out" }
+params.output = "text"
+params.path = "/cue"
+
+[[node]]
+id = 4
+name = "socket"
+type = "dat.websocket"
+pos = [220.0, 320.0]
+inputs.send = { node = 0, output = "out" }
+params.active = false
+params.url = "ws://127.0.0.1:8080/"

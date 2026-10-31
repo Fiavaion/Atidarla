@@ -2,7 +2,7 @@
 
 AI · version 1 · cook budget 150 µs
 
-Transcribes speech from an audio input with Whisper (faster-whisper) on an AI Host. The input is gated by level: what is said is sent once the speaker pauses, and the transcript arrives asynchronously, published under `Publish As` for LLM Chat's `Prompt From` and the app (DAT text out when the engine routes DAT). Channels: `active` while speech is heard, `busy` while transcribing, `new_text` for one frame when a transcript arrives, `count`, `level` and `ready` (a host has the model loaded). Needs a Whisper model from the model manager and the host's `stt` extra; `builtin.stt_echo` runs anywhere for testing.
+Transcribes speech from an audio input with Whisper (faster-whisper) on an AI Host. The input is gated by level: what is said is sent once the speaker pauses, and the transcript arrives asynchronously on the DAT `text` output (wire it into LLM Chat's `prompt` input or a Prompt Template); it is also published under `Publish As` for `Prompt From`. Channels: `active` while speech is heard, `busy` while transcribing, `new_text` for one frame when a transcript arrives, `count`, `level` and `ready` (a host has the model loaded). Needs a Whisper model from the model manager and the host's `stt` extra; `builtin.stt_echo` runs anywhere for testing.
 
 Cooks every frame (time-dependent).
 
@@ -34,7 +34,7 @@ Sink: requested every frame even when nothing downstream is viewed, because it h
 | `hang_ms` | Hang | float | `600.0` | 50 – 5000 | Milliseconds below the threshold that end an utterance and send it. |
 | `min_ms` | Minimum | float | `250.0` | 0 – 5000 | Utterances shorter than this many milliseconds (clicks, coughs) are dropped. |
 | `max_seconds` | Maximum | int | `15` | 1 – 30 | Longest utterance in seconds: longer speech is sent in pieces of this length. |
-| `publish` | Publish As | string | `"speech"` |  | The name each transcript is published under, for LLM Chat's `Prompt From` and the app. Empty: not published. |
+| `publish` | Publish As | string | `"speech"` |  | The name each transcript is also published under, for LLM Chat's `Prompt From`. Empty: not published (the `text` output still has it). |
 
 ## Platforms
 

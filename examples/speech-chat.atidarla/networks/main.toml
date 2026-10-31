@@ -1,6 +1,6 @@
 # Atidarla network. Node IDs are stable: inputs and bindings refer to them.
 format = 1
-next_id = 4
+next_id = 5
 
 [[node]]
 id = 0
@@ -21,8 +21,8 @@ id = 2
 name = "chat"
 type = "ai.llm_chat"
 pos = [440.0, 0.0]
+inputs.prompt = { node = 1, output = "text" }
 params.prompt = "Turn what was said into a short prompt for an image generator:"
-params.prompt_from = "speech"
 
 [[node]]
 id = 3
@@ -31,3 +31,11 @@ type = "img.channel_image"
 pos = [440.0, 160.0]
 inputs.sig = { node = 1, output = "out" }
 params.layout = "channels"
+
+[[node]]
+id = 4
+name = "answer"
+type = "dat.convert"
+pos = [660.0, 0.0]
+inputs.in = { node = 2, output = "reply" }
+params.to = "text"

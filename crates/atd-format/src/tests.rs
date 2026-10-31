@@ -160,6 +160,107 @@ fn random_networks_round_trip_exactly_and_byte_stable() {
     }
 }
 
+/// DAT nodes (A64): table and script text in parameters (tabs, quotes,
+/// `'''`, CRLF) and DAT wires, including a SIG node's DAT output, round-trip
+/// exactly and byte-stable.
+#[test]
+fn dat_text_and_wires_round_trip() {
+    use atd_core::registry::{OpFamily, OperatorSchema, ParamSchema, SocketSchema};
+    let socket = |name: &str, wire| SocketSchema {
+        name: name.into(),
+        wire,
+        optional: true,
+        feedback: false,
+    };
+    let schema = |id: &str, family, inputs, outputs| OperatorSchema {
+        type_id: id.into(),
+        family,
+        label: id.into(),
+        summary: "test".into(),
+        version: 1,
+        params: vec![ParamSchema::string("rows", "Rows", "").multiline()],
+        inputs,
+        outputs,
+        capabilities: vec![],
+        cook_budget_us: 1,
+        time_dependent: false,
+        sink: false,
+    };
+    let mut reg = Registry::default();
+    reg.register(schema(
+        "dat.table",
+        OpFamily::Dat,
+        vec![],
+        vec![socket("out", WireType::Dat)],
+    ))
+    .unwrap();
+    reg.register(schema(
+        "sig.speech",
+        OpFamily::Sig,
+        vec![socket("prompt", WireType::Dat)],
+        vec![socket("out", WireType::Sig), socket("text", WireType::Dat)],
+    ))
+    .unwrap();
+    reg.register(schema(
+        "dat.select",
+        OpFamily::Dat,
+        vec![socket("in", WireType::Dat)],
+        vec![socket("out", WireType::Dat)],
+    ))
+    .unwrap();
+    for (round, text) in STRINGS
+        .iter()
+        .chain(&[
+            "name\tvalue\nsubject\t\"a lighthouse\"\n",
+            "def cook(inputs):\n\treturn '''x'''\r\n",
+        ])
+        .enumerate()
+    {
+        let mut net = Network::default();
+        let ids: Vec<NodeId> = ["dat.table", "sig.speech", "dat.select"]
+            .iter()
+            .map(|ty| {
+                let id = net.alloc_id();
+                net.apply(
+                    &reg,
+                    Edit::AddNode {
+                        node: Node::new(id, *ty, net.unique_name("n")),
+                    },
+                )
+                .unwrap();
+                net.apply(
+                    &reg,
+                    Edit::SetParam {
+                        node: id,
+                        param: "rows".into(),
+                        value: Some(Param::constant(json!(text))),
+                    },
+                )
+                .unwrap();
+                id
+            })
+            .collect();
+        for (from, out, to, input) in [
+            (ids[0], "out", ids[1], "prompt"),
+            (ids[1], "text", ids[2], "in"),
+        ] {
+            net.apply(
+                &reg,
+                Edit::Connect {
+                    wire: Wire::new(Endpoint::new(from, out), Endpoint::new(to, input)),
+                },
+            )
+            .unwrap();
+        }
+        let saved = network_to_string(&net).unwrap();
+        let back =
+            network_from_str(&saved).unwrap_or_else(|e| panic!("round {round}: {e}\n{saved}"));
+        assert_eq!(back, net, "round {round}:\n{saved}");
+        assert_eq!(network_to_string(&back).unwrap(), saved, "round {round}");
+        back.validated(&reg).unwrap();
+    }
+}
+
 const SAMPLE: &str = r#"# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
 format = 1
 next_id = 5

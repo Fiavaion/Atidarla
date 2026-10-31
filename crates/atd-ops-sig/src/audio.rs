@@ -574,6 +574,7 @@ mod tests {
         let mut out = Channels::default();
         let cook = |op: &mut AudioFileIn, out: &mut Channels, dt: f64| {
             let mut ctx = SigCtx {
+                dat: atd_gpu::engine::DatIo::none(),
                 inputs: SigInputs::new(&[], &sig),
                 output: out,
                 params: Params::new(&net, &reg, &sig, id),
@@ -616,6 +617,7 @@ mod tests {
         let mut result = Ok(());
         for _ in 0..200 {
             let mut ctx = SigCtx {
+                dat: atd_gpu::engine::DatIo::none(),
                 inputs: SigInputs::new(&[], &sig),
                 output: &mut out,
                 params: Params::new(&net, &reg, &sig, id),
@@ -657,6 +659,7 @@ mod tests {
         let mut out = Channels::default();
         let sources = [Some(src)];
         let mut ctx = SigCtx {
+            dat: atd_gpu::engine::DatIo::none(),
             inputs: SigInputs::new(&sources, &sig),
             output: &mut out,
             params: Params::new(&net, &reg, &sig, id),
@@ -697,6 +700,7 @@ mod tests {
     ) -> Result<(), String> {
         let sig = HashMap::new();
         let mut ctx = SigCtx {
+            dat: atd_gpu::engine::DatIo::none(),
             inputs: SigInputs::new(&[], &sig),
             output: out,
             params: Params::new(net, reg, &sig, id),

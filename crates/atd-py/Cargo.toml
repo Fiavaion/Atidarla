@@ -21,6 +21,7 @@ serde_json.workspace = true
 [dev-dependencies]
 atd-ops-img.workspace = true
 atd-ops-sig.workspace = true
+atd-ops-dat.workspace = true
 atd-interop.workspace = true
 atd-format.workspace = true
 pollster.workspace = true

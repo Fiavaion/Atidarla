@@ -1,10 +1,10 @@
 //! Text that AI nodes publish by name (Speech to Text transcripts, LLM Chat
-//! replies), until the engine carries DAT wires.
+//! replies), alongside their DAT outputs.
 //!
-//! The engine routes IMG, SIG, GEO and MAT results today; DAT, the wire
-//! these nodes declare for their text, is not routed yet. Meanwhile a node
-//! publishes its newest text under its `Publish As` name, another node reads
-//! it with `Prompt From`, and the app can show it. Each name holds one text
+//! The DAT wire is the way to chain these nodes (Speech to Text's `text`
+//! into LLM Chat's `prompt`). Publishing by name stays for projects made
+//! before DAT was routed: a node publishes its newest text under its
+//! `Publish As` name and another node reads it with `Prompt From`. Each name holds one text
 //! with a sequence number that grows on every publish. Buffers keep their
 //! capacity, so publishing and reading a text no longer than the last one
 //! allocate nothing; both happen only when a new text arrives.

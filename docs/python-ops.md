@@ -184,6 +184,16 @@ expressions can exhaust Python's parser; files over 1 MB are refused). Files are
 `ops/` itself (not subfolders); `ops/` is not on Python's import path, so a stray `.pyc` or
 module there is never imported.
 
+**Script DATs** (`dat.script`, `crates/atd-py/src/script.rs`) are project Python too, written in a
+node's `code` parameter rather than in `ops/`. They run on their own worker thread and only after an
+explicit choice: the app's Allow dialog, which also opens for a project whose network has Script
+nodes and lists them ("Allow this time" or "Allow and remember"; the remembered hash covers `ops/`
+files, not network code, so it never allows scripts by itself and the dialog asks again on the
+next open), or `--allow-python-ops` for `check` and `render`. Opening another project stops them
+until it is allowed. Until then their nodes report the same "not allowed" error as Python
+operators. Known limit: a script that never returns holds the Script worker (no timeout yet; the
+show is not affected).
+
 **Known gap (not closed by this work):** Python *expressions* in parameters (A22) run as soon
 as a project opens, without asking. Until they go through the same gate, opening an untrusted
 project is not safe even with its Python operators blocked. Raised with Mark.

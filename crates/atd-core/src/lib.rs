@@ -6,6 +6,7 @@
 
 pub mod capability;
 pub mod cook;
+pub mod dat;
 pub mod expr;
 pub mod fragment;
 pub mod geo;

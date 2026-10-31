@@ -178,8 +178,13 @@ impl ProjectState {
                     if let Some(e) = python.errors().first() {
                         self.message = Some((e.to_string(), true));
                     }
-                    self.python_ask = !python.is_empty() && !python.is_allowed();
-                    self.python = (!python.is_empty()).then_some(python);
+                    // Script DATs are project Python too: they ask as well.
+                    let scripts = engine
+                        .network()
+                        .nodes()
+                        .any(|n| n.type_id == atd_py::script::TYPE_ID);
+                    self.python_ask = (!python.is_empty() && !python.is_allowed()) || scripts;
+                    self.python = (!python.is_empty() || scripts).then_some(python);
                     self.saved_mappings = meta.mappings.clone();
                     self.saved_timeline = meta.timeline.clone();
                     self.saved_ai = (meta.ai.clone(), meta.models.clone());
@@ -472,6 +477,8 @@ pub fn open(engine: &mut Engine, dir: &Path) -> Result<Opened, String> {
         log::warn!("{}: shader {name} not imported: {e}", dir.display());
     }
     let mut python = atd_py::ops::PythonOps::open(dir);
+    // A new project's Script DATs wait for its own choice.
+    atd_py::script::allow(false);
     for e in python.errors() {
         log::warn!("{}: {e}", dir.display());
     }

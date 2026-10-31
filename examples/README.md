@@ -17,7 +17,12 @@ every IMG and SIG operator (CLAUDE.md rule 7); each operator's page in
 | [beat-switcher](beat-switcher.atidarla/) | A BPM clock switching generators per beat, with triggers and counters |
 | [stage-deck](stage-deck.atidarla/) | A Stage deck: three layers by four columns, quantised launch, fades and wipes, launch modes and a crossfader (M3); play it in the Stage tab |
 | [ai-live](ai-live.atidarla/) | Every AI operator (M4): Diffusion with Prompt Blend and a Control Prep edge map, the built-in Invert model, the ONNX vision nodes and Video Model, governed at the project frame rate |
-| [speech-chat](speech-chat.atidarla/) | Speech to Text (Whisper) feeding LLM Chat (Ollama) through `Prompt From`, both on this machine, so Sovereign mode stays on (FR-A13) |
+| [speech-chat](speech-chat.atidarla/) | Speech to Text (Whisper) feeding LLM Chat (Ollama) over a DAT wire, both on this machine, so Sovereign mode stays on (FR-A13) |
+| [dat-tables](dat-tables.atidarla/) | Text and tables on DAT wires: Table, Text, Select, Convert, JSON and a Prompt Template filled from a table, text and a channel |
+| [dat-files](dat-files.atidarla/) | File In reading a CSV and a JSON file (reloaded on save), Select and JSON over them, and File Out writing the result |
+| [dat-network](dat-network.atidarla/) | A Web Server on loopback serving a DAT, a Web Client polling it into JSON, and a WebSocket client (inactive until given a server) |
+| [dat-serial](dat-serial.atidarla/) | A serial device's lines as table rows, filtered with Select, and commands written back to it |
+| [dat-script](dat-script.atidarla/) | Script DATs: Python `cook(inputs)` over a table and a text, gated like the project's Python operators |
 | [batch-wedge](batch-wedge.atidarla/) | Batch Graph (M5): a noise seed × scale wedge through the built-in Invert model, and a 10 prompts × 10 seeds wedge across two LAN hosts; results land in the Stage tab's Media Bin ([`docs/batch.md`](../docs/batch.md)) |
 | [beat-clock](beat-clock.atidarla/) | Tap tempo, nudge, resync and MIDI clock in/out on Beat, with beat-synced LFOs and a Timer (M3) |
 | [two-outputs](two-outputs.atidarla/) | One composition to two output windows (`cmp.window`): slices, a corner pin, a Catmull-Rom warp, a mask and soft edges over the overlap (M3, [`docs/outputs.md`](../docs/outputs.md)) |

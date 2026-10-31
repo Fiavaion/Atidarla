@@ -451,7 +451,14 @@ dependencies = [
 name = "atd-ops-dat"
 version = "0.0.1"
 dependencies = [
+ "atd-ai",
  "atd-core",
+ "atd-gpu",
+ "libc",
+ "serde_json",
+ "tungstenite",
+ "ureq 3.5.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -559,6 +566,7 @@ dependencies = [
  "atd-format",
  "atd-gpu",
  "atd-interop",
+ "atd-ops-dat",
  "atd-ops-img",
  "atd-ops-sig",
  "log",

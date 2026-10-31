@@ -161,6 +161,11 @@ impl ExprTable {
         self.nodes.is_empty()
     }
 
+    /// Whether `node` has parameter expressions.
+    pub(crate) fn has(&self, node: NodeId) -> bool {
+        self.nodes.contains_key(&node)
+    }
+
     fn entry(&self, node: NodeId, param: &str) -> Option<&Entry> {
         self.nodes.get(&node)?.iter().find(|e| e.param == param)
     }

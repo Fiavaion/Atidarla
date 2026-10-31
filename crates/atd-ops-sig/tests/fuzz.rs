@@ -153,6 +153,7 @@ fn every_sig_operator_survives_random_inputs() {
                 })
                 .collect();
             let mut ctx = SigCtx {
+                dat: atd_gpu::engine::DatIo::none(),
                 inputs: SigInputs::new(&sources, &sig),
                 output: &mut out,
                 params: Params::new(&net, &reg, &sig, id),

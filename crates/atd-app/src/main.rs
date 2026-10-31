@@ -6,6 +6,7 @@ mod app;
 mod assistant;
 mod canvas;
 mod channels;
+mod dat_view;
 mod diff_view;
 mod dock;
 mod heartbeat;

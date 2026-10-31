@@ -1,0 +1,91 @@
+# Atidarla network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 10
+
+[[node]]
+id = 0
+name = "cast"
+type = "dat.table"
+pos = [0.0, 0.0]
+params.rows = '''
+name	role	city
+Ada	lights	Vilnius
+Bo	sound	Kaunas
+Cy	lights	Riga'''
+
+[[node]]
+id = 1
+name = "lights"
+type = "dat.select"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+params.cols = "name, city"
+params.match = "lights"
+params.match_col = "role"
+
+[[node]]
+id = 2
+name = "as_json"
+type = "dat.convert"
+pos = [220.0, 140.0]
+inputs.in = { node = 0, output = "out" }
+params.to = "json"
+
+[[node]]
+id = 3
+name = "parsed"
+type = "dat.json"
+pos = [440.0, 140.0]
+inputs.in = { node = 2, output = "out" }
+params.path = "/1"
+
+[[node]]
+id = 4
+name = "csv"
+type = "dat.text"
+pos = [0.0, 280.0]
+params.text = '''
+x,y
+1,2
+3,4'''
+
+[[node]]
+id = 5
+name = "csv_table"
+type = "dat.convert"
+pos = [220.0, 280.0]
+inputs.in = { node = 4, output = "out" }
+params.delimiter = "comma"
+
+[[node]]
+id = 6
+name = "words"
+type = "dat.table"
+pos = [0.0, 420.0]
+params.rows = '''
+subject	a lighthouse
+style	ink on paper'''
+
+[[node]]
+id = 7
+name = "note"
+type = "dat.text"
+pos = [0.0, 560.0]
+params.text = "at dusk"
+
+[[node]]
+id = 8
+name = "lfo"
+type = "sig.lfo"
+pos = [0.0, 700.0]
+
+[[node]]
+id = 9
+name = "prompt"
+type = "dat.prompt_template"
+pos = [220.0, 560.0]
+inputs.sig = { node = 8, output = "out" }
+inputs.text = { node = 7, output = "out" }
+inputs.values = { node = 6, output = "out" }
+params.precision = 2
+params.template = "{subject} in {style}, {text}, brightness {lfo}"

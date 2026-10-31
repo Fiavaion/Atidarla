@@ -140,6 +140,8 @@ pub(crate) fn library_with(
     atd_ops_sig::library(&mut library);
     atd_ops_pnt::library(&mut library);
     atd_ops_mat::library(&mut library);
+    atd_ops_dat::library(&mut library);
+    atd_py::script::library(&mut library);
     atd_ops_msh::library(&mut library);
     atd_ops_cmp::library(&mut library);
     atd_ops_ai::library_with(&mut library, supervisor);
@@ -301,6 +303,8 @@ fn check_one(dir: &Path, gpu: Option<&atd_gpu::GpuContext>, opts: CheckOptions) 
     if opts.allow_python_ops {
         python.allow();
     }
+    // Script DATs are project Python too: the same flag runs them.
+    atd_py::script::allow(opts.allow_python_ops);
     let flat = project
         .packs
         .flatten(&main, &registry)
@@ -643,14 +647,15 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// CLAUDE.md rule 7: every IMG and SIG operator has a runnable example.
+    /// CLAUDE.md rule 7: every IMG, SIG and DAT operator has a runnable
+    /// example.
     #[test]
-    fn every_img_and_sig_operator_has_an_example() {
+    fn every_img_sig_and_dat_operator_has_an_example() {
         let used = crate::docs::examples_by_type(&repo("examples")).unwrap();
         let registry = crate::builtin_registry();
         let missing: Vec<&str> = registry
             .iter()
-            .filter(|s| matches!(s.family, OpFamily::Img | OpFamily::Sig))
+            .filter(|s| matches!(s.family, OpFamily::Img | OpFamily::Sig | OpFamily::Dat))
             .map(|s| s.type_id.as_str())
             .filter(|t| !used.contains_key(*t))
             .collect();

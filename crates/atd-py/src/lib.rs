@@ -6,13 +6,14 @@
 //! (CLAUDE.md rule 1). Python 3.13 is the default, 3.11 the floor (PRD A5).
 //!
 //! **Status (M2 pre-work):** expressions (A22, [`expr`]), Python custom
-//! operators ([`ops`], `docs/python-ops.md`) and the textport ([`textport`],
-//! `docs/textport.md`).
+//! operators ([`ops`], `docs/python-ops.md`), the Script DAT ([`script`])
+//! and the textport ([`textport`], `docs/textport.md`).
 
 use pyo3::prelude::*;
 
 pub mod expr;
 pub mod ops;
+pub mod script;
 pub mod textport;
 
 /// The embedded `atidarla` module.

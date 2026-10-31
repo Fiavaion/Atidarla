@@ -291,6 +291,7 @@ mod tests {
         let mut out = Channels::default();
         let cook = |op: &mut MidiInOp, out: &mut Channels| {
             let mut ctx = SigCtx {
+                dat: atd_gpu::engine::DatIo::none(),
                 inputs: SigInputs::new(&[], &sig),
                 output: out,
                 params: Params::new(&net, &reg, &sig, id),
@@ -360,6 +361,7 @@ mod tests {
         });
         let mut out = Channels::default();
         let mut ctx = SigCtx {
+            dat: atd_gpu::engine::DatIo::none(),
             inputs: SigInputs::new(&[], &sig),
             output: &mut out,
             params: Params::new(&net, &reg, &sig, id),
@@ -397,6 +399,7 @@ mod tests {
             let mut sig = HashMap::new();
             sig.insert(src, Channels::single(&["a", "b"], values));
             let mut ctx = SigCtx {
+                dat: atd_gpu::engine::DatIo::none(),
                 inputs: SigInputs::new(&sources, &sig),
                 output: &mut out,
                 params: Params::new(&net, &reg, &sig, id),

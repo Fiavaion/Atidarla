@@ -21,15 +21,24 @@
 //! a renderer reads through [`CookCtx::mat_inputs`] (contract in
 //! [`crate::mat`]).
 //!
-//! **Status:** IMG, SIG, GEO and MAT wires (M2 pre-work for GEO and MAT).
-//! DAT results arrive with their family. Operators are created per node
-//! from an [`OpLibrary`] of factories registered by the `atd-ops-*` crates.
+//! DAT operators ([`DatOp`]) cook on the CPU into a [`Dat`]: shared text
+//! or tables (contract in [`atd_core::dat`]). A DAT node whose inputs are
+//! the same values as at its last cook, and that nothing else dirtied, is
+//! not cooked again (its consumers see the same value); I/O happens on the
+//! operators' worker threads, which the cook polls ([`DatCtx::cook_again`]).
+//! SIG operators may read DAT inputs and write a DAT output too
+//! ([`SigCtx::dat`]).
+//!
+//! **Status:** IMG, SIG, GEO, MAT and DAT wires. Operators are created per
+//! node from an [`OpLibrary`] of factories registered by the `atd-ops-*`
+//! crates.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use atd_core::cook::{CookStat, PlanError, Scheduler};
+pub use atd_core::dat::{Dat, Table};
 use atd_core::expr::{PyJob, PythonHost};
 use atd_core::graph::{Edit, GraphError, Network, NodeId, assign_value};
 use atd_core::history::History;
@@ -933,10 +942,102 @@ pub trait GeoOp: Send {
 /// Creates a GEO operator instance.
 pub type GeoFactory = Box<dyn Fn(&wgpu::Device) -> Box<dyn GeoOp> + Send + Sync>;
 
+/// DAT inputs of a node, by input index. Does not allocate.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DatInputs<'a> {
+    sources: &'a [Option<NodeId>],
+    dat: Option<&'a HashMap<NodeId, Dat>>,
+}
+
+impl<'a> DatInputs<'a> {
+    /// Inputs given by source node per input index (for tests and tools).
+    pub fn new(sources: &'a [Option<NodeId>], dat: &'a HashMap<NodeId, Dat>) -> Self {
+        Self {
+            sources,
+            dat: Some(dat),
+        }
+    }
+
+    /// No DAT inputs.
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    /// The value on input `i`, if connected and cooked.
+    pub fn get(&self, i: usize) -> Option<&'a Dat> {
+        let n = self.sources.get(i).copied().flatten()?;
+        self.dat?.get(&n)
+    }
+
+    pub fn len(&self) -> usize {
+        self.sources.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.sources.is_empty()
+    }
+}
+
+/// The DAT side of a SIG operator: its DAT inputs, and its DAT output when
+/// its schema declares one (Speech to Text's transcript).
+#[derive(Debug, Default)]
+pub struct DatIo<'a> {
+    pub inputs: DatInputs<'a>,
+    /// This node's DAT value from its previous cook; replace it only when
+    /// the content changes ([`Dat::replace`]).
+    pub output: Option<&'a mut Dat>,
+}
+
+impl DatIo<'_> {
+    /// No DAT inputs or output (SIG operators without DAT sockets, tests).
+    pub fn none() -> Self {
+        Self::default()
+    }
+}
+
+/// Everything a DAT operator needs to cook one frame.
+#[derive(Debug)]
+pub struct DatCtx<'a> {
+    pub inputs: DatInputs<'a>,
+    /// SIG inputs by input index (a trigger, values to format).
+    pub sig_inputs: SigInputs<'a>,
+    /// This node's value from its previous cook (empty text at first).
+    /// Replace it only when the content changes ([`Dat::replace`]): an
+    /// unchanged value is how consumers know not to cook again.
+    pub output: &'a mut Dat,
+    pub params: Params<'a>,
+    /// A DAT input is a different value than at this node's last cook (or
+    /// this is its first cook).
+    pub inputs_changed: bool,
+    /// Seconds since the engine's time origin.
+    pub time: f64,
+    pub dt: f64,
+    pub frame: u64,
+    /// Set while work is in flight on a worker thread (a file read, a
+    /// request): the engine cooks the node again next frame to collect it.
+    pub cook_again: bool,
+}
+
+/// A live DAT operator instance (one per node). Must not wait for I/O:
+/// files, sockets and devices are read on worker threads it starts.
+pub trait DatOp: Send {
+    fn cook(&mut self, ctx: &mut DatCtx<'_>) -> Result<(), String>;
+
+    /// A short status line for the parameter panel, or `None`.
+    fn status(&self) -> Option<&str> {
+        None
+    }
+}
+
+/// Creates a DAT operator instance.
+pub type DatFactory = Box<dyn Fn() -> Box<dyn DatOp> + Send + Sync>;
+
 /// Everything a SIG operator needs to cook one frame.
 #[derive(Debug)]
 pub struct SigCtx<'a> {
     pub inputs: SigInputs<'a>,
+    /// DAT inputs and output, for SIG operators with DAT sockets.
+    pub dat: DatIo<'a>,
     /// This node's channels from its previous cook, to overwrite in place.
     pub output: &'a mut Channels,
     pub params: Params<'a>,
@@ -1001,6 +1102,7 @@ pub struct OpLibrary {
     analysis_factories: HashMap<String, ImgToSigFactory>,
     geo_factories: HashMap<String, GeoFactory>,
     mat_factories: HashMap<String, MatFactory>,
+    dat_factories: HashMap<String, DatFactory>,
     fuser: Option<FuserFactory>,
 }
 
@@ -1013,6 +1115,7 @@ impl std::fmt::Debug for OpLibrary {
             .chain(self.analysis_factories.keys())
             .chain(self.geo_factories.keys())
             .chain(self.mat_factories.keys())
+            .chain(self.dat_factories.keys())
             .collect();
         ids.sort();
         f.debug_struct("OpLibrary").field("types", &ids).finish()
@@ -1077,8 +1180,19 @@ impl OpLibrary {
         self.mat_factories.insert(type_id.into(), Box::new(factory));
     }
 
+    /// Registers a DAT operator implementation (an operator whose first
+    /// output is a `DAT` socket).
+    pub fn add_dat(
+        &mut self,
+        type_id: impl Into<String>,
+        factory: impl Fn() -> Box<dyn DatOp> + Send + Sync + 'static,
+    ) {
+        self.dat_factories.insert(type_id.into(), Box::new(factory));
+    }
+
     pub fn contains(&self, type_id: &str) -> bool {
-        self.factories.contains_key(type_id)
+        self.dat_factories.contains_key(type_id)
+            || self.factories.contains_key(type_id)
             || self.sig_factories.contains_key(type_id)
             || self.analysis_factories.contains_key(type_id)
             || self.geo_factories.contains_key(type_id)
@@ -1126,6 +1240,7 @@ pub struct Engine {
     analysis_ops: HashMap<NodeId, Box<dyn ImgToSigOp>>,
     geo_ops: HashMap<NodeId, Box<dyn GeoOp>>,
     mat_ops: HashMap<NodeId, Box<dyn MatOp>>,
+    dat_ops: HashMap<NodeId, Box<dyn DatOp>>,
     /// Fusers of runs of per-point stages, by the run's last node.
     fusers: HashMap<NodeId, Box<dyn PointFuser>>,
     /// Whether straight runs of per-point stages are fused (on by default).
@@ -1137,6 +1252,9 @@ pub struct Engine {
     sig: HashMap<NodeId, Channels>,
     geo: HashMap<NodeId, Geometry>,
     mat: HashMap<NodeId, Material>,
+    dat: HashMap<NodeId, Dat>,
+    /// The DAT inputs each DAT node last cooked with (change detection).
+    dat_seen: HashMap<NodeId, Vec<Option<Dat>>>,
     errors: HashMap<NodeId, String>,
     pool: TexturePool,
     buffers: BufferPool,
@@ -1157,6 +1275,7 @@ pub struct Engine {
     sig_sources: Vec<Option<NodeId>>,
     geo_sources: Vec<Option<NodeId>>,
     mat_sources: Vec<Option<NodeId>>,
+    dat_sources: Vec<Option<NodeId>>,
     handover: Vec<bool>,
     /// Nodes that asked to cook again next frame ([`CookCtx::cook_again`]).
     again: Vec<NodeId>,
@@ -1224,6 +1343,7 @@ impl Engine {
             analysis_ops: HashMap::new(),
             geo_ops: HashMap::new(),
             mat_ops: HashMap::new(),
+            dat_ops: HashMap::new(),
             fusers: HashMap::new(),
             fusion: true,
             fused: 0,
@@ -1232,6 +1352,8 @@ impl Engine {
             sig: HashMap::new(),
             geo: HashMap::new(),
             mat: HashMap::new(),
+            dat: HashMap::new(),
+            dat_seen: HashMap::new(),
             errors: HashMap::new(),
             pool,
             buffers,
@@ -1248,6 +1370,7 @@ impl Engine {
             sig_sources: Vec::new(),
             geo_sources: Vec::new(),
             mat_sources: Vec::new(),
+            dat_sources: Vec::new(),
             handover: Vec::new(),
             again: Vec::new(),
             released: Vec::new(),
@@ -1491,6 +1614,8 @@ impl Engine {
             .chain(self.analysis_ops.keys())
             .chain(self.geo_ops.keys())
             .chain(self.mat_ops.keys())
+            .chain(self.dat_ops.keys())
+            .chain(self.dat.keys())
             .chain(self.results.keys())
             .chain(self.sig.keys())
             .chain(self.geo.keys())
@@ -1506,6 +1631,9 @@ impl Engine {
             self.fusers.remove(&id);
             self.mat_ops.remove(&id);
             self.mat.remove(&id);
+            self.dat_ops.remove(&id);
+            self.dat.remove(&id);
+            self.dat_seen.remove(&id);
             self.sig.remove(&id);
             // Its buffers return to the pool, reusable after the next submit.
             self.geo.remove(&id);
@@ -1553,6 +1681,7 @@ impl Engine {
             analysis_ops,
             geo_ops,
             mat_ops,
+            dat_ops,
             fusers,
             fusion,
             fused,
@@ -1561,6 +1690,8 @@ impl Engine {
             sig,
             geo,
             mat,
+            dat,
+            dat_seen,
             errors,
             pool,
             buffers,
@@ -1576,6 +1707,7 @@ impl Engine {
             sig_sources,
             geo_sources,
             mat_sources,
+            dat_sources,
             handover,
             released,
             again,
@@ -1704,6 +1836,113 @@ impl Engine {
                 .outputs
                 .first()
                 .is_some_and(|o| o.wire == WireType::Mat);
+            let is_dat = schema
+                .outputs
+                .first()
+                .is_some_and(|o| o.wire == WireType::Dat);
+
+            if is_dat {
+                if let std::collections::hash_map::Entry::Vacant(slot) = dat_ops.entry(id) {
+                    match library.dat_factories.get(&node.type_id) {
+                        Some(f) => {
+                            slot.insert(f());
+                        }
+                        None => {
+                            errors.insert(
+                                id,
+                                format!("no DAT implementation for `{}`", node.type_id),
+                            );
+                            dat.remove(&id);
+                            scheduler.record(id, start.elapsed());
+                            continue;
+                        }
+                    }
+                }
+                dat_sources.clear();
+                sig_sources.clear();
+                // A non-DAT input (a trigger channel) whose source cooked.
+                let mut others_cooked = false;
+                for socket in &schema.inputs {
+                    let src = net
+                        .inputs_of(id)
+                        .find(|(name, _)| *name == socket.name)
+                        .map(|(_, src)| src.node);
+                    dat_sources.push(src.filter(|_| socket.wire == WireType::Dat));
+                    sig_sources.push(src.filter(|_| socket.wire == WireType::Sig));
+                    others_cooked |=
+                        socket.wire != WireType::Dat && src.is_some_and(|s| plan.contains(&s));
+                }
+                let seen = dat_seen.entry(id).or_default();
+                let inputs_changed = !dat.contains_key(&id)
+                    || seen.len() != dat_sources.len()
+                    || dat_sources.iter().zip(seen.iter()).any(|(src, old)| {
+                        match (src.and_then(|s| dat.get(&s)), old) {
+                            (None, None) => false,
+                            (Some(now), Some(old)) => !Dat::ptr_eq(now, old),
+                            _ => true,
+                        }
+                    });
+                // Planned only because a source cooked, and every DAT input
+                // is the value it saw last time: its result stands.
+                let unchanged = !inputs_changed
+                    && !others_cooked
+                    && !schema.time_dependent
+                    && !scheduler.is_dirty(id)
+                    && !exprs.has(id)
+                    && !net.bindings_of(id).any(|b| plan.contains(&b.node));
+                if unchanged {
+                    continue;
+                }
+                seen.clear();
+                seen.extend(
+                    dat_sources
+                        .iter()
+                        .map(|s| s.and_then(|s| dat.get(&s)).cloned()),
+                );
+                let mut out = dat.remove(&id).unwrap_or_default();
+                let mut ctx = DatCtx {
+                    inputs: DatInputs {
+                        sources: dat_sources,
+                        dat: Some(dat),
+                    },
+                    sig_inputs: SigInputs {
+                        sources: sig_sources,
+                        sig,
+                    },
+                    output: &mut out,
+                    params: Params {
+                        net,
+                        registry,
+                        sig,
+                        node: id,
+                        project_dir: project_dir.as_deref(),
+                        exprs: Some(exprs),
+                        live: Some(live),
+                        mode,
+                    },
+                    inputs_changed,
+                    time,
+                    dt,
+                    frame: *frame,
+                    cook_again: false,
+                };
+                let op = dat_ops.get_mut(&id).expect("instance created above");
+                let result = op.cook(&mut ctx);
+                if ctx.cook_again {
+                    again.push(id);
+                }
+                match result {
+                    Ok(()) => settle(errors, exprs, id),
+                    // The last good value stays (a failed request keeps the
+                    // previous response).
+                    Err(e) => {
+                        errors.insert(id, e);
+                    }
+                }
+                dat.insert(id, out);
+                scheduler.record(id, start.elapsed());
+                continue;
+            }
 
             if is_mat {
                 if let std::collections::hash_map::Entry::Vacant(slot) = mat_ops.entry(id) {
@@ -2017,18 +2256,32 @@ impl Engine {
                     }
                 }
                 sig_sources.clear();
+                dat_sources.clear();
                 for socket in &schema.inputs {
                     let src = net
                         .inputs_of(id)
                         .find(|(name, _)| *name == socket.name)
                         .map(|(_, src)| src.node);
                     sig_sources.push(src.filter(|_| socket.wire == WireType::Sig));
+                    dat_sources.push(src.filter(|_| socket.wire == WireType::Dat));
                 }
                 let mut out = sig.remove(&id).unwrap_or_default();
+                let mut dat_out = schema
+                    .outputs
+                    .iter()
+                    .any(|o| o.wire == WireType::Dat)
+                    .then(|| dat.remove(&id).unwrap_or_default());
                 let mut ctx = SigCtx {
                     inputs: SigInputs {
                         sources: sig_sources,
                         sig,
+                    },
+                    dat: DatIo {
+                        inputs: DatInputs {
+                            sources: dat_sources,
+                            dat: Some(dat),
+                        },
+                        output: dat_out.as_mut(),
                     },
                     output: &mut out,
                     params: Params {
@@ -2053,6 +2306,9 @@ impl Engine {
                     }
                 }
                 sig.insert(id, out);
+                if let Some(d) = dat_out {
+                    dat.insert(id, d);
+                }
                 scheduler.record(id, start.elapsed());
                 continue;
             }
@@ -2244,8 +2500,11 @@ impl Engine {
         self.analysis_ops.clear();
         self.geo_ops.clear();
         self.mat_ops.clear();
+        self.dat_ops.clear();
         self.sig.clear();
         self.mat.clear();
+        self.dat.clear();
+        self.dat_seen.clear();
         // Buffers return to the pool, reusable after the next submit.
         self.geo.clear();
         self.errors.clear();
@@ -2318,6 +2577,12 @@ impl Engine {
         self.geo.get(&node)
     }
 
+    /// The latest value of a DAT node, or the DAT output of a SIG node
+    /// that has one (Speech to Text's transcript).
+    pub fn dat(&self, node: NodeId) -> Option<&Dat> {
+        self.dat.get(&node)
+    }
+
     /// The latest material of a MAT node.
     pub fn material(&self, node: NodeId) -> Option<&Material> {
         self.mat.get(&node)
@@ -2328,13 +2593,16 @@ impl Engine {
         self.errors.get(&node).map(String::as_str)
     }
 
-    /// The status line of an IMG node's operator, if it reports one
+    /// The status line of an IMG, GEO or DAT node's operator, if it reports one
     /// ([`GpuOp::status`]).
     pub fn status(&self, node: NodeId) -> Option<&str> {
-        match self.gpu_ops.get(&node) {
-            Some(op) => op.status(),
-            None => self.geo_ops.get(&node)?.status(),
+        if let Some(op) = self.gpu_ops.get(&node) {
+            return op.status();
         }
+        if let Some(op) = self.dat_ops.get(&node) {
+            return op.status();
+        }
+        self.geo_ops.get(&node)?.status()
     }
 
     pub fn stat(&self, node: NodeId) -> Option<&CookStat> {

@@ -146,6 +146,7 @@ mod tests {
         let sig = HashMap::new();
         let mut out = Channels::default();
         let mut ctx = SigCtx {
+            dat: atd_gpu::engine::DatIo::none(),
             inputs: SigInputs::new(&[], &sig),
             output: &mut out,
             params: Params::new(&net, &reg, &sig, id),

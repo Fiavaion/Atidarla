@@ -1,0 +1,15 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "DAT network"
+description = '''
+DAT over the network, on this machine only, so Sovereign mode stays on. `server` is a Web Server
+on http://127.0.0.1:9980/ serving the `state` text as JSON; its output lists the requests it gets.
+`client` is a Web Client fetching that address twice a second, and `cue` reads the `cue` field of
+the reply with JSON. `socket` is a WebSocket client, inactive until you give it a server: it
+sends each new value of `state` and lists the messages it receives.
+
+Try: open http://127.0.0.1:9980/ in a browser; edit `state` and watch `cue` follow; send text
+into the show with `curl -d 'hello' http://127.0.0.1:9980/msg` and watch `server`'s table. Point
+`socket` at a WebSocket server (`ws://127.0.0.1:8080/`) and turn it on.
+'''
+resolution = [1280, 720]

@@ -341,7 +341,11 @@ impl RadixSort {
                 Work::Groups(tiles),
             );
         }
-        Ok(if passes.is_multiple_of(2) { values } else { &s.vals })
+        Ok(if passes.is_multiple_of(2) {
+            values
+        } else {
+            &s.vals
+        })
     }
 
     /// Bind groups created so far (a steady frame must not raise it).
