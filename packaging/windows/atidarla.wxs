@@ -4,7 +4,9 @@
   packaging/windows/build-msi.ps1, which passes:
     -d Version=1.2.3    numeric MSI version
     -d BinDir=...       folder with atidarla-app.exe and atidarla.exe
-    -d Root=...         repository root (licences, examples)
+    -d Root=...         repository root (licences)
+    -d ExamplesDir=...  a copy of examples\ without .cache folders (WiX
+                        cannot exclude a folder name at any depth)
     -d PythonDir=...    the bundled CPython runtime (python-build-standalone,
                         PRD A68), installed as INSTALLFOLDER\python
     -d PythonDll=...    its DLL (python313.dll), also installed beside the
@@ -89,9 +91,7 @@
     </ComponentGroup>
 
     <ComponentGroup Id="Examples" Directory="EXAMPLESFOLDER">
-      <Files Include="$(Root)\examples\**">
-        <Exclude Files="$(Root)\examples\**\.cache\**" />
-      </Files>
+      <Files Include="$(ExamplesDir)\**" />
     </ComponentGroup>
 
     <ComponentGroup Id="Python" Directory="PYTHONFOLDER">

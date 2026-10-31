@@ -165,10 +165,14 @@ if ($signing) {
 } else {
     Write-Host "no ATD_WIN_SIGN_THUMBPRINT or ATD_WIN_SIGN_PFX: unsigned (SmartScreen will warn)"
 }
+# The examples without their caches.
+Copy-Item -Recurse "$root\examples" "$stage\examples"
+Get-ChildItem "$stage\examples" -Recurse -Directory -Force -Filter .cache |
+    Remove-Item -Recurse -Force
 
 $msi = "$dist\Atidarla-$version-windows-x64.msi"
 wix build packaging\windows\atidarla.wxs -arch x64 `
-    -d "Version=$msiVersion" -d "BinDir=$stage" -d "Root=$root" `
+    -d "Version=$msiVersion" -d "BinDir=$stage" -d "Root=$root" -d "ExamplesDir=$stage\examples" `
     -d "PythonDir=$pyHome" -d "PythonDll=$pyDll" -o $msi
 if ($LASTEXITCODE) { throw "wix build failed" }
 Sign $msi
