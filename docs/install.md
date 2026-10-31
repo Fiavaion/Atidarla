@@ -25,18 +25,63 @@ installing first (PRD A68):
 - **Windows:** the setup `.exe` installs the Microsoft Visual C++ 2015–2022 runtime (x64) before
   the app, unless the same or a newer one is already there. The bare MSI does not: deploy
   `vc_redist.x64.exe /install /quiet /norestart` before it.
-- **The AI Host is not bundled** (its ML packages run to gigabytes, and model weights are never
-  shipped). Set it up once with [uv](https://docs.astral.sh/uv/) from an Atidarla source folder,
-  using the bundled Python as its base so no other Python is needed:
+- **The AI Host is bundled.** Its source, lock file and the hash-pinned requirements of each
+  optional extra are in `Atidarla.app/Contents/Resources/ai-host` (macOS), `<install
+  folder>\ai-host` (Windows) or `usr/lib/atidarla/ai-host` (AppImage), precompiled. The app
+  starts it on the bundled Python when an AI node needs it, with no setup and no environment
+  variables. Its base install is standard library only, so the built-in reference models
+  (`builtin.invert`, `builtin.echo`) work at once; nothing is downloaded on start.
+  `atidarla ai-host check` starts it and lists what it can run. No ML packages and no model
+  weights are shipped (see [Optional AI adapters](#optional-ai-adapters)).
+
+## Optional AI adapters
+
+The heavier adapters need packages that are not in the installer: `vision` (ONNX vision models,
+ONNX Runtime), `stt` (speech to text, faster-whisper), `diffusion` (SD-Turbo-class img2img,
+torch and diffusers; gigabytes) and `cloud` (Decart's SDK). Install one only when you want it:
+
+```sh
+atidarla ai-host status                              # extras offered and installed, folders
+atidarla ai-host install vision --allow-internet     # download from PyPI, this once
+atidarla ai-host install vision stt --wheelhouse D:\wheels   # offline, from a folder of wheels
+atidarla ai-host remove                              # remove every extra
+```
+
+The CLI is `/Applications/Atidarla.app/Contents/MacOS/atidarla` on macOS,
+`atidarla.exe` in the install folder on Windows and `Atidarla.AppImage ai-host ...` on Linux.
+
+- **What is installed.** Exactly the versions in the shipped `uv.lock`, from
+  `ai-host/requirements/<extra>.txt`, with the bundled Python's pip: `--require-hashes --no-deps
+  --only-binary :all:` (every file checked against its SHA-256, nothing unpinned, nothing
+  compiled). Extras are installed together into a fresh folder that replaces the old one only
+  when pip succeeds, so a failed install changes nothing.
+- **Where.** In your user folder, never inside the app (a signed macOS bundle must not change):
+  `~/Library/Application Support/Atidarla/ai-host/python3.13` (macOS),
+  `%LOCALAPPDATA%\Atidarla\ai-host\python3.13` (Windows),
+  `$XDG_DATA_HOME/atidarla/ai-host/python3.13` or `~/.local/share/atidarla/ai-host/python3.13`
+  (Linux). The host picks them up the next time it starts. Uninstalling the app leaves them; delete
+  the folder (or run `atidarla ai-host remove` first) to reclaim the space.
+- **Sovereign mode** (the default) blocks the download: `install` refuses without
+  `--allow-internet` and says so. Nothing is installed on start or in the background.
+- **Offline (a machine with no internet).** On a connected machine with the same OS and CPU,
+  download the wheels with any Python 3.13 and pip, from the requirements file of the same
+  Atidarla version (in the installed app's `ai-host/requirements/`), then copy the folder over:
 
   ```sh
-  cd ai-host
-  uv sync --python /Applications/Atidarla.app/Contents/Resources/python/bin/python3   # macOS
-  uv sync --python "C:\Program Files\Atidarla\python\python.exe"                      # Windows
+  python3.13 -m pip download --only-binary :all: --no-deps --require-hashes -r vision.txt -d wheels
   ```
 
-  To have an installed app start that host, set `ATD_AI_HOST_CMD` to its command, for example
-  `ATD_AI_HOST_CMD="<atidarla source>/ai-host/.venv/bin/python -m atd_ai_host"`.
+  To prepare wheels for another platform, add pip's `--platform` (for example
+  `win_amd64`, `macosx_11_0_arm64`), `--python-version 3.13` and `--implementation cp`.
+  Then `atidarla ai-host install vision --wheelhouse wheels` on the offline machine.
+- **Models** are separate: download them with the model manager (`atidarla models`,
+  [`docs/models.md`](models.md)).
+- **Torch on Windows.** The `diffusion` extra installs torch from PyPI, which on Windows is the
+  CPU build. For real-time diffusion with an NVIDIA GPU, run a host from a source checkout with
+  a CUDA torch (`ai-host/README.md`) and point the app at it with `ATD_AI_HOST_CMD` or add it as
+  a LAN host.
+
+`ATD_AI_HOST_CMD` still overrides the bundled host, for a host you run from a source checkout.
 
 ## macOS
 
@@ -72,8 +117,11 @@ The entitlements allow loading Python extension modules not signed by our team a
 microphone and camera (Audio In, Video In).
 
 The script builds the app against the bundled Python (`PYO3_CONFIG_FILE` from
-`packaging/fetch-python.sh`), precompiles its standard library so nothing is written into the
-signed bundle, and stops if a binary links a Python outside the bundle. `ATD_SKIP_BUILD=1` needs
+`packaging/fetch-python.sh`), precompiles its standard library and the AI Host
+(`packaging/stage-ai-host.sh`, shared with the AppImage; the MSI script does the same) so nothing
+is written into the signed bundle, signs every Mach-O file in the runtime and the host folder
+(the host is source only, and the staging script refuses binaries or weights), and stops if a
+binary links a Python outside the bundle. `ATD_SKIP_BUILD=1` needs
 binaries built the same way.
 
 ## Windows
@@ -161,7 +209,8 @@ chmod +x Atidarla-*.AppImage
 ./Atidarla-1.0.0-linux-x86_64.AppImage soak show.atidarla    # a CLI command runs the CLI
 ```
 
-The AppImage carries the app, the CLI, the examples and Python; the GPU driver (Vulkan), ALSA,
+The AppImage carries the app, the CLI, the examples, Python and the AI Host
+(`./Atidarla-*.AppImage ai-host status`); the GPU driver (Vulkan), ALSA,
 X11 or Wayland come from the system. Build with `packaging/linux/build-appimage.sh`
 (it downloads `appimagetool` into `dist/tools` unless `APPIMAGETOOL` points at one).
 
