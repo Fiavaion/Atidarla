@@ -16,6 +16,7 @@
 //! | `mat.toon` | — | banded diffuse, highlight, rim |
 //! | `mat.line` | — | polygon edges and polylines in pixels, optional fill |
 //! | `mat.point_sprite` | — | points as discs or squares (`pscale`) |
+//! | `mat.splat` | — | points as Gaussian splats (`scale`, `orient`, `Cd`, `sh0`…), GPU-sorted and blended |
 //! | `img.render` (IMG) | GEO `P N Cd uv pscale`, prim `Cd`; MAT | an image |
 //! | `msh.platonic` (MSH) | — | `P`, `N`, `uv` (split per face), prim `Cd` |
 
@@ -23,6 +24,8 @@ mod camera;
 mod materials;
 mod platonic;
 mod render;
+mod splat;
+mod splat_sort;
 pub mod triangulate;
 
 use atd_core::registry::{OperatorSchema, Registry};
@@ -33,6 +36,7 @@ pub use platonic::build as platonic_geometry;
 /// Every schema this crate registers.
 pub fn schemas() -> Vec<OperatorSchema> {
     let mut all = materials::schemas();
+    all.push(splat::schema());
     all.push(render::schema());
     all.push(platonic::schema());
     all
@@ -53,6 +57,7 @@ pub fn library(library: &mut OpLibrary) {
         let factory = materials::create(&schema.type_id).expect("every MAT schema has an op");
         library.add_mat(schema.type_id, factory);
     }
+    library.add_mat(splat::schema().type_id, splat::create);
     library.add(render::schema().type_id, render::create);
     library.add_geo(platonic::schema().type_id, platonic::create);
 }

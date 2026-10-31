@@ -72,6 +72,11 @@ rfd = "0.17"
 sha2 = "0.10"
 ctrlc = { version = "3", features = ["termination"] }
 zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+# Splat In (FR-C1): SPZ is gzip (v1-3) or zstd streams (v4); SOG is lossless
+# WebP images. All pure Rust, MIT OR Apache-2.0 / MIT.
+flate2 = "1"
+ruzstd = "0.9"
+image-webp = "0.2"
 # Model downloads (FR-A12): rustls with the ring provider and the OS trust
 # store (platform verifier), so no bundled root list and no native-tls.
 ureq = { version = "3.5", default-features = false, features = ["rustls-no-provider", "platform-verifier"] }

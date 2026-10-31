@@ -33,3 +33,4 @@ All platforms.
 ## Examples
 
 - [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `left`, `turn`
+- [Gaussian Splats](../../../examples/splats.atidarla/) — `place_ply`, `place_sog`

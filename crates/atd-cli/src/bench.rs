@@ -3,6 +3,8 @@
 //! M0 measures start-up costs only. Each milestone adds the PT-n cases it is
 //! accountable for; results are compared across runs by case `id`.
 
+mod splat;
+
 use std::path::Path;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -961,6 +963,12 @@ pub fn run(out: Option<&Path>, use_gpu: bool) -> anyhow::Result<()> {
                 }));
                 cases.push(render_mesh(&gpu).unwrap_or_else(|err| Case {
                     id: "render.mesh_1m",
+                    status: Status::Error,
+                    ms: None,
+                    note: Some(format!("{err:#}")),
+                }));
+                cases.push(splat::splats_1m(&gpu).unwrap_or_else(|err| Case {
+                    id: "render.splats_1m",
                     status: Status::Error,
                     ms: None,
                     note: Some(format!("{err:#}")),

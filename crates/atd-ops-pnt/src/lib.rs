@@ -25,6 +25,7 @@
 //! | `pnt.kernel` | the attributes its code reads (Kernel DSL) | the attributes its code writes |
 //! | `pnt.solver`, `pnt.piece` | `init`, `prev`; an attribute or `P` | the state; `piece` |
 //! | `pnt.foreach`, `pnt.foreach_end` | every attribute (pieces: one attribute) | every attribute, `iteration`; the passes merged |
+//! | `pnt.splat_in` | a PLY, SPZ or SOG file (worker thread) | `P`, `Cd`, `scale`, `orient`, `sh0`… (detail `sh_degree`) |
 //! | `img.render_points` (IMG) | `P`, `Cd`, polylines | an image |
 
 mod attr;
@@ -44,6 +45,8 @@ mod select;
 mod solver;
 mod sort;
 mod sources;
+mod splat;
+pub mod splat_file;
 mod transform;
 
 use atd_core::registry::{OpFamily, OperatorSchema, ParamSchema, Registry, SocketSchema, WireType};
@@ -112,6 +115,7 @@ const OPS: &[(Schema, Factory)] = &[
     (kernel::schema, kernel::create),
     (foreach::begin_schema, foreach::create_begin),
     (foreach::end_schema, foreach::create_end),
+    (splat::schema, splat::create),
 ];
 
 /// Every schema this crate registers (PNT operators and Render Points).

@@ -7,7 +7,7 @@ use atd_gpu::engine::{MatCtx, MatOp, Params};
 use atd_gpu::mat::{Material, Model};
 
 /// A MAT operator schema: optional IMG texture inputs, one MAT output.
-fn mat(
+pub(crate) fn mat(
     id: &str,
     label: &str,
     summary: &str,

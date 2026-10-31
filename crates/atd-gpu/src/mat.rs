@@ -46,6 +46,11 @@ pub enum Model {
     Line,
     /// Points drawn as camera-facing discs or squares.
     Sprite,
+    /// Points drawn as Gaussian splats (3D Gaussian Splatting): sorted on
+    /// the GPU and blended back to front, coloured by `Cd` and the `sh*`
+    /// spherical harmonics. The renderer draws these itself; `shade()` is
+    /// not used.
+    Splat,
 }
 
 impl Model {
@@ -58,6 +63,7 @@ impl Model {
             Model::Toon => 3,
             Model::Line => 4,
             Model::Sprite => 5,
+            Model::Splat => 6,
         }
     }
 }
@@ -79,7 +85,7 @@ pub struct Material {
     pub colour2: [f32; 4],
     /// Model-specific numbers (see each MAT operator): Toon bands, rim,
     /// highlight size, rim width; Line width; Sprite size, size mode,
-    /// shape, sphere shading.
+    /// shape, sphere shading; Splat size, opacity, highest SH degree.
     pub params: [f32; 4],
     /// PBR roughness (0.02 – 1).
     pub roughness: f32,
@@ -155,6 +161,7 @@ const MODEL_MATCAP: u32 = 2u;
 const MODEL_TOON: u32 = 3u;
 const MODEL_LINE: u32 = 4u;
 const MODEL_SPRITE: u32 = 5u;
+const MODEL_SPLAT: u32 = 6u;
 "#;
 
 /// The shared shading function. Inputs, all in world space: unit normal

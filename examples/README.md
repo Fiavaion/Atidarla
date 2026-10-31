@@ -39,6 +39,7 @@ every IMG and SIG operator (CLAUDE.md rule 7); each operator's page in
 | [render-solids](render-solids.atidarla/) | 3D: lit Platonic solids under an orbiting camera, PBR and emission through Bloom (M2) |
 | [render-textures](render-textures.atidarla/) | 3D: a textured square (uv) and a matcap-shaded solid (M2) |
 | [render-wire-toon](render-wire-toon.atidarla/) | 3D: toon shading, a wireframe and points as lit sprites in one depth buffer (M2) |
+| [splats](splats.atidarla/) | Gaussian splats from PLY, SPZ and SOG files (Splat In), GPU-sorted and blended by Splat MAT around a solid ring (M6) |
 | [mesh-primitives](mesh-primitives.atidarla/) | MSH primitives merged, coloured, pulsing and exported to glTF, drawn as points (M2) |
 | [mesh-modelling](mesh-modelling.atidarla/) | Extrude, Subdivide, Boolean, Delete and PolyReduce (M2) |
 | [mesh-scatter-iso](mesh-scatter-iso.atidarla/) | Scatter → Iso Surface → curl-noise deform: the PNT↔MSH chain, and a Sweep (M2) |

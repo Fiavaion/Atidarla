@@ -142,6 +142,19 @@ pub mod names {
     pub const ORIENT: &str = "orient";
     /// Group membership mask, `u32`: bit `i` is the class's `i`-th group.
     pub const GROUP: &str = "group";
+    /// Per-axis scale, `vec3f` (Gaussian splats: the standard deviations
+    /// along the axes `orient` turns).
+    pub const SCALE: &str = "scale";
+    /// Gaussian-splat spherical-harmonic coefficients beyond the base colour,
+    /// `vec4f` each: the per-splat floats (coefficient 1 R, G, B, then
+    /// coefficient 2…, in the 3DGS order) four to an attribute, `sh0` holding
+    /// floats 0–3. Degree 3 uses all twelve.
+    pub const SH: [&str; 12] = [
+        "sh0", "sh1", "sh2", "sh3", "sh4", "sh5", "sh6", "sh7", "sh8", "sh9", "sh10", "sh11",
+    ];
+    /// Detail value (`I32`): the spherical-harmonic degree (0–3) of the
+    /// [`SH`] attributes.
+    pub const SH_DEGREE: &str = "sh_degree";
 }
 
 /// Most groups per class: one bit each in the [`names::GROUP`] mask.
