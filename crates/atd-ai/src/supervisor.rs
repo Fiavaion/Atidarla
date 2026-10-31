@@ -265,10 +265,14 @@ impl Drop for Supervisor {
     }
 }
 
-/// The local host command: `ATD_AI_HOST_CMD` (whitespace-separated), or the
-/// development host in `ai-host/` run by its own virtual environment when
-/// it has one (it holds torch), else `-m atd_ai_host` under `ATD_PYTHON`,
-/// the installer's bundled Python (PRD A68) or `python3`.
+/// The local host command, the first found of:
+///
+/// 1. `ATD_AI_HOST_CMD` (whitespace-separated), an explicit override;
+/// 2. the host an installer ships beside the executable (PRD A68), on the
+///    bundled Python, with the user's installed extras ([`crate::hostenv`]);
+/// 3. the development host in `ai-host/` run by its own virtual
+///    environment when it has one (it holds torch), else `-m atd_ai_host`
+///    under `ATD_PYTHON`, the bundled Python or `python3`.
 pub fn default_local_command() -> HostCommand {
     if let Ok(cmd) = std::env::var("ATD_AI_HOST_CMD") {
         let mut parts = cmd.split_whitespace().map(std::ffi::OsString::from);
@@ -279,6 +283,9 @@ pub fn default_local_command() -> HostCommand {
                 env: vec![],
             };
         }
+    }
+    if let Some(bundled) = crate::hostenv::Bundled::find() {
+        return bundled.host_command(&crate::hostenv::data_root());
     }
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ai-host");
     let venv = if cfg!(windows) {
