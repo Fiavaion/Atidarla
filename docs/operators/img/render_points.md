@@ -53,3 +53,4 @@ All platforms.
 - [PNT Outputs](../../../examples/pnt-outputs.atidarla/) — `draw`
 - [PNT Solver](../../../examples/pnt-solver.atidarla/) — `draw`
 - [Points](../../../examples/points.atidarla/) — `draw_cloud`, `draw_grid`
+- [Soak show](../../../examples/soak-show.atidarla/) — `draw`

@@ -30,4 +30,5 @@ All platforms.
 ## Examples
 
 - [Image processing](../../../examples/image-processing.atidarla/) — `edges`
+- [Soak show](../../../examples/soak-show.atidarla/) — `grid`
 - [Stage deck](../../../examples/stage-deck.atidarla/) — `grid`

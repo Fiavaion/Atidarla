@@ -45,4 +45,5 @@ All platforms.
 
 - [Beat clock](../../../examples/beat-clock.atidarla/) — `clock`
 - [Beat switcher](../../../examples/beat-switcher.atidarla/) — `clock`
+- [Soak show](../../../examples/soak-show.atidarla/) — `clock`
 - [Stage deck](../../../examples/stage-deck.atidarla/) — `clock`

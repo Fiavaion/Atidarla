@@ -16,6 +16,7 @@ mod project;
 mod pt8;
 mod render;
 mod serve;
+mod soak;
 mod supervise;
 
 /// The mock ComfyUI server of `atd-ops-ai`'s tests, for the render test.
@@ -183,6 +184,11 @@ enum Command {
     },
     /// Expose MCP + OSC/REST without UI (FR-H3, M5).
     Serve(serve::ServeArgs),
+    /// Run a project headless for hours and check PT-10: resident memory
+    /// grows by at most 100 MB and no frame takes over 50 ms after the
+    /// warm-up. Writes <OUT>/soak.md and <OUT>/soak.csv; exits non-zero on
+    /// a failure. See docs/soak.md.
+    Soak(soak::SoakArgs),
     /// The assistant: build a request into a project, or run the eval (FR-G4, M5).
     #[command(subcommand)]
     Agent(agent::AgentCommand),
@@ -527,6 +533,7 @@ fn main() -> ExitCode {
             },
         ),
         Command::Serve(args) => serve::run(args),
+        Command::Soak(args) => soak::run(&args),
         Command::Agent(cmd) => agent::run(cmd),
         Command::Batch { action } => batch::run(action),
     };

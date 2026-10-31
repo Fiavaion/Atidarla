@@ -39,4 +39,5 @@ All platforms.
 - [Neural Growth](../../../examples/neural-growth.atidarla/) — `dim`
 - [Python operators](../../../examples/python-ops.atidarla/) — `level1`
 - [Signal scope](../../../examples/signal-scope.atidarla/) — `meter`
+- [Soak show](../../../examples/soak-show.atidarla/) — `trail`
 - [Timeline show](../../../examples/timeline-show.atidarla/) — `level1`

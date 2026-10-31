@@ -97,4 +97,5 @@ All platforms.
 
 ## Examples
 
+- [Soak show](../../../examples/soak-show.atidarla/) — `deck`
 - [Stage deck](../../../examples/stage-deck.atidarla/) — `deck`

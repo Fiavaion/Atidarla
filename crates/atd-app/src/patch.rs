@@ -14,6 +14,19 @@
 //!   it through the system clipboard (as a JSON fragment); Ctrl+D
 //!   duplicates it. Each of these is one undo step.
 //!
+//! Without a mouse (docs/accessibility.md): Tab moves keyboard focus to the
+//! canvas (a ring shows it). Then the arrows select the nearest node in
+//! that direction; Shift+arrows move the selection (Shift+Ctrl/Cmd+arrows
+//! further); W starts a wire from the selected node's output (W again picks
+//! the next output), the arrows choose the node to wire to, I its input,
+//! Enter connects and Esc cancels; N adds an operator at the centre; Delete
+//! removes the selection; F frames the patch. Nodes and sockets are not tab
+//! stops, so Tab leaves the canvas in one press.
+//!
+//! Wire colours are colour-blind safe and each wire type has its own socket
+//! shape (`crate::wires`); the View > Accessibility window can also label
+//! every wire with its type.
+//!
 //! Drawing reads the engine immutably and queues edits, which are applied
 //! after the frame's layout as undo steps.
 
@@ -22,7 +35,7 @@ use std::time::{Duration, Instant};
 
 use atd_core::PlatformInfo;
 use atd_core::fragment::Fragment;
-use atd_core::graph::{Comment, CommentId, Edit, Endpoint, Node, NodeId, Wire};
+use atd_core::graph::{Comment, CommentId, Edit, Endpoint, Network, Node, NodeId, Wire};
 use atd_core::registry::{OpFamily, OperatorSchema, Registry, WireType};
 use atd_gpu::engine::Engine;
 use egui::epaint::CubicBezierShape;
@@ -31,6 +44,7 @@ use egui::{
 };
 
 use crate::canvas::{View, paint_grid};
+use crate::wires;
 
 pub const NODE_W: f32 = 150.0;
 pub const HEADER: f32 = 26.0;
@@ -60,15 +74,78 @@ pub fn output_pos(pos: Pos2, i: usize) -> Pos2 {
     pos + Vec2::new(NODE_W, HEADER + ROW * (i as f32 + 0.5))
 }
 
-fn wire_colour(w: WireType) -> Color32 {
-    match w {
-        WireType::Img => Color32::from_rgb(180, 120, 255),
-        WireType::Sig => Color32::from_rgb(110, 210, 140),
-        WireType::Geo => Color32::from_rgb(90, 170, 255),
-        WireType::Dat => Color32::from_rgb(230, 190, 90),
-        WireType::Mat => Color32::from_rgb(240, 120, 120),
-        WireType::Cmp => Color32::from_rgb(170, 170, 170),
+/// Canvas units Shift+arrow moves the selection (Shift+Ctrl/Cmd: the big
+/// step).
+const KEY_STEP: f32 = 20.0;
+const KEY_STEP_BIG: f32 = 100.0;
+
+/// Centre of a node in canvas units.
+fn node_centre(net: &Network, reg: &Registry, id: NodeId) -> Option<Pos2> {
+    let n = net.node(id)?;
+    let size = reg.get(&n.type_id).map_or(Vec2::ZERO, node_size);
+    Some(Pos2::new(n.pos[0], n.pos[1]) + size * 0.5)
+}
+
+/// The node whose centre is nearest `from` in direction `dir` (a unit
+/// vector), favouring nodes near the line: the distance along it plus
+/// twice the distance across. Nodes within 45° of the direction come
+/// first; when there are none, any node ahead.
+pub fn nearest_in_direction(
+    from: Pos2,
+    dir: Vec2,
+    nodes: impl IntoIterator<Item = (NodeId, Pos2)>,
+) -> Option<NodeId> {
+    // (in the cone, score): the cone sorts first.
+    nodes
+        .into_iter()
+        .filter_map(|(id, c)| {
+            let d = c - from;
+            let along = d.dot(dir);
+            let across = (d - dir * along).length();
+            (along > 1.0).then_some(((across > along), along + 2.0 * across, id))
+        })
+        .min_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)))
+        .map(|(_, _, id)| id)
+}
+
+/// Inputs of `to` that take output `output` of `from`: unconnected ones
+/// first, then connected ones (connecting replaces their wire). Every
+/// input when none has the type, so the engine can say why.
+fn wire_inputs(
+    net: &Network,
+    reg: &Registry,
+    from: NodeId,
+    output: usize,
+    to: NodeId,
+) -> Vec<usize> {
+    let (Some(f), Some(t)) = (net.node(from), net.node(to)) else {
+        return Vec::new();
+    };
+    let (Some(fs), Some(ts)) = (reg.get(&f.type_id), reg.get(&t.type_id)) else {
+        return Vec::new();
+    };
+    let Some(out) = fs.outputs.get(output) else {
+        return Vec::new();
+    };
+    let connected: BTreeSet<&str> = net.inputs_of(to).map(|(n, _)| n).collect();
+    let mut fit: Vec<usize> = (0..ts.inputs.len())
+        .filter(|i| ts.inputs[*i].wire == out.wire)
+        .collect();
+    if fit.is_empty() {
+        fit = (0..ts.inputs.len()).collect();
     }
+    fit.sort_by_key(|i| connected.contains(ts.inputs[*i].name.as_str()));
+    fit
+}
+
+/// A wire being made with the keyboard (W): from output `output` of `from`
+/// to input `input` of `target`, which the arrows choose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct KeyWire {
+    from: NodeId,
+    output: usize,
+    target: Option<NodeId>,
+    input: usize,
 }
 
 fn family_colour(f: OpFamily) -> Color32 {
@@ -166,6 +243,8 @@ struct Search {
     /// Screen position of the popup.
     screen: Pos2,
     focus: bool,
+    /// Opened with N on the focused canvas: focus returns there after.
+    from_keyboard: bool,
 }
 
 #[derive(Debug, Default)]
@@ -184,6 +263,9 @@ pub struct PatchEditor {
     fit: bool,
     /// Badge text, reused between nodes and frames (`crate::ai_badges`).
     badge: String,
+    /// Draw each wire's type at its middle (a per-user setting).
+    pub wire_labels: bool,
+    key_wire: Option<KeyWire>,
 }
 
 impl PatchEditor {
@@ -288,8 +370,27 @@ impl PatchEditor {
     pub fn ui(&mut self, ui: &mut Ui, engine: &mut Engine, platform: &PlatformInfo) {
         let (rect, bg) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
         let origin = rect.min;
-        let frame_key = bg.hovered()
-            && !ui.ctx().egui_wants_keyboard_input()
+        // The canvas is one tab stop; while it has focus the arrows act on
+        // the patch instead of moving focus, and Esc cancels a keyboard wire.
+        let focused = bg.has_focus();
+        if focused {
+            ui.memory_mut(|m| {
+                m.set_focus_lock_filter(
+                    bg.id,
+                    egui::EventFilter {
+                        horizontal_arrows: true,
+                        vertical_arrows: true,
+                        escape: self.key_wire.is_some(),
+                        tab: false,
+                    },
+                );
+            });
+        } else {
+            self.key_wire = None;
+        }
+        let typing = ui.ctx().text_edit_focused();
+        let frame_key = (bg.hovered() || focused)
+            && !typing
             && ui.input(|i| i.key_pressed(egui::Key::F) && i.modifiers.is_none());
         if (self.fit || frame_key)
             && rect.width() > 0.0
@@ -417,14 +518,10 @@ impl PatchEditor {
             let hr = ui.interact(
                 header,
                 Id::unique(("atd-comment", c.id.0)),
-                Sense::click_and_drag(),
+                Sense::CLICK | Sense::DRAG,
             );
             let grip = Rect::from_min_size(screen.max - Vec2::splat(14.0), Vec2::splat(14.0));
-            let gr = ui.interact(
-                grip,
-                Id::unique(("atd-comment-size", c.id.0)),
-                Sense::drag(),
-            );
+            let gr = ui.interact(grip, Id::unique(("atd-comment-size", c.id.0)), Sense::DRAG);
             for k in [4.0, 8.0] {
                 painter.line_segment(
                     [
@@ -540,8 +637,11 @@ impl PatchEditor {
             let a = to_screen(output_pos(node_pos(from.id).unwrap_or_default(), oi));
             let b = to_screen(input_pos(node_pos(to.id).unwrap_or_default(), ii));
             let feedback = ts.inputs.get(ii).is_some_and(|s| s.feedback);
-            let colour = wire_colour(fs.outputs.get(oi).map_or(WireType::Img, |s| s.wire));
-            draw_wire(&painter, a, b, colour, zoom, feedback);
+            let kind = fs.outputs.get(oi).map_or(WireType::Img, |s| s.wire);
+            draw_wire(&painter, a, b, wires::colour(kind), zoom, feedback);
+            if self.wire_labels && zoom > 0.6 {
+                wire_label(ui, &painter, a, b, zoom, kind);
+            }
         }
 
         // Channel bindings: dashed lines from the SIG source to the bound
@@ -554,7 +654,7 @@ impl PatchEditor {
                 let a = to_screen(output_pos(node_pos(src.id).unwrap_or_default(), 0));
                 let t =
                     to_screen(node_pos(node.id).unwrap_or_default() + Vec2::new(0.0, HEADER * 0.5));
-                let c = wire_colour(WireType::Sig).gamma_multiply(0.7);
+                let c = wires::colour(WireType::Sig).gamma_multiply(0.7);
                 draw_wire(&painter, a, t, c, zoom, true);
             }
         }
@@ -576,7 +676,7 @@ impl PatchEditor {
             let resp = ui.interact(
                 screen,
                 Id::unique(("atd-node", node.id.0)),
-                Sense::click_and_drag(),
+                Sense::CLICK | Sense::DRAG,
             );
             if resp.clicked() || resp.drag_started() {
                 self.selected_comment = None;
@@ -731,7 +831,7 @@ impl PatchEditor {
                 let c = to_screen(input_pos(pos, i));
                 input_targets.push((c, node.id, s.name.clone(), s.wire));
                 let hit = Rect::from_center_size(c, Vec2::splat(SNAP));
-                let sr = ui.interact(hit, Id::unique(("atd-in", node.id.0, i)), Sense::click());
+                let sr = ui.interact(hit, Id::unique(("atd-in", node.id.0, i)), Sense::CLICK);
                 if sr.secondary_clicked()
                     && let Some((_, src)) = net.inputs_of(node.id).find(|(n, _)| *n == s.name)
                 {
@@ -742,9 +842,9 @@ impl PatchEditor {
                     ));
                 }
                 let r = SOCKET_R * zoom.max(0.5);
-                painter.circle_filled(c, r, wire_colour(s.wire));
+                painter.add(wires::socket(c, r, s.wire));
                 if s.feedback {
-                    painter.circle_stroke(c, r + 2.0, Stroke::new(1.0, wire_colour(s.wire)));
+                    painter.circle_stroke(c, r + 2.0, Stroke::new(1.0, wires::colour(s.wire)));
                 }
                 if zoom > 0.6 {
                     painter.text(
@@ -757,9 +857,10 @@ impl PatchEditor {
                 }
                 if sr.hovered() {
                     sr.on_hover_text(format!(
-                        "{} ({:?}){}",
+                        "{} ({}, {} socket){}",
                         s.name,
-                        s.wire,
+                        wires::tag(s.wire),
+                        wires::shape_name(s.wire),
                         if s.feedback { ", feedback" } else { "" }
                     ));
                 }
@@ -767,7 +868,7 @@ impl PatchEditor {
             for (i, s) in schema.outputs.iter().enumerate() {
                 let c = to_screen(output_pos(pos, i));
                 let hit = Rect::from_center_size(c, Vec2::splat(SNAP));
-                let sr = ui.interact(hit, Id::unique(("atd-out", node.id.0, i)), Sense::drag());
+                let sr = ui.interact(hit, Id::unique(("atd-out", node.id.0, i)), Sense::DRAG);
                 if sr.drag_started() {
                     self.drag = Some(Drag::Wire {
                         from: node.id,
@@ -786,9 +887,14 @@ impl PatchEditor {
                         );
                     }
                 }
-                painter.circle_filled(c, SOCKET_R * zoom.max(0.5), wire_colour(s.wire));
+                painter.add(wires::socket(c, SOCKET_R * zoom.max(0.5), s.wire));
                 if sr.hovered() {
-                    sr.on_hover_text(format!("{} ({:?}) — drag to an input", s.name, s.wire));
+                    sr.on_hover_text(format!(
+                        "{} ({}, {} socket) — drag to an input",
+                        s.name,
+                        wires::tag(s.wire),
+                        wires::shape_name(s.wire)
+                    ));
                 }
             }
         }
@@ -899,7 +1005,8 @@ impl PatchEditor {
             }
         }
 
-        if bg.clicked() && !modifier {
+        // A pointer click only: Enter/Space on the focused canvas is not one.
+        if bg.clicked_by(egui::PointerButton::Primary) && !modifier {
             self.select_only(None);
         }
         let tab = bg.hovered() && ui.input(|i| i.key_pressed(Key::Tab));
@@ -911,10 +1018,16 @@ impl PatchEditor {
                 at: view.to_canvas(origin, p),
                 screen: p,
                 focus: true,
+                from_keyboard: false,
             });
         }
-        let typing = ui.ctx().egui_wants_keyboard_input();
-        let keys = !typing && self.search.is_none() && ui.rect_contains_pointer(rect);
+        if focused && self.search.is_none() && !typing {
+            self.keyboard(ui, net, reg, rect, origin, &mut pending);
+        }
+        if focused {
+            self.paint_keyboard(ui, &painter, net, reg, rect, origin);
+        }
+        let keys = !typing && self.search.is_none() && (focused || ui.rect_contains_pointer(rect));
         let mut clipboard: Option<Fragment> = None;
         let mut paste: Option<(Fragment, [f32; 2])> = None;
         let mut delete = false;
@@ -995,7 +1108,11 @@ impl PatchEditor {
             ui.ctx().copy_text(f.to_json());
         }
 
+        let from_keyboard = self.search.as_ref().is_some_and(|s| s.from_keyboard);
         let chosen = self.search_ui(ui, reg);
+        if from_keyboard && self.search.is_none() {
+            ui.memory_mut(|m| m.request_focus(bg.id));
+        }
         for (label, edits) in pending {
             if let Err(e) = engine.edit(&label, edits) {
                 self.status(e.to_string());
@@ -1034,6 +1151,270 @@ impl PatchEditor {
                 self.status(e.to_string());
             }
         }
+    }
+
+    /// Keys on the focused canvas: select, move, wire and add without a
+    /// mouse. Edits go to `pending` like the pointer's.
+    fn keyboard(
+        &mut self,
+        ui: &Ui,
+        net: &Network,
+        reg: &Registry,
+        rect: Rect,
+        origin: Pos2,
+        pending: &mut Vec<(String, Vec<Edit>)>,
+    ) {
+        let (arrow, shift, command, wire, input, enter, escape, add) = ui.input(|i| {
+            let arrow = [
+                (Key::ArrowLeft, Vec2::LEFT),
+                (Key::ArrowRight, Vec2::RIGHT),
+                (Key::ArrowUp, Vec2::UP),
+                (Key::ArrowDown, Vec2::DOWN),
+            ]
+            .into_iter()
+            .find(|(k, _)| i.key_pressed(*k))
+            .map(|(_, d)| d);
+            let plain = |k| i.key_pressed(k) && i.modifiers.is_none();
+            (
+                arrow,
+                i.modifiers.shift,
+                i.modifiers.command,
+                plain(Key::W),
+                plain(Key::I),
+                plain(Key::Enter),
+                plain(Key::Escape),
+                plain(Key::N),
+            )
+        });
+        if self.key_wire.is_some_and(|k| {
+            net.node(k.from).is_none() || k.target.is_some_and(|t| net.node(t).is_none())
+        }) {
+            self.key_wire = None;
+        }
+
+        if wire {
+            let Some(from) = self.selected else {
+                self.status("Select a node to wire from (arrows), then W");
+                return;
+            };
+            let outputs = net
+                .node(from)
+                .and_then(|n| reg.get(&n.type_id))
+                .map_or(0, |s| s.outputs.len());
+            if outputs == 0 {
+                self.status("This node has no outputs to wire from");
+                return;
+            }
+            self.key_wire = Some(match self.key_wire {
+                // W again: the next output.
+                Some(k) if k.from == from => KeyWire {
+                    output: (k.output + 1) % outputs,
+                    ..k
+                },
+                _ => KeyWire {
+                    from,
+                    output: 0,
+                    target: None,
+                    input: 0,
+                },
+            });
+            return;
+        }
+
+        if let Some(mut k) = self.key_wire {
+            if escape {
+                self.key_wire = None;
+                return;
+            }
+            if let Some(dir) = arrow.filter(|_| !shift) {
+                let at = k
+                    .target
+                    .or(Some(k.from))
+                    .and_then(|id| node_centre(net, reg, id))
+                    .unwrap_or_default();
+                let others = net
+                    .nodes()
+                    .filter(|n| n.id != k.from)
+                    .filter_map(|n| Some((n.id, node_centre(net, reg, n.id)?)));
+                if let Some(t) = nearest_in_direction(at, dir, others) {
+                    k.target = Some(t);
+                    k.input = wire_inputs(net, reg, k.from, k.output, t)
+                        .first()
+                        .copied()
+                        .unwrap_or(0);
+                    if let Some(c) = node_centre(net, reg, t) {
+                        self.reveal(rect, origin, c);
+                    }
+                }
+            }
+            if input && let Some(t) = k.target {
+                let choices = wire_inputs(net, reg, k.from, k.output, t);
+                if let Some(i) = choices.iter().position(|i| *i == k.input) {
+                    k.input = choices[(i + 1) % choices.len()];
+                } else if let Some(first) = choices.first() {
+                    k.input = *first;
+                }
+            }
+            self.key_wire = Some(k);
+            if enter && let Some(t) = k.target {
+                let from = net.node(k.from).and_then(|n| reg.get(&n.type_id));
+                let to = net.node(t).and_then(|n| reg.get(&n.type_id));
+                if let (Some(out), Some(inp)) = (
+                    from.and_then(|s| s.outputs.get(k.output)),
+                    to.and_then(|s| s.inputs.get(k.input)),
+                ) {
+                    let wire = Wire::new(
+                        Endpoint::new(k.from, out.name.clone()),
+                        Endpoint::new(t, inp.name.clone()),
+                    );
+                    pending.push(("connect".into(), vec![Edit::Connect { wire }]));
+                    self.select_only(Some(t));
+                } else {
+                    self.status("That node has no inputs");
+                }
+                self.key_wire = None;
+            }
+            return;
+        }
+
+        match arrow {
+            Some(dir) if shift && !self.selection.is_empty() => {
+                let step = if command { KEY_STEP_BIG } else { KEY_STEP };
+                let moves: Vec<Edit> = self
+                    .selection
+                    .iter()
+                    .filter_map(|id| net.node(*id))
+                    .map(|n| Edit::Move {
+                        node: n.id,
+                        pos: [n.pos[0] + dir.x * step, n.pos[1] + dir.y * step],
+                    })
+                    .collect();
+                let label = match moves.len() {
+                    1 => "move with keys".to_owned(),
+                    n => format!("move {n} nodes with keys"),
+                };
+                pending.push((label, moves));
+                if let Some(c) = self.selected.and_then(|id| node_centre(net, reg, id)) {
+                    self.reveal(rect, origin, c + dir * step);
+                }
+            }
+            Some(dir) if !shift => {
+                let at = self
+                    .selected
+                    .and_then(|id| node_centre(net, reg, id))
+                    .unwrap_or_else(|| self.view.to_canvas(origin, rect.center()));
+                let candidates = net
+                    .nodes()
+                    .filter(|n| Some(n.id) != self.selected)
+                    .filter_map(|n| Some((n.id, node_centre(net, reg, n.id)?)));
+                let next = nearest_in_direction(at, dir, candidates).or_else(|| {
+                    // Nothing selected and nothing that way: the nearest node.
+                    self.selected.is_none().then(|| {
+                        net.nodes()
+                            .filter_map(|n| Some((n.id, node_centre(net, reg, n.id)?)))
+                            .min_by(|a, b| a.1.distance(at).total_cmp(&b.1.distance(at)))
+                            .map(|(id, _)| id)
+                    })?
+                });
+                if let Some(id) = next {
+                    self.select_only(Some(id));
+                    if let Some(c) = node_centre(net, reg, id) {
+                        self.reveal(rect, origin, c);
+                    }
+                }
+            }
+            _ => {}
+        }
+        if add {
+            let centre = rect.center();
+            self.search = Some(Search {
+                query: String::new(),
+                at: self.view.to_canvas(origin, centre),
+                screen: centre,
+                focus: true,
+                from_keyboard: true,
+            });
+        }
+    }
+
+    /// Pans so the canvas point `at` is on screen, if it is not.
+    fn reveal(&mut self, rect: Rect, origin: Pos2, at: Pos2) {
+        let screen = self.view.to_screen(origin, at);
+        if !rect.shrink(40.0).contains(screen) {
+            self.view.offset = rect.center() - origin - at.to_vec2() * self.view.zoom;
+        }
+    }
+
+    /// The focus ring, the keyboard wire being made, and what the keys do.
+    fn paint_keyboard(
+        &self,
+        ui: &Ui,
+        painter: &egui::Painter,
+        net: &Network,
+        reg: &Registry,
+        rect: Rect,
+        origin: Pos2,
+    ) {
+        let accent = ui.visuals().selection.stroke.color;
+        painter.rect_stroke(
+            rect.shrink(1.0),
+            0.0,
+            Stroke::new(2.0, accent),
+            StrokeKind::Inside,
+        );
+        let view = self.view;
+        let hint = match self.key_wire {
+            Some(k) => {
+                let from = net.node(k.from);
+                let fs = from.and_then(|n| reg.get(&n.type_id));
+                let out = fs.and_then(|s| s.outputs.get(k.output));
+                let to = k.target.and_then(|t| net.node(t));
+                let inp = to
+                    .and_then(|n| reg.get(&n.type_id))
+                    .and_then(|s| s.inputs.get(k.input));
+                if let (Some(f), Some(o)) = (from, out) {
+                    let a = view.to_screen(origin, output_pos(Pos2::new(f.pos[0], f.pos[1]), k.output));
+                    if let (Some(t), Some(_)) = (to, inp) {
+                        let b = view.to_screen(origin, input_pos(Pos2::new(t.pos[0], t.pos[1]), k.input));
+                        draw_wire(painter, a, b, accent, view.zoom, true);
+                        if let Some(s) = reg.get(&t.type_id) {
+                            let r = Rect::from_min_size(
+                                view.to_screen(origin, Pos2::new(t.pos[0], t.pos[1])),
+                                node_size(s) * view.zoom,
+                            );
+                            painter.rect_stroke(r.expand(3.0), 4.0, Stroke::new(2.0, accent), StrokeKind::Outside);
+                        }
+                    } else {
+                        painter.circle_stroke(a, 8.0, Stroke::new(2.0, accent));
+                    }
+                    format!(
+                        "Wire {}.{} ({}) → {}: arrows pick a node · I input · W output · Enter connects · Esc cancels",
+                        f.name,
+                        o.name,
+                        wires::tag(o.wire),
+                        match (to, inp) {
+                            (Some(t), Some(i)) => format!("{}.{}", t.name, i.name),
+                            _ => "?".into(),
+                        }
+                    )
+                } else {
+                    String::new()
+                }
+            }
+            None => "Arrows select · Shift+arrows move · W wire · N add · Delete remove · F frame · Tab leaves".into(),
+        };
+        let galley = painter.layout_no_wrap(
+            hint,
+            FontId::proportional(12.0),
+            ui.visuals().strong_text_color(),
+        );
+        let at = rect.left_top() + Vec2::new(8.0, 8.0);
+        painter.rect_filled(
+            Rect::from_min_size(at, galley.size()).expand(4.0),
+            3.0,
+            ui.visuals().window_fill.gamma_multiply(0.9),
+        );
+        painter.galley(at, galley, Color32::WHITE);
     }
 
     /// Canvas area for a new comment: around the selection, or at `at`.
@@ -1199,7 +1580,7 @@ impl PatchEditor {
             Stroke::new(1.0, Color32::WHITE),
             StrokeKind::Inside,
         );
-        let resp = ui.interact(map, Id::unique("atd-minimap"), Sense::click_and_drag());
+        let resp = ui.interact(map, Id::unique("atd-minimap"), Sense::CLICK | Sense::DRAG);
         if (resp.clicked() || resp.dragged())
             && let Some(p) = resp.interact_pointer_pos()
         {
@@ -1260,6 +1641,35 @@ impl PatchEditor {
         }
         chosen.map(|t| (t, at))
     }
+}
+
+/// The wire's type (IMG, SIG, ...) in a small box at its middle.
+fn wire_label(ui: &Ui, painter: &egui::Painter, a: Pos2, b: Pos2, zoom: f32, kind: WireType) {
+    let dx = ((b.x - a.x).abs() * 0.5).max(40.0 * zoom);
+    // The cubic's point at t = 0.5: (a + 3c1 + 3c2 + b) / 8, with the
+    // control points draw_wire uses.
+    let (c1, c2) = (a + Vec2::new(dx, 0.0), b - Vec2::new(dx, 0.0));
+    let mid = Pos2::new(
+        (a.x + 3.0 * c1.x + 3.0 * c2.x + b.x) / 8.0,
+        (a.y + 3.0 * c1.y + 3.0 * c2.y + b.y) / 8.0,
+    );
+    if !painter.clip_rect().contains(mid) {
+        return;
+    }
+    let galley = painter.layout_no_wrap(
+        wires::tag(kind).to_owned(),
+        FontId::monospace(9.0 * zoom.min(1.5)),
+        wires::text_on(kind),
+    );
+    let r = Rect::from_center_size(mid, galley.size()).expand(2.0);
+    painter.rect(
+        r,
+        2.0,
+        wires::colour(kind),
+        Stroke::new(1.0, ui.visuals().window_fill),
+        StrokeKind::Outside,
+    );
+    painter.galley(r.min + Vec2::splat(2.0), galley, wires::text_on(kind));
 }
 
 fn draw_wire(painter: &egui::Painter, a: Pos2, b: Pos2, colour: Color32, zoom: f32, dashed: bool) {
@@ -1329,6 +1739,173 @@ mod tests {
         atd_ops_sig::register(&mut reg);
         assert_eq!(search(&reg, "audio in")[0].type_id, "sig.audio_in");
         assert_eq!(search(&reg, "").len(), reg.len());
+    }
+
+    #[test]
+    fn arrows_pick_the_nearest_node_that_way() {
+        let (a, b, c, d) = (NodeId(1), NodeId(2), NodeId(3), NodeId(4));
+        let nodes = [
+            (a, Pos2::new(0.0, 0.0)),
+            (b, Pos2::new(200.0, 10.0)),
+            (c, Pos2::new(150.0, 300.0)),
+            (d, Pos2::new(-200.0, 0.0)),
+        ];
+        let from = Pos2::new(0.0, 0.0);
+        assert_eq!(nearest_in_direction(from, Vec2::RIGHT, nodes), Some(b));
+        assert_eq!(nearest_in_direction(from, Vec2::DOWN, nodes), Some(c));
+        assert_eq!(nearest_in_direction(from, Vec2::LEFT, nodes), Some(d));
+        assert_eq!(nearest_in_direction(from, Vec2::UP, nodes), None);
+        // Along the line beats closer but far off it.
+        let near_off = [(b, Pos2::new(100.0, 90.0)), (c, Pos2::new(160.0, 0.0))];
+        assert_eq!(nearest_in_direction(from, Vec2::RIGHT, near_off), Some(c));
+    }
+
+    /// The canvas without a mouse: Tab focuses it, arrows select, W /
+    /// arrows / Enter wire, Shift+arrows move, Delete deletes; Tab leaves.
+    #[test]
+    fn keyboard_selects_wires_moves_and_deletes() {
+        let instance = atd_gpu::primary_instance();
+        let Ok(adapter) =
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+        else {
+            assert!(
+                !std::env::var("ATD_REQUIRE_GPU").is_ok_and(|v| !v.is_empty() && v != "0"),
+                "ATD_REQUIRE_GPU is set but there is no GPU adapter"
+            );
+            return;
+        };
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
+        let mut library = atd_gpu::engine::OpLibrary::default();
+        atd_ops_img::library(&mut library);
+        let mut registry = Registry::default();
+        atd_ops_img::register(&mut registry);
+        let config = atd_gpu::engine::EngineConfig {
+            width: 64,
+            height: 64,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+        };
+        let mut engine = Engine::new(device, queue, registry, library, config);
+        let (noise, level, blur) = (engine.alloc_id(), engine.alloc_id(), engine.alloc_id());
+        let mut edits = Vec::new();
+        for (id, ty, name, pos) in [
+            (noise, "img.noise", "noise1", [0.0, 0.0]),
+            (level, "img.level", "level1", [300.0, 0.0]),
+            (blur, "img.blur", "blur1", [300.0, 300.0]),
+        ] {
+            let mut node = Node::new(id, ty, name);
+            node.pos = pos;
+            edits.push(Edit::AddNode { node });
+        }
+        engine.edit("build", edits).unwrap();
+
+        let mut editor = PatchEditor::default();
+        let platform = PlatformInfo::host();
+        let ctx = egui::Context::default();
+        let press =
+            |editor: &mut PatchEditor, engine: &mut Engine, key: Option<(Key, egui::Modifiers)>| {
+                let mut input = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200.0, 800.0))),
+                    ..Default::default()
+                };
+                if let Some((key, modifiers)) = key {
+                    input.events.push(egui::Event::ModifiersChanged(modifiers));
+                    input.events.push(egui::Event::Key {
+                        key,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                    });
+                }
+                // Another tab stop before the canvas, as in the app.
+                let frame = |ui: &mut Ui| {
+                    let _ = ui.button("before");
+                    editor.ui(ui, engine, &platform);
+                };
+                ctx.run_ui(input, frame).textures_delta.clear();
+                // A quiet frame, as between real key presses.
+                let quiet = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200.0, 800.0))),
+                    events: vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)],
+                    ..Default::default()
+                };
+                let frame = |ui: &mut Ui| {
+                    let _ = ui.button("before");
+                    editor.ui(ui, engine, &platform);
+                };
+                ctx.run_ui(quiet, frame).textures_delta.clear();
+            };
+        let none = egui::Modifiers::NONE;
+        let shift = egui::Modifiers::SHIFT;
+
+        press(&mut editor, &mut engine, None);
+        // The button, then the canvas.
+        press(&mut editor, &mut engine, Some((Key::Tab, none)));
+        press(&mut editor, &mut engine, Some((Key::Tab, none)));
+        assert!(
+            ctx.memory(|m| m.focused()).is_some(),
+            "Tab focuses the canvas"
+        );
+
+        editor.select_only(Some(noise));
+        press(&mut editor, &mut engine, Some((Key::ArrowRight, none)));
+        assert_eq!(editor.selected, Some(level), "right of noise1");
+        assert!(
+            ctx.memory(|m| m.focused()).is_some(),
+            "arrows stay on the canvas"
+        );
+        press(&mut editor, &mut engine, Some((Key::ArrowDown, none)));
+        assert_eq!(editor.selected, Some(blur));
+        press(&mut editor, &mut engine, Some((Key::ArrowUp, none)));
+        press(&mut editor, &mut engine, Some((Key::ArrowLeft, none)));
+        assert_eq!(editor.selected, Some(noise));
+
+        // Wire noise1 → level1, then Esc cancels a second one.
+        press(&mut editor, &mut engine, Some((Key::W, none)));
+        press(&mut editor, &mut engine, Some((Key::ArrowRight, none)));
+        press(&mut editor, &mut engine, Some((Key::Enter, none)));
+        let wires: Vec<_> = engine.network().wires().collect();
+        assert_eq!(wires.len(), 1);
+        assert_eq!((wires[0].from.node, wires[0].to.node), (noise, level));
+        assert_eq!(
+            editor.selected,
+            Some(level),
+            "the wired-to node is selected"
+        );
+        press(&mut editor, &mut engine, Some((Key::W, none)));
+        press(&mut editor, &mut engine, Some((Key::ArrowDown, none)));
+        press(&mut editor, &mut engine, Some((Key::Escape, none)));
+        assert_eq!(engine.network().wires().count(), 1, "Esc cancels");
+        assert!(editor.key_wire.is_none());
+        assert!(
+            ctx.memory(|m| m.focused()).is_some(),
+            "Esc on a wire keeps focus"
+        );
+
+        // Shift+arrow moves by a step: one undo step per press.
+        press(&mut editor, &mut engine, Some((Key::ArrowDown, shift)));
+        assert_eq!(engine.network().node(level).unwrap().pos, [300.0, KEY_STEP]);
+        assert_eq!(engine.history().undo_label(), Some("move with keys"));
+
+        press(&mut editor, &mut engine, Some((Key::Delete, none)));
+        assert!(engine.network().node(level).is_none(), "Delete removes it");
+
+        // N opens the add-operator search at the centre; Esc returns focus.
+        press(&mut editor, &mut engine, Some((Key::N, none)));
+        assert!(editor.search.as_ref().is_some_and(|s| s.from_keyboard));
+        press(&mut editor, &mut engine, Some((Key::Escape, none)));
+        press(&mut editor, &mut engine, None);
+        assert!(editor.search.is_none());
+
+        // Tab leaves the canvas in one press (nodes are not tab stops).
+        let canvas = ctx.memory(|m| m.focused());
+        assert!(
+            canvas.is_some(),
+            "focus is back on the canvas after the search"
+        );
+        press(&mut editor, &mut engine, Some((Key::Tab, none)));
+        assert_ne!(ctx.memory(|m| m.focused()), canvas);
     }
 
     /// FR-P1: a 2,000-node network stays interactive. Times layout plus

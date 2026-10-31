@@ -38,3 +38,4 @@ All platforms.
 - [Pack: Beat Flash](../../../examples/pack-beat-flash.atidarla/) — `kick`
 - [Pack: Feedback Trails](../../../examples/pack-feedback-trails.atidarla/) — `orbit`
 - [Simulations](../../../examples/simulations.atidarla/) — `orbiting`
+- [Soak show](../../../examples/soak-show.atidarla/) — `swirl`

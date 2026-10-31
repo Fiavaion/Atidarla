@@ -48,6 +48,7 @@ All platforms.
 - [Points](../../../examples/points.atidarla/) — `mix`
 - [Signal scope](../../../examples/signal-scope.atidarla/) — `scopes`, `all`
 - [Simulations](../../../examples/simulations.atidarla/) — `screen`, `all`
+- [Soak show](../../../examples/soak-show.atidarla/) — `over`
 - [Time effects](../../../examples/time-effects.atidarla/) — `compare`
 - [Timeline show](../../../examples/timeline-show.atidarla/) — `mix`
 - [Two outputs](../../../examples/two-outputs.atidarla/) — `sky_clouds`, `scene`

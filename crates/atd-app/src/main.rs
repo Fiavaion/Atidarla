@@ -1,5 +1,6 @@
 //! Atidarla application shell (PRD §5.2 `atd-app`).
 
+mod accessibility;
 mod ai_badges;
 mod ai_hosts;
 mod app;
@@ -20,12 +21,14 @@ mod params;
 mod patch;
 mod project;
 mod record;
+mod settings;
 mod smoke;
 mod stage;
 mod suggest;
 mod textport;
 mod timeline;
 mod viewer;
+mod wires;
 
 use std::process::ExitCode;
 
