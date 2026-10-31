@@ -48,8 +48,10 @@ Stage from cues.
 
 Before the first key a track holds the first value; after the last, the last. Integer parameters
 round the value. Toggles are on at 0.5 and above. A track can animate a number, an integer, a
-toggle, or one component of a colour or vector; the components without a track keep their stored
-value (or one held by a cue). Text, menus and paths change through cues only.
+toggle, or one component of a colour or vector; the components without a track follow the
+parameter's binding or expression if it has one, else keep their stored value (or one held by a
+cue); see [Vectors and colours](expressions.md#vectors-and-colours-prd-a66). Text, menus and paths
+change through cues only.
 
 ## Cues
 
@@ -59,8 +61,10 @@ value (or one held by a cue). Text, menus and paths change through cues only.
 - A **manual** cue (no `t`) fires with **Go**, in cue-list order.
 - A **condition** (`when`) uses the native expression subset ([`expressions.md`](expressions.md)):
   numbers, `time` (timeline seconds), `frame`, `op('name')['channel']` for a SIG channel,
-  `op('name').par.param` for a stored value, comparisons, `and`, `or`. For example
-  `op('beat1')['beat'] > 0`. A timed cue with a condition is *armed* at its time and fires on the
+  `op('name').par.param` (or `.par.param[i]` for a component) for a parameter's value as its
+  binding or expression drives it, else its stored value (live values are left out; see
+  [Vectors and colours](expressions.md#vectors-and-colours-prd-a66)), comparisons, `and`, `or`.
+  For example `op('beat1')['beat'] > 0`. A timed cue with a condition is *armed* at its time and fires on the
   first frame its condition holds. A manual cue with a condition fires whenever it first holds
   while playing, or with Go. The nodes a condition names are cooked every frame, even when nothing
   is wired to them. Conditions read the channels of the previous frame. A condition outside the

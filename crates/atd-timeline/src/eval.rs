@@ -19,8 +19,8 @@ pub trait Signals {
     /// The current value of `channel` of SIG node `node`.
     fn channel(&self, node: NodeId, channel: &str) -> Option<f64>;
     /// The value of `node`'s `param` (component `index` of a vector or
-    /// colour), not counting live values: stored, or for a component as a
-    /// binding or expression drives it (PRD A66).
+    /// colour), not counting live values: as a binding or expression
+    /// drives it, else stored (PRD A66).
     fn param(&self, node: NodeId, param: &str, index: Option<usize>) -> Option<f64>;
 }
 
