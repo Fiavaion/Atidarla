@@ -1,0 +1,156 @@
+name: Release
+
+# FR-H5: installers for Windows (setup .exe and MSI), macOS (DMG) and Linux
+# (AppImage, best-effort). Each bundles CPython from python-build-standalone
+# (packaging/python-runtime.env, PRD A68), so no job installs a Python; the
+# Windows setup also carries the VC++ runtime.
+# Runs only for a version tag (v1.2.3) or by hand; never on
+# ordinary pushes. Started by hand it is a dry run: it builds the installers
+# and keeps them as workflow artefacts, without signing or publishing.
+#
+# Signing and notarisation use these repository secrets when they are set
+# (docs/install.md); without them the artefacts are unsigned:
+#   MACOS_CERTIFICATE_P12        base64 of the Developer ID Application .p12
+#   MACOS_CERTIFICATE_PASSWORD   its password
+#   MACOS_SIGN_IDENTITY          "Developer ID Application: Name (TEAMID)"
+#   MACOS_NOTARY_APPLE_ID, MACOS_NOTARY_TEAM_ID, MACOS_NOTARY_PASSWORD
+#                                (app-specific password)
+#   WINDOWS_CERTIFICATE_PFX      base64 of the code-signing .pfx
+#   WINDOWS_CERTIFICATE_PASSWORD its password
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos:
+    name: macOS DMG
+    runs-on: macos-latest
+    env:
+      HAS_CERT: ${{ secrets.MACOS_CERTIFICATE_P12 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.0"
+      - name: Import the signing certificate
+        if: github.event_name == 'push' && env.HAS_CERT == 'true'
+        env:
+          P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          P12_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD=$(uuidgen)
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+      - name: Build the DMG
+        env:
+          ATD_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          ATD_MACOS_SIGN_IDENTITY: ${{ github.event_name == 'push' && secrets.MACOS_SIGN_IDENTITY || '' }}
+          ATD_NOTARY_APPLE_ID: ${{ github.event_name == 'push' && secrets.MACOS_NOTARY_APPLE_ID || '' }}
+          ATD_NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+          ATD_NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+        run: |
+          export ATD_VERSION="${ATD_VERSION#v}"
+          packaging/macos/build-dmg.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-macos
+          path: dist/*.dmg
+
+  windows:
+    name: Windows setup and MSI
+    runs-on: windows-latest
+    env:
+      HAS_CERT: ${{ secrets.WINDOWS_CERTIFICATE_PFX != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.0"
+      - name: WiX Toolset
+        run: dotnet tool install --global wix --version 5.0.2
+      - name: Write the signing certificate
+        if: github.event_name == 'push' && env.HAS_CERT == 'true'
+        shell: pwsh
+        env:
+          PFX: ${{ secrets.WINDOWS_CERTIFICATE_PFX }}
+        run: |
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\sign.pfx", [Convert]::FromBase64String($env:PFX))
+          "ATD_WIN_SIGN_PFX=$env:RUNNER_TEMP\sign.pfx" >> $env:GITHUB_ENV
+      - name: Build the MSI
+        shell: pwsh
+        env:
+          ATD_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          ATD_WIN_SIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if ($env:ATD_VERSION) { $env:ATD_VERSION = $env:ATD_VERSION.TrimStart('v') }
+          ./packaging/windows/build-msi.ps1
+      - name: Remove the certificate
+        if: always()
+        shell: pwsh
+        run: Remove-Item -Force "$env:RUNNER_TEMP\sign.pfx" -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-windows
+          path: |
+            dist/*.msi
+            dist/*-setup.exe
+
+  linux:
+    name: Linux AppImage (best-effort)
+    runs-on: ubuntu-22.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.0"
+      - name: Linux headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev librsvg2-bin
+      - name: Build the AppImage
+        env:
+          ATD_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: |
+          export ATD_VERSION="${ATD_VERSION#v}"
+          packaging/linux/build-appimage.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-linux
+          path: dist/*.AppImage
+
+  publish:
+    name: Draft release
+    # Tags only; a run started by hand stops at the artefacts above.
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [macos, windows, linux]
+    # The Linux job is best-effort: publish without it if it failed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: installer-*
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Draft a GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" dist/* \
+            --repo "${{ github.repository }}" --draft --title "Atidarla ${{ github.ref_name }}" \
+            --notes "Installers for ${{ github.ref_name }}. See docs/install.md."
