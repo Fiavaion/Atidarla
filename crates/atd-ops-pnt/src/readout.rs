@@ -10,8 +10,8 @@
 
 use atd_core::registry::{OpFamily, OperatorSchema, ParamSchema, SocketSchema, WireType};
 use atd_gpu::engine::{ImgToSigCtx, ImgToSigOp};
+use atd_gpu::geo::AttrClass;
 use atd_gpu::geo::readback::{PointReadback, Recorded};
-use atd_gpu::geo::{AttrClass, Attribute};
 use atd_io::fixture::Mapping;
 use atd_ops_img::DmxSenders;
 use atd_ops_img::watch::{Watcher, watch};
@@ -107,34 +107,38 @@ struct Reader {
     /// The attribute and limit of the last copy, to see changes.
     attr: String,
     max: u32,
-    last: Option<Attribute>,
+    /// The values copied last (`Attribute::values_id`; holding the
+    /// attribute would keep its buffer out of the pool).
+    last: Option<usize>,
     /// Points changed while every staging buffer was busy.
     stale: bool,
 }
 
 impl Reader {
     /// Takes arrived values and records a new copy when the points may have
-    /// changed. `Ok(false)` when there are no points to read.
+    /// changed. `Ok(false)` when there are no points to read (no input, or
+    /// an empty one).
     fn read(&mut self, ctx: &mut ImgToSigCtx<'_>, attr: &str, max: u32) -> Result<bool, String> {
         let offline = ctx.params.mode().is_offline();
         if !offline {
             self.rb.receive(ctx.device)?;
         }
-        let Some(geo) = ctx.geo_inputs.get(0) else {
+        let Some(geo) = ctx.geo_inputs.get(0).filter(|g| g.points() > 0) else {
             self.rb.clear();
             self.last = None;
             return Ok(false);
         };
-        let current = geo.attr(AttrClass::Point, attr);
+        let Some(current) = geo.attr(AttrClass::Point, attr) else {
+            self.rb.clear();
+            self.last = None;
+            self.stale = false;
+            return Err(format!("the points have no attribute `{attr}`"));
+        };
         let changed = self.stale
             || ctx.inputs_cooked
             || self.attr != attr
             || self.max != max
-            || match (&self.last, current) {
-                (Some(a), Some(b)) => !a.shares(b),
-                (None, None) => false,
-                _ => true,
-            };
+            || self.last != Some(current.values_id());
         if changed {
             match self
                 .rb
@@ -150,14 +154,15 @@ impl Reader {
                         self.attr.push_str(attr);
                     }
                     self.max = max;
-                    self.last = current.cloned();
+                    self.last = Some(current.values_id());
                 }
                 Recorded::Busy => self.stale = true,
                 Recorded::Missing => {
+                    // Checked above; an attribute neither on the GPU nor
+                    // the CPU has no values to read.
                     self.rb.clear();
                     self.last = None;
-                    self.stale = false;
-                    return Err(format!("the points have no attribute `{attr}`"));
+                    return Err(format!("`{attr}` has no values"));
                 }
             }
         }

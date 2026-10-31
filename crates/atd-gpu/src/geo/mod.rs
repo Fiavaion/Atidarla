@@ -225,6 +225,14 @@ impl Attribute {
     pub fn shares(&self, other: &Attribute) -> bool {
         Arc::ptr_eq(&self.data, &other.data)
     }
+
+    /// An identity of these values while they are alive, for change
+    /// detection without keeping them alive (a held handle would keep its
+    /// buffer out of the pool). Two live handles have the same identity
+    /// exactly when they [`Self::shares`]; a freed identity may be reused.
+    pub fn values_id(&self) -> usize {
+        Arc::as_ptr(&self.data).addr()
+    }
 }
 
 /// Polygon or polyline (design D1; no NURBS or Bézier in M2).
