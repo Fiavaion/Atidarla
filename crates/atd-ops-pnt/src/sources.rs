@@ -765,7 +765,14 @@ impl GeoOp for Copy {
             device,
             &mut ps,
             &hdr,
-            &[&src_hdr, &copynum_buf, &cd_buf, tc.as_ref().unwrap_or(d)],
+            // Without target colour TC is never read; it must not alias
+            // `cd_buf` (the dummy, read-write here), so the header stands in.
+            &[
+                &src_hdr,
+                &copynum_buf,
+                &cd_buf,
+                tc.as_ref().unwrap_or(&src_hdr),
+            ],
         );
         drop(ps);
         ctx.encoder
