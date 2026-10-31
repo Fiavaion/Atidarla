@@ -358,8 +358,12 @@ impl Renderer {
             .extend(|r, l| crate::project::python_ops(dir, r, l))?;
         if opts.allow_python_ops {
             python.allow();
+        } else {
+            // Not allowed: nothing runs. Allowed loads only add to the list
+            // (below): a batch's parallel workers share it, so clearing here
+            // would take other workers' items away.
+            atd_py::allow::clear();
         }
-        atd_py::allow::clear();
         // Kernel files are read once, as they are when the render starts.
         let kernels = self
             .engine
