@@ -844,6 +844,11 @@ impl Agent {
             if !selection.contains(&id) {
                 return Err(format!("`{node}` is not one of `nodes`"));
             }
+            // Promoting a Script node's code would let the instance's
+            // parameter write Python: the same scope as writing it directly.
+            if let Some(n) = net.node(id) {
+                self.python_gate_script(&n.type_id, param)?;
+            }
             let t = ParamTarget::new(id, param);
             if promote.contains(&t) {
                 return Err(format!("{node}.{param} is promoted twice"));

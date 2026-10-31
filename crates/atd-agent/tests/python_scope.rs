@@ -1,7 +1,8 @@
 //! Red team for CLAUDE.md rule 9: an agent without `python.exec` cannot
 //! write Python into the network. A Python-tier expression (anything
 //! outside the native subset, PRD A22) or a Script node's code is refused
-//! through every tool that sets parameters, the network is unchanged, and
+//! through every tool that sets parameters (and promoting Script code to a
+//! Pack parameter is refused), the network is unchanged, and
 //! native expressions still go through. With `python.exec` they are
 //! accepted.
 
@@ -87,6 +88,14 @@ fn python_needs_the_python_exec_scope() {
         &mut ws,
         "create_node",
         &json!({"type": "dat.script", "name": "script2", "params": {"code": "def cook(i): pass"}}),
+    ));
+    assert!(e.contains("python.exec"), "{e}");
+    // Promoting a Script's code to a Pack parameter would let the instance
+    // write Python under another name: refused too.
+    let e = refused(&a.call(
+        &mut ws,
+        "create_pack",
+        &json!({"name": "evil", "nodes": ["script1"], "promote": [{"node": "script1", "param": "code"}]}),
     ));
     assert!(e.contains("python.exec"), "{e}");
     // build_network reports it as an error of that parameter.
