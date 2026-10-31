@@ -581,6 +581,47 @@ fn build_planned(
                 Err(e) => problems.push(e),
             }
         }
+        // SIG nodes that drive nothing, and channels read from nodes that
+        // have none: both leave the patch still.
+        let net = ws.network();
+        let refs = |sig: &atd_core::graph::Node| {
+            let call = format!("op('{}')", sig.name);
+            net.nodes().any(|n| {
+                n.params.values().any(|p| {
+                    p.expr.as_deref().is_some_and(|e| e.contains(&call))
+                        || p.bind.as_ref().is_some_and(|b| b.node == sig.id)
+                })
+            }) || net.wires().any(|w| w.from.node == sig.id)
+        };
+        // Outputs (`sig.dmx_out`, `sig.audio_out` …) are ends in themselves.
+        for n in net
+            .nodes()
+            .filter(|n| n.type_id.starts_with("sig.") && !n.type_id.ends_with("_out"))
+        {
+            if !refs(n) {
+                problems.push(format!(
+                    "`{}` ({}) drives nothing: wire it into a SIG input, or read it in a parameter expression as op('{}')['<channel>']",
+                    n.name, n.type_id, n.name
+                ));
+            }
+        }
+        for p in &mut problems {
+            if p.contains("no such channel")
+                && let Some(name) = p
+                    .split("op('")
+                    .nth(1)
+                    .and_then(|r| r.split('\'').next())
+                    .map(str::to_owned)
+                && let Some(node) = net.node_by_name(&name)
+                && !node.type_id.starts_with("sig.")
+            {
+                let _ = write!(
+                    p,
+                    " (`{name}` is a {} node and has no channels; channels come from SIG nodes such as sig.lfo)",
+                    node.type_id
+                );
+            }
+        }
         // A node name used as a bare variable in an expression.
         let names: Vec<String> = ws.network().nodes().map(|n| n.name.clone()).collect();
         for p in &mut problems {

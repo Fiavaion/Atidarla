@@ -1015,6 +1015,21 @@ impl Agent {
                 let expression = v
                     .as_str()
                     .filter(|e| !text && serde_json::from_str::<Value>(e.trim()).is_err());
+                // A bare word ("noise1", "on") for a number is a mistake, not
+                // an expression worth evaluating.
+                if let Some(word) = expression.filter(|e| {
+                    let e = e.trim();
+                    !matches!(e, "time" | "frame")
+                        && e.chars()
+                            .next()
+                            .is_some_and(|c| c.is_alphabetic() || c == '_')
+                        && e.chars().all(|c| c.is_alphanumeric() || c == '_')
+                }) {
+                    errors.push(format!(
+                        "{name}.{p}: `{word}` is not a value for this parameter; give a number, true/false, or an expression such as `0.5 + 0.5 * sin(time)`"
+                    ));
+                    continue;
+                }
                 let call = match expression {
                     Some(e) => json!({"node": name, "param": p, "expression": e}),
                     None => json!({"node": name, "param": p, "value": v}),
