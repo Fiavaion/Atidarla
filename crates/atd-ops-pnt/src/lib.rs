@@ -31,6 +31,7 @@
 //! | `pnt.attribute_noise`, `attribute_from_channels` (SIG in), `falloff_field` | `P` or a vector attribute; channels | any attribute (`falloff`) |
 //! | `pnt.attribute_transfer`, `proximity`, `neighbours` (grid hash) | `P` of both inputs, the attribute | the attribute; `dist`, `nearvec`; `nbr`, `nbrdist`, `nbrcount` |
 //! | `pnt.lattice`, `pnt.flock` (grid hash), `pnt.trail` | `P` (a cage's `P`); `P`, `v`; `P`, `Cd` | `P` (cage: lines); `v`; history lines, `age` |
+//! | `pnt.attribute_promote`, `pnt.ray_intersect` | an attribute; `P` (`N`), a target's polygons | the reduction on every point; `P`, `hitdist` |
 //! | `img.render_points` (IMG) | `P`, `Cd`, polylines | an image |
 
 mod attr;
@@ -51,6 +52,8 @@ mod noise;
 mod particles;
 mod points;
 pub mod project;
+mod promote;
+mod ray;
 mod render;
 mod select;
 mod sensor;
@@ -142,6 +145,8 @@ const OPS: &[(Schema, Factory)] = &[
     (lattice::schema, lattice::create),
     (trail::trail_schema, trail::create_trail),
     (trail::flock_schema, trail::create_flock),
+    (promote::schema, promote::create),
+    (ray::schema, ray::create),
 ];
 
 /// Every schema this crate registers (PNT operators and Render Points).

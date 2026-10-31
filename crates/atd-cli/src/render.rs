@@ -777,6 +777,8 @@ pub fn classify(type_id: &str) -> Option<Class> {
         | "pnt.vortex" | "pnt.wave" | "pnt.wind" => Pure,
         // M6 capture and lookup operators: GPU work in the frame's encoder.
         "pnt.attribute_from_channels"
+        | "pnt.attribute_promote"
+        | "pnt.ray_intersect"
         | "pnt.attribute_from_image"
         | "pnt.attribute_noise"
         | "pnt.attribute_transfer"

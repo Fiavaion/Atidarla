@@ -5,7 +5,7 @@
 
 use atd_core::graph::{Edit, Endpoint, Node, NodeId, Param, Wire};
 use atd_core::registry::Registry;
-use atd_gpu::engine::{Engine, EngineConfig, OpLibrary};
+use atd_gpu::engine::{CookMode, Engine, EngineConfig, OpLibrary};
 use atd_gpu::geo::readback::read_blocking;
 use serde_json::{Value, json};
 
@@ -30,9 +30,11 @@ fn engine() -> Option<Engine> {
     let mut reg = Registry::default();
     atd_ops_pnt::register(&mut reg);
     atd_ops_sig::register(&mut reg);
+    atd_ops_msh::register(&mut reg);
     let mut lib = OpLibrary::default();
     atd_ops_pnt::library(&mut lib);
     atd_ops_sig::library(&mut lib);
+    atd_ops_msh::library(&mut lib);
     let config = EngineConfig {
         width: 16,
         height: 16,
@@ -569,4 +571,127 @@ fn flocks_steer_toward_neighbours_and_hold_speed() {
         let s = (row[0] * row[0] + row[1] * row[1] + row[2] * row[2]).sqrt();
         assert!((0.3 - 1e-4..=0.8 + 1e-4).contains(&s), "speed {s}");
     }
+}
+
+#[test]
+fn attribute_promote_reduces_over_live_points() {
+    let Some(mut e) = engine() else { return };
+    let mut b = Build::new(&mut e);
+    let pts = b.node(
+        "pnt.points",
+        &[
+            ("shape", json!("random")),
+            ("count", json!(1000)),
+            ("seed", json!(5)),
+        ],
+    );
+    let ops = ["min", "max", "sum", "average"];
+    let nodes: Vec<NodeId> = ops
+        .iter()
+        .map(|op| {
+            let n = b.node("pnt.attribute_promote", &[("operation", json!(op))]);
+            b.wire(pts, n, "in");
+            n
+        })
+        .collect();
+    // Every third point, counted on the GPU: only those are averaged.
+    let some = b.node("pnt.subset", &[("nth", json!(3))]);
+    let avg = b.node("pnt.attribute_promote", &[]);
+    b.wire(pts, some, "in");
+    b.wire(some, avg, "in");
+    b.done();
+    let mut all = nodes.clone();
+    all.push(avg);
+    e.cook(&all, 0.0).unwrap();
+    let p = floats(&e, pts, "P");
+    for (k, op) in ops.iter().enumerate() {
+        let got = floats(&e, nodes[k], "promoted");
+        for c in 0..3 {
+            let col = p.iter().map(|r| r[c]);
+            let want = match *op {
+                "min" => col.fold(f32::MAX, f32::min),
+                "max" => col.fold(f32::MIN, f32::max),
+                "sum" => col.sum(),
+                _ => col.sum::<f32>() / 1000.0,
+            };
+            let tol = if *op == "sum" { 1e-2 } else { 1e-5 };
+            assert!(
+                got.iter().all(|r| (r[c] - want).abs() < tol),
+                "{op} {c}: {} vs {want}",
+                got[0][c]
+            );
+        }
+    }
+    let live: Vec<&Vec<f32>> = p.iter().step_by(3).collect();
+    let want = live.iter().map(|r| r[0]).sum::<f32>() / live.len() as f32;
+    let got = floats(&e, avg, "promoted");
+    assert!((got[0][0] - want).abs() < 1e-5, "{} vs {want}", got[0][0]);
+}
+
+#[test]
+fn ray_intersect_projects_points_onto_polygons() {
+    let Some(mut e) = engine() else { return };
+    // MSH operators cook on worker threads: offline, each cook waits.
+    e.set_mode(CookMode::Offline { fps: 60.0 });
+    let mut b = Build::new(&mut e);
+    let floor = b.node(
+        "msh.grid",
+        &[("plane", json!("xz")), ("size", json!([4.0, 4.0]))],
+    );
+    let rain = b.node(
+        "pnt.points",
+        &[
+            ("shape", json!("random")),
+            ("count", json!(200)),
+            ("centre", json!([0.0, 2.0, 0.0])),
+        ],
+    );
+    let land = b.node("pnt.ray_intersect", &[]);
+    let ball = b.node(
+        "msh.sphere",
+        &[
+            ("type", json!("ico")),
+            ("radius", json!(1.0)),
+            ("level", json!(3)),
+        ],
+    );
+    let shell = b.node(
+        "pnt.scatter",
+        &[
+            ("shape", json!("sphere")),
+            ("count", json!(200)),
+            ("radius", json!(2.0)),
+        ],
+    );
+    let wrap = b.node("pnt.ray_intersect", &[("direction_from", json!("point"))]);
+    let miss = b.node(
+        "pnt.ray_intersect",
+        &[("direction", json!([0.0, 1.0, 0.0]))],
+    );
+    b.wire(rain, land, "in");
+    b.wire(floor, land, "target");
+    b.wire(shell, wrap, "in");
+    b.wire(ball, wrap, "target");
+    b.wire(rain, miss, "in");
+    b.wire(floor, miss, "target");
+    b.done();
+    e.cook(&[land, wrap, miss], 0.0).unwrap();
+    let before = floats(&e, rain, "P");
+    let after = floats(&e, land, "P");
+    let hd = floats(&e, land, "hitdist");
+    for i in 0..200 {
+        assert!(after[i][1].abs() < 1e-5, "on the floor: {:?}", after[i]);
+        assert!((hd[i][0] - before[i][1]).abs() < 1e-5);
+        assert!((after[i][0] - before[i][0]).abs() < 1e-6, "straight down");
+    }
+    for q in floats(&e, wrap, "P") {
+        let r = (q[0] * q[0] + q[1] * q[1] + q[2] * q[2]).sqrt();
+        assert!((0.95..=1.0 + 1e-4).contains(&r), "on the ball: {r}");
+    }
+    let hd = floats(&e, miss, "hitdist");
+    assert!(
+        hd.iter().all(|h| h[0] == -1.0),
+        "upward rays miss the floor"
+    );
+    assert_eq!(floats(&e, miss, "P"), before, "misses stay put");
 }

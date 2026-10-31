@@ -21,6 +21,7 @@ wgpu.workspace = true
 [dev-dependencies]
 atd-format.workspace = true
 atd-interop.workspace = true
+atd-ops-msh.workspace = true
 atd-ops-sig.workspace = true
 naga.workspace = true
 serde_json.workspace = true

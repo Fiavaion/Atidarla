@@ -56,7 +56,7 @@ static GLOBAL: Counting = Counting;
 const BOUND: f64 = 90.0;
 
 /// Nodes cooked per frame (all but the static Points source).
-const NODES: usize = 20;
+const NODES: usize = 21;
 
 #[test]
 fn geo_chains_steady_state_allocations() {
@@ -152,6 +152,7 @@ fn geo_chains_steady_state_allocations() {
     let lattice = node(&mut e, "pnt.lattice", &[]);
     let trail = node(&mut e, "pnt.trail", &[("length", json!(8))]);
     let flock = node(&mut e, "pnt.flock", &[]);
+    let promote = node(&mut e, "pnt.attribute_promote", &[]);
     let mix = node(&mut e, "pnt.merge", &[]);
     let r3 = node(&mut e, "img.render_points", &[]);
     let r4 = node(&mut e, "img.render_points", &[]);
@@ -183,7 +184,8 @@ fn geo_chains_steady_state_allocations() {
         wire(flock, r4, "geo"),
         wire(afc, lattice, "in"),
         wire(lattice, trail, "in"),
-        wire(trail, mix, "a"),
+        wire(trail, promote, "in"),
+        wire(promote, mix, "a"),
         wire(pfd, mix, "b"),
         wire(sensor, mix, "c"),
         wire(mix, r3, "geo"),
@@ -238,7 +240,7 @@ fn geo_chains_steady_state_allocations() {
     );
     for n in [
         pts, n1, n2, r1, ps, force, r2, img, pfi, afi, pfd, sensor, mix, r3, falloff, anoise, wave,
-        afc, lattice, trail,
+        afc, lattice, trail, promote,
     ] {
         assert_eq!(e.error(n), None);
     }

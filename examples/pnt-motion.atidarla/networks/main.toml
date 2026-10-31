@@ -1,6 +1,6 @@
 # Atidarla network. Node IDs are stable: inputs and bindings refer to them.
 format = 1
-next_id = 20
+next_id = 27
 
 [[node]]
 id = 0
@@ -117,7 +117,7 @@ id = 11
 name = "streaks"
 type = "pnt.trail"
 pos = [1540.0, 400.0]
-inputs.in = { node = 10, output = "out" }
+inputs.in = { node = 21, output = "out" }
 params.length = 12
 
 [[node]]
@@ -172,4 +172,70 @@ type = "img.composite"
 pos = [2200.0, 250.0]
 inputs.a = { node = 16, output = "out" }
 inputs.b = { node = 15, output = "out" }
+params.operation = "add"
+
+[[node]]
+id = 20
+name = "flock_centre"
+type = "pnt.attribute_promote"
+pos = [1320.0, 600.0]
+inputs.in = { node = 10, output = "out" }
+params.result = "centroid"
+
+[[node]]
+id = 21
+name = "recentre"
+type = "pnt.attribute_math"
+pos = [1540.0, 600.0]
+inputs.in = { node = 20, output = "out" }
+params.b = "centroid"
+params.b_from = "attribute"
+params.operation = "subtract"
+
+[[node]]
+id = 22
+name = "ball"
+type = "msh.sphere"
+pos = [0.0, 800.0]
+params.centre = [-0.2, -0.9, 0.0]
+params.level = 2
+params.radius = 0.4
+params.type = "ico"
+
+[[node]]
+id = 23
+name = "dust"
+type = "pnt.scatter"
+pos = [0.0, 1000.0]
+params.centre = [-0.2, -0.9, 0.0]
+params.count = 3000
+params.radius = 0.8
+params.shape = "sphere"
+
+[[node]]
+id = 24
+name = "shrink_wrap"
+type = "pnt.ray_intersect"
+pos = [220.0, 900.0]
+inputs.in = { node = 23, output = "out" }
+inputs.target = { node = 22, output = "out" }
+params.centre = [-0.2, -0.9, 0.0]
+params.direction_from = "point"
+
+[[node]]
+id = 25
+name = "draw_wrap"
+type = "img.render_points"
+pos = [440.0, 900.0]
+inputs.geo = { node = 24, output = "out" }
+params.colour = [0.7, 1.0, 0.6, 1.0]
+params.height = 3.0
+
+[[node]]
+id = 26
+name = "final"
+type = "img.composite"
+pos = [2420.0, 500.0]
+inputs.a = { node = 17, output = "out" }
+inputs.b = { node = 25, output = "out" }
 params.operation = "add"
