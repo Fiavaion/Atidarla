@@ -1,7 +1,7 @@
 # Builds the Atidarla installers (FR-H5, PRD A68) with WiX Toolset v5:
 #   dist\Atidarla-<version>-windows-x64.msi        the app, the CLI, the
-#       examples and the bundled CPython (python-build-standalone, pinned in
-#       packaging\python-runtime.env and checked by SHA-256)
+#       examples, the bundled CPython (python-build-standalone, pinned in
+#       packaging\python-runtime.env and checked by SHA-256) and the AI Host
 #   dist\Atidarla-<version>-windows-x64-setup.exe  a Burn bundle: the
 #       Microsoft Visual C++ runtime, then that MSI (bundle.wxs)
 # Unsigned by default; signs the executables, the MSI and the bundle when a
@@ -175,11 +175,27 @@ if ($signing) {
 Copy-Item -Recurse "$root\examples" "$stage\examples"
 Get-ChildItem "$stage\examples" -Recurse -Directory -Force -Filter .cache |
     Remove-Item -Recurse -Force
+# The AI Host (as packaging/stage-ai-host.sh): source, lock and the extras'
+# hash-pinned requirements, precompiled, so the installed app starts its
+# local host with no setup. Extras the user installs go to
+# %LOCALAPPDATA%\Atidarla\ai-host; no packages or weights are shipped.
+$aiHost = "$stage\ai-host"
+New-Item -ItemType Directory -Force "$aiHost\src" | Out-Null
+Copy-Item "$root\ai-host\pyproject.toml", "$root\ai-host\uv.lock", "$root\ai-host\README.md" $aiHost
+Copy-Item -Recurse "$root\ai-host\src\atd_ai_host" "$aiHost\src\atd_ai_host"
+Copy-Item -Recurse "$root\ai-host\requirements" "$aiHost\requirements"
+Get-ChildItem $aiHost -Recurse -Directory -Force -Filter __pycache__ | Remove-Item -Recurse -Force
+Get-ChildItem $aiHost -Recurse -File -Filter *.pyc | Remove-Item -Force
+& "$pyHome\python.exe" -I -B -m compileall -f -q --invalidation-mode unchecked-hash "$aiHost\src" | Out-Null
+if ($LASTEXITCODE) { throw "precompiling the AI Host failed" }
+if (Get-ChildItem $aiHost -Recurse -File -Include *.pyd, *.dll, *.exe, *.safetensors, *.onnx, *.bin, *.ckpt, *.pt) {
+    throw "$aiHost holds binaries or weights"
+}
 
 $msi = "$dist\Atidarla-$version-windows-x64.msi"
 wix build packaging\windows\atidarla.wxs -arch x64 `
     -d "Version=$msiVersion" -d "BinDir=$stage" -d "Root=$root" -d "ExamplesDir=$stage\examples" `
-    -d "PythonDir=$pyHome" -d "PythonDll=$pyDll" -o $msi
+    -d "PythonDir=$pyHome" -d "PythonDll=$pyDll" -d "AiHostDir=$aiHost" -o $msi
 if ($LASTEXITCODE) { throw "wix build failed" }
 Sign $msi
 
