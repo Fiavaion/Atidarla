@@ -15,18 +15,26 @@
 // Mesh code walks several parallel per-element arrays by index.
 #![allow(clippy::needless_range_loop)]
 
+pub mod bevel;
 pub mod boolean;
+pub mod clean;
+pub mod clip;
 pub mod cook;
 pub mod edit;
 pub mod file;
 pub mod io;
+pub mod measure;
 pub mod mesh;
+pub mod mirror;
 pub mod model;
 pub mod normals;
 pub mod points;
 pub mod prims;
 pub mod reduce;
+pub mod remesh;
+pub mod smooth;
 pub mod sweep;
+pub mod topo;
 
 use atd_core::registry::{OpFamily, OperatorSchema, ParamSchema, Registry, SocketSchema, WireType};
 use atd_gpu::engine::OpLibrary;
@@ -258,6 +266,62 @@ fn defs() -> Vec<Def> {
             inputs: &["in"],
             params: model::colour_params,
             run: model::colour,
+        },
+        Def {
+            id: "bevel",
+            label: "Bevel",
+            summary: "Bevels sharp edges: each becomes a flat chamfer or a rounded strip of segments, with patches where strips meet at a corner. Selected by angle and an optional point group; edges at open borders or non-manifold points stay. The new polygons are the group `bevel`.",
+            inputs: &["in"],
+            params: bevel::params,
+            run: bevel::run,
+        },
+        Def {
+            id: "remesh",
+            label: "Remesh",
+            summary: "Rebuilds the surface as even triangles of about one edge length (isotropic remeshing: split, collapse, flip, relax, project back), keeping open borders and sharp edges. Attributes are interpolated from the nearest point of the input surface; polylines are dropped.",
+            inputs: &["in"],
+            params: remesh::params,
+            run: remesh::run,
+        },
+        Def {
+            id: "smooth",
+            label: "Smooth",
+            summary: "Smooths the surface without changing its topology: Taubin smoothing (keeps the size) or Laplacian smoothing (shrinks), optionally keeping open borders and limited to a point group.",
+            inputs: &["in"],
+            params: smooth::params,
+            run: smooth::run,
+        },
+        Def {
+            id: "clean",
+            label: "Clean",
+            summary: "Repairs geometry: welds duplicate points, removes degenerate and duplicate primitives and unused points, and makes polygon winding consistent (closed parts facing outward).",
+            inputs: &["in"],
+            params: clean::params,
+            run: clean::run,
+        },
+        Def {
+            id: "mirror",
+            label: "Mirror",
+            summary: "Reflects the geometry across a plane, with or without the original; the seam can be welded so a half model becomes one closed piece. The reflected primitives are the group `mirrored`.",
+            inputs: &["in"],
+            params: mirror::params,
+            run: mirror::run,
+        },
+        Def {
+            id: "clip",
+            label: "Clip",
+            summary: "Cuts the geometry with a plane and keeps one side or both (groups `above` and `below`), welded along the cut. Cap fills the cut (group `clip_cap`) so closed input stays closed.",
+            inputs: &["in"],
+            params: clip::params,
+            run: clip::run,
+        },
+        Def {
+            id: "measure",
+            label: "Measure",
+            summary: "Writes measurements as attributes: primitive `area`, `perimeter` and normal `N`, and point `curvature` (mean or Gaussian).",
+            inputs: &["in"],
+            params: measure::params,
+            run: measure::run,
         },
     ]
 }
