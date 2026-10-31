@@ -57,7 +57,9 @@ All platforms.
 
 ## Examples
 
+- [Mesh Construction](../../../examples/mesh-construction.atidarla/) — `render`
 - [Mesh Shaping](../../../examples/mesh-shaping.atidarla/) — `look`
+- [VAT Playback](../../../examples/mesh-vat.atidarla/) — `render`
 - [Render Solids](../../../examples/render-solids.atidarla/) — `render`
 - [Render Textures](../../../examples/render-textures.atidarla/) — `render`
 - [Render Wire and Toon](../../../examples/render-wire-toon.atidarla/) — `render`

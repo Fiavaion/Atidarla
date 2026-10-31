@@ -32,3 +32,4 @@ All platforms.
 
 - [Mesh Files](../../../examples/mesh-files.atidarla/) — `edges`
 - [Mesh Shaping](../../../examples/mesh-shaping.atidarla/) — `crease`
+- [VAT Playback](../../../examples/mesh-vat.atidarla/) — `flat`

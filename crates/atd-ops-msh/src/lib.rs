@@ -17,11 +17,14 @@
 
 pub mod bevel;
 pub mod boolean;
+pub mod carve;
 pub mod clean;
 pub mod clip;
 pub mod cook;
 pub mod edit;
 pub mod file;
+pub mod fracture;
+pub mod hull;
 pub mod io;
 pub mod measure;
 pub mod mesh;
@@ -32,9 +35,13 @@ pub mod points;
 pub mod prims;
 pub mod reduce;
 pub mod remesh;
+pub mod revolve;
 pub mod smooth;
 pub mod sweep;
+pub mod text3d;
 pub mod topo;
+pub mod unwrap;
+pub mod vat;
 
 use atd_core::registry::{OpFamily, OperatorSchema, ParamSchema, Registry, SocketSchema, WireType};
 use atd_gpu::engine::OpLibrary;
@@ -258,6 +265,62 @@ fn defs() -> Vec<Def> {
             inputs: &["in"],
             params: file::out_params,
             run: file::file_out,
+        },
+        Def {
+            id: "revolve",
+            label: "Revolve",
+            summary: "Turns every primitive of the input about an axis (a lathe): a full turn or an arc, with end caps for closed profiles. Points on the axis are welded. Writes `N` and `uv`.",
+            inputs: &["in"],
+            params: revolve::params,
+            run: revolve::run,
+        },
+        Def {
+            id: "carve",
+            label: "Carve",
+            summary: "Keeps the part of each polyline between two fractions of its length, or the part of each polygon whose `uv` u or v lies in a range. Cuts interpolate every point attribute and stay welded.",
+            inputs: &["in"],
+            params: carve::params,
+            run: carve::run,
+        },
+        Def {
+            id: "convex_hull",
+            label: "Convex Hull",
+            summary: "The smallest convex mesh around the input's points (quickhull): outward triangles, the points' attributes kept. Flat inputs give one polygon.",
+            inputs: &["in"],
+            params: hull::params,
+            run: hull::run,
+        },
+        Def {
+            id: "fracture",
+            label: "Fracture",
+            summary: "Breaks a closed mesh into Voronoi pieces around seeded random points inside it (or the `points` input), with an optional gap. Writes `piece` per point and primitive; cut faces are the group `inside`, the original surface `outside`. Heavy: usually baked.",
+            inputs: &["in", "points"],
+            params: fracture::params,
+            run: fracture::run,
+        },
+        Def {
+            id: "uv_unwrap",
+            label: "UV Unwrap",
+            summary: "Cuts the surface into charts by normal angle, flattens each (least squares conformal maps, or planar) and packs them into the unit square: writes `uv` (points split along seams) and the primitive attribute `chart`.",
+            inputs: &["in"],
+            params: unwrap::params,
+            run: unwrap::run,
+        },
+        Def {
+            id: "text_3d",
+            label: "Text 3D",
+            summary: "Extruded letters from a built-in or TrueType/OpenType font: filled glyph outlines (holes kept) with sides, in the groups `front`, `back` and `side`.",
+            inputs: &[],
+            params: text3d::params,
+            run: text3d::run,
+        },
+        Def {
+            id: "vat_in",
+            label: "VAT In",
+            summary: "Plays vertex animation textures in the layout of Houdini VAT 3.0 (soft, rigid, fluid, sprite): the exported mesh moved by its position (and rotation) texture at a frame, with colours. Drive Frame with an expression to play.",
+            inputs: &[],
+            params: vat::params,
+            run: vat::run,
         },
         Def {
             id: "colour",

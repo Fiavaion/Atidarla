@@ -33,6 +33,8 @@ All platforms.
 ## Examples
 
 - [Mesh Boolean to glTF](../../../examples/mesh-boolean-gltf.atidarla/) — `tilt`
+- [Mesh Construction](../../../examples/mesh-construction.atidarla/) — `raise`, `left`, `middle`, `right`
 - [Mesh Files](../../../examples/mesh-files.atidarla/) — `place_vase`, `place_loft`
 - [Mesh Modelling](../../../examples/mesh-modelling.atidarla/) — `tilt`
 - [Mesh Primitives](../../../examples/mesh-primitives.atidarla/) — `pulse`
+- [VAT Playback](../../../examples/mesh-vat.atidarla/) — `lower`, `raise`

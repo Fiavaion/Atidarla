@@ -14,6 +14,12 @@ atd-core.workspace = true
 atd-gpu.workspace = true
 wgpu.workspace = true
 serde_json.workspace = true
+# Text 3D: the outline reader and fonts of `img.text`.
+skrifa.workspace = true
+epaint_default_fonts.workspace = true
+# VAT In: position, rotation and colour textures.
+png.workspace = true
+exr.workspace = true
 
 [dev-dependencies]
 atd-interop.workspace = true

@@ -45,6 +45,8 @@ every IMG and SIG operator (CLAUDE.md rule 7); each operator's page in
 | [mesh-files](mesh-files.atidarla/) | Mesh File In/Out (OBJ in, PLY out), Normals, Skin and UV Project (M2) |
 | [mesh-boolean-gltf](mesh-boolean-gltf.atidarla/) | Boolean → Fuse → UV Project → Mesh File Out as a GLB that opens in Blender (M2) |
 | [mesh-shaping](mesh-shaping.atidarla/) | Clip with a capped cut, Measure, Smooth, Remesh, Mirror, Clean and Bevel (M6) |
+| [mesh-construction](mesh-construction.atidarla/) | Text 3D → UV Unwrap, Fracture, Carve → Revolve and Convex Hull (M6) |
+| [mesh-vat](mesh-vat.atidarla/) | VAT In playing a soft-body ripple (16-bit PNG) and rigid cubes (EXR position and rotation) in the Houdini VAT 3.0 layout (M6, [`docs/design/vat-in.md`](../docs/design/vat-in.md)) |
 | [timeline-show](timeline-show.atidarla/) | A 32-second show on the timeline: keyframe tracks (linear, Bezier, step), markers, timed, conditional and manual cues (M3) |
 | [pnt-fountain](pnt-fountain.atidarla/) | Emitter, Gravity, Vortex, Turbulence, Wind, Drag and Collide in a particle loop (M2) |
 | [pnt-deformers](pnt-deformers.atidarla/) | Twist, Taper, Bend and Wave on a column; Copy to Points with random sizes and colours (M2) |
