@@ -87,6 +87,25 @@ fn worker_cook_times() {
         &[],
         &[Some(sphere.clone())],
     );
+    let divided = run("msh.box", &[("divisions", json!(64))], &[]).unwrap();
+    time(
+        "bevel box of 64 divisions, 3 segments",
+        "msh.bevel",
+        &[("offset", json!(0.01)), ("segments", json!(3))],
+        &[Some(divided.clone())],
+    );
+    let open = run(
+        "msh.clip",
+        &[("origin", json!([0.0, 0.4, 0.0]))],
+        &[Some(divided)],
+    )
+    .unwrap();
+    time(
+        "bevel open box (clipped), 3 segments",
+        "msh.bevel",
+        &[("offset", json!(0.01)), ("segments", json!(3))],
+        &[Some(open)],
+    );
     let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
     let glb = dir.join("timing.glb");
     time(
