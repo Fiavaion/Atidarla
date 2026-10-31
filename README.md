@@ -2,16 +2,16 @@
 
 A free, open-source real-time visual instrument for **Windows and macOS** (Linux best-effort). Patch it like a node engine, play it like a clip deck, sequence it on a timeline, all over one graph, with GPU procedural geometry and AI you can perform.
 
-> **Status: M0 (foundations & spikes), with M1 pre-work.** In place:
+> **Status: M0–M6 built; v1.0 hardening and hand checks open.** In place:
 >
-> - the workspace, with CI on Windows (WARP) and macOS (Metal);
-> - capability flags, GPU texture sharing and the AI Host protocol prototype;
-> - the graph engine (undo, pull cook, zero allocations per frame);
-> - 39 IMG and 29 SIG operators;
-> - ISF import (99% of the public collection), HAP Movie In, and live Audio In;
-> - the Patch editor.
+> - the node engine (undo, pull cook, zero allocations per frame), Patch, Stage and Timeline over one graph;
+> - **211 operators** across IMG, SIG, PNT, MSH, MAT, DAT, CMP and AI (Kernel DSL, WGSL, ISF, Python operators, Packs);
+> - native AI through AI Hosts (local, LAN, cloud) behind the Output Governor; Sovereign mode;
+> - Gaussian splats, VAT, point caches; Syphon/Spout, DMX, MIDI/OSC;
+> - the agent layer (typed MCP tools, Show Lock, the in-app Assistant, in-show cues), Batch Graph, diff and merge, Learn mode;
+> - `atidarla soak`, accessibility settings, installer scripts and a user manual ([`docs/manual`](docs/manual/README.md)).
 >
-> Progress: [`docs/milestones/M0.md`](docs/milestones/M0.md), [`docs/milestones/M1.md`](docs/milestones/M1.md).
+> Progress and evidence: [`docs/milestones/`](docs/milestones/) (M0–M6), hand checks for Mark in each file.
 
 **Using the app:** `cargo run -p atd-app` opens a demo patch (noise, kaleidoscope and level, animated by two LFOs). Operator reference: [`docs/operators`](docs/operators/README.md).
 
