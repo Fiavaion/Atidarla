@@ -12,9 +12,10 @@
 //!    attributes' CPU copies ([`Attribute::cpu_bytes`]).
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
-use super::{Attribute, BufferPool, GeoBuffer};
+use super::{AttrType, Attribute, BufferPool, GeoBuffer, Geometry, Scalar};
 use crate::engine::CookMode;
 
 /// Usage of staging buffers.
@@ -262,4 +263,283 @@ pub fn read_buffer_blocking(
         .to_vec();
     staging.unmap();
     Ok(out)
+}
+
+const IDLE: u8 = 0;
+const RECORDED: u8 = 1;
+const MAPPING: u8 = 2;
+const READY: u8 = 3;
+
+/// Bytes before the attribute values in a [`PointReadback`] staging buffer:
+/// the start of the geometry's header (its live count).
+const COUNT_BYTES: u64 = 16;
+
+/// One staging buffer of a [`PointReadback`].
+#[derive(Debug)]
+struct RingSlot {
+    buffer: Option<wgpu::Buffer>,
+    state: Arc<AtomicU8>,
+    frame: u64,
+    since: Instant,
+    elements: u32,
+    ty: AttrType,
+    counted: bool,
+}
+
+/// What [`PointReadback::record`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Recorded {
+    /// A copy is in the encoder; the values arrive after
+    /// [`PointReadback::start`] and a later [`PointReadback::receive`].
+    Copy,
+    /// The attribute had a CPU copy: its values are already read.
+    Now,
+    /// Every staging buffer is in flight; record again next frame.
+    Busy,
+    /// The geometry has no such point attribute.
+    Missing,
+}
+
+/// Reads the first elements of one point attribute (and the live point
+/// count) back to the CPU for a GPU→SIG operator (PRD A65) through a ring of
+/// three staging buffers, as Analyze and Pixel Map do for images: a copy
+/// recorded into the frame's encoder, mapped after the frame is submitted
+/// ([`Self::start`]) and read on a later cook without waiting
+/// ([`Self::receive`]), so live values trail the points by one frame or
+/// two. Offline, [`Self::finish_now`] submits and waits instead.
+///
+/// After warm-up nothing is allocated: staging buffers only grow (to a
+/// power of two) and the value buffer is reused.
+#[derive(Debug)]
+pub struct PointReadback {
+    slots: [RingSlot; 3],
+    bytes: Vec<u8>,
+    count: u32,
+    ty: AttrType,
+    frame: Option<u64>,
+}
+
+impl Default for PointReadback {
+    fn default() -> Self {
+        let slot = || RingSlot {
+            buffer: None,
+            state: Arc::new(AtomicU8::new(IDLE)),
+            frame: 0,
+            since: Instant::now(),
+            elements: 0,
+            ty: AttrType::F32,
+            counted: false,
+        };
+        Self {
+            slots: [slot(), slot(), slot()],
+            bytes: Vec::new(),
+            count: 0,
+            ty: AttrType::F32,
+            frame: None,
+        }
+    }
+}
+
+impl PointReadback {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Records a copy of the first `max` elements of point attribute `name`
+    /// of `geo` (and its GPU live count) into a free staging buffer; `frame`
+    /// tags the values. A CPU-resident attribute is read at once.
+    pub fn record(
+        &mut self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        geo: &Geometry,
+        name: &str,
+        max: u32,
+        frame: u64,
+    ) -> Recorded {
+        let Some(attr) = geo.point(name) else {
+            return Recorded::Missing;
+        };
+        let ty = attr.ty();
+        let stride = u64::from(ty.stride());
+        let elements = geo.points().min(max).min(attr.len());
+        if let Some(cpu) = attr.cpu_bytes() {
+            self.bytes.clear();
+            self.bytes
+                .extend_from_slice(&cpu[..(u64::from(elements) * stride) as usize]);
+            self.count = elements;
+            self.ty = ty;
+            self.frame = Some(frame);
+            return Recorded::Now;
+        }
+        let Some(src) = attr.gpu_buffer() else {
+            return Recorded::Missing;
+        };
+        let Some(slot) = self
+            .slots
+            .iter_mut()
+            .find(|s| s.state.load(Ordering::Acquire) == IDLE)
+        else {
+            return Recorded::Busy;
+        };
+        let needed = COUNT_BYTES + u64::from(elements) * stride;
+        if slot.buffer.as_ref().is_none_or(|b| b.size() < needed) {
+            slot.buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("atd-point-readback"),
+                size: needed.next_power_of_two(),
+                usage: STAGING,
+                mapped_at_creation: false,
+            }));
+        }
+        let dst = slot.buffer.as_ref().expect("created above");
+        let header = geo.header().filter(|_| geo.is_gpu_counted());
+        if let Some(header) = header {
+            encoder.copy_buffer_to_buffer(header, 0, dst, 0, COUNT_BYTES);
+        }
+        if elements > 0 {
+            encoder.copy_buffer_to_buffer(src, 0, dst, COUNT_BYTES, needed - COUNT_BYTES);
+        }
+        slot.frame = frame;
+        slot.since = Instant::now();
+        slot.elements = elements;
+        slot.ty = ty;
+        slot.counted = header.is_some();
+        slot.state.store(RECORDED, Ordering::Release);
+        Recorded::Copy
+    }
+
+    /// Maps the recorded staging buffers; call once the encoder holding the
+    /// copies has been submitted (`after_submit`).
+    pub fn start(&mut self) {
+        for slot in &self.slots {
+            if slot.state.load(Ordering::Acquire) != RECORDED {
+                continue;
+            }
+            let Some(buffer) = &slot.buffer else { continue };
+            slot.state.store(MAPPING, Ordering::Release);
+            let state = slot.state.clone();
+            buffer.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+                state.store(if r.is_ok() { READY } else { IDLE }, Ordering::Release);
+            });
+        }
+    }
+
+    /// Takes the newest mapped values without waiting (it only polls the
+    /// device). Returns whether newer values arrived.
+    pub fn receive(&mut self, device: &wgpu::Device) -> Result<bool, String> {
+        device
+            .poll(wgpu::PollType::Poll)
+            .map_err(|e| e.to_string())?;
+        self.take_ready()
+    }
+
+    /// Offline: submits the encoder recorded so far (the points' producers
+    /// and the copy), maps and waits, so the values are this frame's.
+    pub fn finish_now(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Result<bool, String> {
+        let done = std::mem::replace(encoder, device.create_command_encoder(&Default::default()));
+        queue.submit([done.finish()]);
+        self.start();
+        device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .map_err(|e| e.to_string())?;
+        self.take_ready()
+    }
+
+    fn take_ready(&mut self) -> Result<bool, String> {
+        let mut fresh = false;
+        let mut failed = None;
+        for slot in &mut self.slots {
+            if slot.state.load(Ordering::Acquire) != READY {
+                continue;
+            }
+            let Some(buffer) = &slot.buffer else { continue };
+            if self.frame.is_none_or(|f| slot.frame >= f) {
+                match buffer.slice(..).get_mapped_range() {
+                    Ok(data) => {
+                        let start = COUNT_BYTES as usize;
+                        let len = slot.elements as usize * slot.ty.stride() as usize;
+                        self.bytes.clear();
+                        self.bytes.extend_from_slice(&data[start..start + len]);
+                        self.count = if slot.counted {
+                            u32::from_le_bytes([data[0], data[1], data[2], data[3]])
+                                .min(slot.elements)
+                        } else {
+                            slot.elements
+                        };
+                        self.ty = slot.ty;
+                        self.frame = Some(slot.frame);
+                        fresh = true;
+                    }
+                    Err(e) => failed = Some(e.to_string()),
+                }
+            }
+            buffer.unmap();
+            slot.state.store(IDLE, Ordering::Release);
+        }
+        match failed {
+            Some(e) => Err(format!("reading points back failed: {e}")),
+            None => Ok(fresh),
+        }
+    }
+
+    /// Whether a copy is recorded or in flight.
+    pub fn busy(&self) -> bool {
+        self.slots
+            .iter()
+            .any(|s| s.state.load(Ordering::Acquire) != IDLE)
+    }
+
+    /// How long the oldest copy in flight has been waiting.
+    pub fn oldest(&self) -> Option<Duration> {
+        self.slots
+            .iter()
+            .filter(|s| s.state.load(Ordering::Acquire) != IDLE)
+            .map(|s| s.since.elapsed())
+            .max()
+    }
+
+    /// Forgets the values read (the input went away).
+    pub fn clear(&mut self) {
+        self.bytes.clear();
+        self.count = 0;
+        self.frame = None;
+    }
+
+    /// Points in the latest values (at most the `max` recorded).
+    pub fn count(&self) -> u32 {
+        self.count
+    }
+
+    /// Type of the attribute read.
+    pub fn ty(&self) -> AttrType {
+        self.ty
+    }
+
+    /// Frame the latest values were recorded on, if any arrived.
+    pub fn frame(&self) -> Option<u64> {
+        self.frame
+    }
+
+    /// Component `c` of point `i` of the latest values as `f32` (integer
+    /// attributes convert); 0 out of range.
+    pub fn value(&self, i: u32, c: u8) -> f32 {
+        if i >= self.count || c >= self.ty.comps() {
+            return 0.0;
+        }
+        let at = i as usize * self.ty.stride() as usize + usize::from(c) * 4;
+        let Some(b) = self.bytes.get(at..at + 4) else {
+            return 0.0;
+        };
+        let b = [b[0], b[1], b[2], b[3]];
+        match self.ty.scalar {
+            Scalar::F32 => f32::from_le_bytes(b),
+            Scalar::I32 => i32::from_le_bytes(b) as f32,
+            Scalar::U32 => u32::from_le_bytes(b) as f32,
+        }
+    }
 }

@@ -1054,8 +1054,9 @@ pub trait SigOp: Send {
     fn cook(&mut self, ctx: &mut SigCtx<'_>) -> Result<(), String>;
 }
 
-/// Context for an IMG→SIG operator (image analysis): GPU access to its IMG
-/// inputs, recording into the frame's command encoder, and channels out.
+/// Context for a GPU→SIG operator: image analysis (IMG inputs) or point
+/// readback (GEO inputs, PRD A65). GPU access to its inputs, recording into
+/// the frame's command encoder, and channels out.
 #[derive(Debug)]
 pub struct ImgToSigCtx<'a> {
     pub device: &'a wgpu::Device,
@@ -1063,9 +1064,11 @@ pub struct ImgToSigCtx<'a> {
     pub encoder: &'a mut wgpu::CommandEncoder,
     /// One entry per input socket; `None` if unconnected or not IMG.
     pub inputs: &'a [Option<wgpu::Texture>],
-    /// An IMG input's source was cooked earlier this frame (its image may
-    /// have changed). False when the node is only cooking again to collect
-    /// results.
+    /// GEO inputs by input index (`None` if unconnected or not GEO).
+    pub geo_inputs: GeoInputs<'a>,
+    /// An IMG or GEO input's source was cooked earlier this frame (its
+    /// value may have changed). False when the node is only cooking again
+    /// to collect results.
     pub inputs_cooked: bool,
     pub output: &'a mut Channels,
     pub params: Params<'a>,
@@ -1076,9 +1079,11 @@ pub struct ImgToSigCtx<'a> {
     pub cook_again: bool,
 }
 
-/// An operator that reads images on the GPU and outputs channels. Results
-/// come back asynchronously: [`Self::after_submit`] runs once the frame's
-/// commands are submitted, where readback buffers may be mapped.
+/// An operator that reads images or points on the GPU and outputs channels.
+/// Results come back asynchronously: [`Self::after_submit`] runs once the
+/// frame's commands are submitted, where readback buffers may be mapped.
+/// Live it never waits for them (rule 1); offline it may submit the encoder
+/// recorded so far and wait, so frame `i` reads frame `i`'s values.
 pub trait ImgToSigOp: Send {
     fn cook(&mut self, ctx: &mut ImgToSigCtx<'_>) -> Result<(), String>;
     fn after_submit(&mut self) {}
@@ -1141,7 +1146,8 @@ impl OpLibrary {
         self.sig_factories.insert(type_id.into(), Box::new(factory));
     }
 
-    /// Registers an IMG→SIG (image analysis) operator implementation.
+    /// Registers a GPU→SIG operator implementation: image analysis (IMG
+    /// inputs) or point readback (GEO inputs).
     pub fn add_img_to_sig(
         &mut self,
         type_id: impl Into<String>,
@@ -2193,16 +2199,19 @@ impl Engine {
             if is_sig && let Some(factory) = library.analysis_factories.get(&node.type_id) {
                 let op = analysis_ops.entry(id).or_insert_with(|| factory(device));
                 inputs.clear();
+                geo_sources.clear();
                 let mut inputs_cooked = false;
                 for socket in &schema.inputs {
                     let src = net
                         .inputs_of(id)
                         .find(|(name, _)| *name == socket.name)
                         .map(|(_, src)| src.node)
-                        .filter(|_| socket.wire == WireType::Img);
+                        .filter(|_| matches!(socket.wire, WireType::Img | WireType::Geo));
                     // The plan is in dependency order: sources come first.
                     inputs_cooked |= src.is_some_and(|s| plan.contains(&s));
-                    inputs.push(src.and_then(|s| results.get(&s)).cloned());
+                    let img = src.filter(|_| socket.wire == WireType::Img);
+                    inputs.push(img.and_then(|s| results.get(&s)).cloned());
+                    geo_sources.push(src.filter(|_| socket.wire == WireType::Geo));
                 }
                 let mut out = sig.remove(&id).unwrap_or_default();
                 let mut ctx = ImgToSigCtx {
@@ -2210,6 +2219,10 @@ impl Engine {
                     queue,
                     encoder: &mut encoder,
                     inputs,
+                    geo_inputs: GeoInputs {
+                        sources: geo_sources,
+                        geo,
+                    },
                     inputs_cooked,
                     output: &mut out,
                     params: Params {

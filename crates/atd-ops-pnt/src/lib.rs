@@ -34,6 +34,10 @@
 //! | `pnt.lattice`, `pnt.flock` (grid hash), `pnt.trail` | `P` (a cage's `P`); `P`, `v`; `P`, `Cd` | `P` (cage: lines); `v`; history lines, `age` |
 //! | `pnt.attribute_promote`, `pnt.ray_intersect` | an attribute; `P` (`N`), a target's polygons | the reduction on every point; `P`, `hitdist` |
 //! | `img.render_points` (IMG) | `P`, `Cd`, polylines | an image |
+//! | `pnt.to_channels`, `pnt.pixel_out` (SIG out, GPU readback, PRD A65) | an attribute; `Cd` and a DMX patch | channels; DMX slot channels (and Art-Net or sACN) |
+//!
+//! `pnt.resample` changes topology, so it is a CPU worker-thread cook and
+//! lives in `atd-ops-msh` with the other topology operators.
 
 mod attr;
 pub mod cache;
@@ -55,6 +59,7 @@ mod points;
 pub mod project;
 mod promote;
 mod ray;
+mod readout;
 mod render;
 mod select;
 mod sensor;
@@ -157,6 +162,8 @@ const OPS: &[(Schema, Factory)] = &[
 pub fn schemas() -> Vec<OperatorSchema> {
     let mut all: Vec<OperatorSchema> = OPS.iter().map(|(schema, _)| schema()).collect();
     all.push(render::schema());
+    all.push(readout::to_channels_schema());
+    all.push(readout::pixel_out_schema());
     all.extend(field::schemas());
     all
 }
@@ -177,6 +184,14 @@ pub fn library(library: &mut OpLibrary) {
         library.add_geo(schema().type_id, *create);
     }
     library.add(render::schema().type_id, render::create);
+    library.add_img_to_sig(
+        readout::to_channels_schema().type_id,
+        readout::create_to_channels,
+    );
+    library.add_img_to_sig(
+        readout::pixel_out_schema().type_id,
+        readout::create_pixel_out,
+    );
     library.set_point_fuser(fuse::create);
     for id in field::ids() {
         library.add_geo(format!("pnt.{id}"), move |d| field::create(d, id));

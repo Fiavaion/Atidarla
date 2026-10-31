@@ -1,7 +1,8 @@
 //! A file watched on its own thread: each new version is read and built
 //! (compiled, parsed) there and handed over a channel, so neither the read
-//! nor the build touches the render thread (rule 1). Used by Compute and
-//! Neural CA; WGSL keeps its own copy of the same loop.
+//! nor the build touches the render thread (rule 1). Used by Compute,
+//! Neural CA, Pixel Map and PNT Pixel Out; WGSL keeps its own copy of the
+//! same loop.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -12,11 +13,19 @@ use std::time::Duration;
 const POLL: Duration = Duration::from_millis(250);
 
 /// Watches one file. Dropping it stops the thread.
-pub(crate) struct Watcher<T> {
+pub struct Watcher<T> {
     /// The parameter text the file came from, for change detection.
-    pub(crate) path: String,
+    pub path: String,
     stop: Arc<AtomicBool>,
-    pub(crate) rx: Receiver<Result<T, String>>,
+    pub rx: Receiver<Result<T, String>>,
+}
+
+impl<T> std::fmt::Debug for Watcher<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Watcher")
+            .field("path", &self.path)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<T> Drop for Watcher<T> {
@@ -28,7 +37,7 @@ impl<T> Drop for Watcher<T> {
 /// Watches `file` (from the parameter text `path`), building every version
 /// that differs from the last with `build`. A read error is sent as an
 /// error naming `path`.
-pub(crate) fn watch<T: Send + 'static>(
+pub fn watch<T: Send + 'static>(
     path: String,
     file: std::path::PathBuf,
     name: &str,
