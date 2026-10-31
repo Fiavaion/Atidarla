@@ -812,7 +812,9 @@ mod tests {
         let mut lines = rows.lines();
         assert_eq!(lines.next(), Some(CSV_HEADER));
         let body: Vec<&str> = lines.collect();
-        assert!(body.len() >= 5, "{rows}");
+        // Samples come between frames: on a software adapter (a frame can
+        // take 1.8 s) a 3 s run writes only a few rows.
+        assert!(body.len() >= 2, "{rows}");
         assert!(body.iter().any(|l| l.contains(",warmup,")));
         assert!(body.iter().any(|l| l.contains(",measured,")));
         assert!(s.markdown().contains("Growth after warm-up"));
