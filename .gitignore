@@ -19,3 +19,6 @@ __pycache__/
 # Throwaway output and local tool downloads (never committed)
 .scratch/
 .claude/worktrees/
+
+# Installer output (packaging/)
+/dist/

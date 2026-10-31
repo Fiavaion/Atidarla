@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Placeholder app icon: three wired nodes in the wire palette. Replace with the final mark. -->
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="#1b1b1f"/>
+  <path d="M330 360 C 520 360, 500 512, 690 512" fill="none" stroke="#56B4E9" stroke-width="36"/>
+  <path d="M330 664 C 520 664, 500 512, 690 512" fill="none" stroke="#F0E442" stroke-width="36"/>
+  <rect x="190" y="290" width="160" height="140" rx="28" fill="#3a3a44"/>
+  <rect x="190" y="594" width="160" height="140" rx="28" fill="#3a3a44"/>
+  <rect x="674" y="442" width="160" height="140" rx="28" fill="#3a3a44"/>
+  <circle cx="350" cy="360" r="30" fill="#56B4E9"/>
+  <rect x="322" y="636" width="56" height="56" fill="#F0E442"/>
+  <circle cx="674" cy="512" r="30" fill="#E69F00"/>
+</svg>

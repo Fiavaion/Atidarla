@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Atidarla Windows installer (FR-H5), WiX Toolset v5: `wix build`, run by
+  packaging/windows/build-msi.ps1, which passes:
+    -d Version=1.2.3    numeric MSI version
+    -d BinDir=...       folder with atidarla-app.exe and atidarla.exe
+    -d Root=...         repository root (licences, examples)
+
+  Per-machine install into "C:\Program Files\Atidarla". Public properties for
+  silent installs (docs/install.md):
+    INSTALLFOLDER=<path>  install somewhere else
+    ADDTOPATH=0|1         put the folder (atidarla.exe) on the system PATH (default 1)
+    DESKTOPSHORTCUT=0|1   a desktop shortcut for all users (default 0)
+  e.g.  msiexec /i Atidarla-1.0.0-windows-x64.msi /qn /norestart ADDTOPATH=1 /l*v install.log
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="Atidarla"
+      Manufacturer="The Atidarla Contributors"
+      Version="$(Version)"
+      UpgradeCode="6B0E3C52-6D4A-4C55-9C1F-2A9B7A3C1D10"
+      Scope="perMachine"
+      Compressed="yes">
+    <SummaryInformation Description="Atidarla real-time visual instrument" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Atidarla is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Property Id="ADDTOPATH" Value="1" Secure="yes" />
+    <Property Id="DESKTOPSHORTCUT" Value="0" Secure="yes" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/fiavaion/atidarla" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Atidarla">
+        <Directory Id="EXAMPLESFOLDER" Name="examples" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+    <StandardDirectory Id="DesktopFolder" />
+
+    <ComponentGroup Id="Program" Directory="INSTALLFOLDER">
+      <Component>
+        <File Id="AtidarlaApp" Source="$(BinDir)\atidarla-app.exe" KeyPath="yes">
+          <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="Atidarla"
+                    Description="Atidarla real-time visual instrument"
+                    WorkingDirectory="INSTALLFOLDER" Advertise="yes" />
+        </File>
+      </Component>
+      <!-- The CLI beside the app, so `atidarla run` finds atidarla-app.exe. -->
+      <Component>
+        <File Id="AtidarlaCli" Source="$(BinDir)\atidarla.exe" KeyPath="yes" />
+      </Component>
+      <Component>
+        <File Source="$(Root)\LICENSE-MIT" KeyPath="yes" />
+      </Component>
+      <Component>
+        <File Source="$(Root)\LICENSE-APACHE" KeyPath="yes" />
+      </Component>
+      <Component Id="SystemPath" Condition="ADDTOPATH = 1">
+        <Environment Id="PathEntry" Name="PATH" Value="[INSTALLFOLDER]" Part="last"
+                     Action="set" System="yes" Permanent="no" />
+        <RegistryValue Root="HKLM" Key="Software\Atidarla" Name="AddToPath" Type="integer"
+                       Value="1" KeyPath="yes" />
+      </Component>
+      <Component Id="DesktopShortcut" Condition="DESKTOPSHORTCUT = 1">
+        <Shortcut Id="DesktopShortcutLink" Directory="DesktopFolder" Name="Atidarla"
+                  Target="[INSTALLFOLDER]atidarla-app.exe" WorkingDirectory="INSTALLFOLDER" />
+        <RegistryValue Root="HKLM" Key="Software\Atidarla" Name="DesktopShortcut" Type="integer"
+                       Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="Examples" Directory="EXAMPLESFOLDER">
+      <Files Include="$(Root)\examples\**">
+        <Exclude Files="$(Root)\examples\**\.cache\**" />
+      </Files>
+    </ComponentGroup>
+
+    <Feature Id="Main" Title="Atidarla" Level="1">
+      <ComponentGroupRef Id="Program" />
+      <ComponentGroupRef Id="Examples" />
+    </Feature>
+  </Package>
+</Wix>
