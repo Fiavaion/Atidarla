@@ -730,9 +730,11 @@ pub(crate) mod tests {
         let mut library = atd_gpu::engine::OpLibrary::default();
         atd_ops_img::library(&mut library);
         atd_ops_sig::library(&mut library);
+        atd_ops_cmp::library(&mut library);
         let mut registry = atd_core::Registry::default();
         atd_ops_img::register(&mut registry);
         atd_ops_sig::register(&mut registry);
+        atd_ops_cmp::register(&mut registry);
         let config = atd_gpu::engine::EngineConfig {
             width: 64,
             height: 64,

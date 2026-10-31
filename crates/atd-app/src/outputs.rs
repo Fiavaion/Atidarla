@@ -152,12 +152,7 @@ impl OutputsPanel {
                 let f = |i: usize| engine.param_component(id, name, i, true).map(|v| v as f32);
                 [f(0).unwrap_or(d[0]), f(1).unwrap_or(d[1])]
             };
-            let fullscreen = param(engine, id, "fullscreen")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            let display = param(engine, id, "display")
-                .and_then(Value::as_u64)
-                .unwrap_or(0) as usize;
+            let (fullscreen, display) = screen_mode(engine, id);
             let size = vec2p("window_size", [960.0, 540.0]);
             let pos = vec2p("position", [80.0, 80.0]);
             let mut builder = egui::ViewportBuilder::default()
@@ -695,6 +690,18 @@ fn set_warp(s: &mut Slice, warp: Warp) {
     s.warp = warp;
 }
 
+/// A window node's Fullscreen toggle and Display index as the node reads
+/// them: live, else bound or expression-driven, else stored.
+fn screen_mode(engine: &Engine, id: NodeId) -> (bool, usize) {
+    let fullscreen = engine
+        .param_number(id, "fullscreen", true)
+        .is_some_and(|v| v >= 0.5);
+    let display = engine
+        .param_number(id, "display", true)
+        .map_or(0, |v| v.round().clamp(0.0, 15.0) as usize);
+    (fullscreen, display)
+}
+
 /// The bounding rectangle of `pts` as a four-point polygon.
 fn bounds(pts: &[[f32; 2]]) -> Vec<[f32; 2]> {
     let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
@@ -727,6 +734,27 @@ mod tests {
         // Whatever the panel does, the text it writes parses back.
         let map = OutputMap { slices: vec![s] };
         assert_eq!(OutputMap::parse(&map.to_text()).unwrap(), map);
+    }
+
+    /// Fullscreen and Display follow driven values, not only stored ones.
+    #[test]
+    fn screen_mode_reads_driven_values() {
+        use serde_json::json;
+        let Some(mut e) = crate::project::tests::engine() else {
+            return;
+        };
+        let id = e.alloc_id();
+        e.edit(
+            "add",
+            [Edit::AddNode {
+                node: atd_core::graph::Node::new(id, atd_ops_cmp::window::TYPE_ID, "window1"),
+            }],
+        )
+        .unwrap();
+        assert_eq!(screen_mode(&e, id), (false, 0));
+        e.set_live(id, "fullscreen", Some(&json!(true)));
+        e.set_live(id, "display", Some(&json!(2)));
+        assert_eq!(screen_mode(&e, id), (true, 2));
     }
 
     #[test]
