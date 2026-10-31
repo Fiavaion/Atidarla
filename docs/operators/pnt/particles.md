@@ -52,3 +52,4 @@ All platforms.
 
 - [Particles](../../../examples/particles.atidarla/) — `system`
 - [PNT Fountain](../../../examples/pnt-fountain.atidarla/) — `system`
+- [Soak show](../../../examples/soak-show.atidarla/) — `system`

@@ -42,4 +42,5 @@ All platforms.
 - [Pack: Duotone](../../../examples/pack-duotone.atidarla/) — `title`
 - [Pack: Film Grain](../../../examples/pack-film-grain.atidarla/) — `title`
 - [Pack: Neon Edges](../../../examples/pack-neon-edges.atidarla/) — `label`
+- [Soak show](../../../examples/soak-show.atidarla/) — `title`
 - [Stage deck](../../../examples/stage-deck.atidarla/) — `title`

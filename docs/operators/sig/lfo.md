@@ -45,6 +45,7 @@ All platforms.
 - [Pack: Neon Edges](../../../examples/pack-neon-edges.atidarla/) — `colours`
 - [Pack: Spark Fountain](../../../examples/pack-spark-fountain.atidarla/) — `breath`
 - [Simulations](../../../examples/simulations.atidarla/) — `orbit`
+- [Soak show](../../../examples/soak-show.atidarla/) — `drift`, `pick`
 - [Stage deck](../../../examples/stage-deck.atidarla/) — `drift`, `pick`
 - [Texture sharing](../../../examples/texture-sharing.atidarla/) — `drift`
 - [Timeline show](../../../examples/timeline-show.atidarla/) — `pulse`

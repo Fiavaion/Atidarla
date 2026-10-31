@@ -37,3 +37,4 @@ All platforms.
 - [PNT Fountain](../../../examples/pnt-fountain.atidarla/) — `glow`
 - [PNT Solver](../../../examples/pnt-solver.atidarla/) — `glow`
 - [Render Solids](../../../examples/render-solids.atidarla/) — `bloom`
+- [Soak show](../../../examples/soak-show.atidarla/) — `bloom`

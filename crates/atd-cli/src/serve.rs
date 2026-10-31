@@ -63,6 +63,8 @@ pub(crate) struct ServeWorkspace {
     flat: Flat,
     save: bool,
     time: f64,
+    /// The GPU adapter the engine runs on (`atidarla soak` reports it).
+    pub(crate) adapter: wgpu::AdapterInfo,
     pub history: Vec<String>,
 }
 
@@ -107,8 +109,19 @@ impl ServeWorkspace {
             flat,
             save,
             time: 0.0,
+            adapter: gpu.adapter.get_info(),
             history: Vec::new(),
         })
+    }
+
+    /// The headless engine (the flattened network).
+    pub(crate) fn engine_mut(&mut self) -> &mut Engine {
+        &mut self.engine
+    }
+
+    /// The show time of the next frame, in seconds.
+    pub(crate) fn time(&self) -> f64 {
+        self.time
     }
 
     /// Cooks every node once (one frame of the show).

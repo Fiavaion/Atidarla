@@ -37,3 +37,4 @@ All platforms.
 - [Particles](../../../examples/particles.atidarla/) — `flow`
 - [PNT Constellation](../../../examples/pnt-constellation.atidarla/) — `flow`
 - [Points](../../../examples/points.atidarla/) — `swirl`, `ripple`
+- [Soak show](../../../examples/soak-show.atidarla/) — `flow`

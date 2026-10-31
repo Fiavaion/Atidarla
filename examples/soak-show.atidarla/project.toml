@@ -1,0 +1,12 @@
+# Atidarla project. The patch is in networks/main.toml.
+format = 1
+name = "Soak show"
+description = '''
+The M6 soak patch (PT-10, docs/soak.md): the Stage deck of stage-deck with a fifth column
+that brings in a 400,000-particle system with bloom ("backs") and an image feedback loop
+("accents"), all on a 120 BPM clock. Every clip cooks every frame headless, so it is a busy
+show; `atidarla soak --cycle-seconds 8` launches the columns in turn.
+
+Try: atidarla soak examples/soak-show.atidarla --minutes 5 --warmup 60 --cycle-seconds 8
+'''
+resolution = [1280, 720]

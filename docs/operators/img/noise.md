@@ -46,6 +46,7 @@ All platforms.
 - [Pack: Vignette](../../../examples/pack-vignette.atidarla/) — `clouds`
 - [Pixel map](../../../examples/pixel-map.atidarla/) — `noise1`
 - [Render Textures](../../../examples/render-textures.atidarla/) — `noise`
+- [Soak show](../../../examples/soak-show.atidarla/) — `tunnel_noise`, `grid_noise`, `seed`
 - [Stage deck](../../../examples/stage-deck.atidarla/) — `tunnel_noise`, `grid_noise`
 - [Texture sharing](../../../examples/texture-sharing.atidarla/) — `pattern`
 - [Timeline show](../../../examples/timeline-show.atidarla/) — `clouds`

@@ -29,4 +29,5 @@ All platforms.
 ## Examples
 
 - [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `mirror1`
+- [Soak show](../../../examples/soak-show.atidarla/) — `bars`
 - [Stage deck](../../../examples/stage-deck.atidarla/) — `bars`

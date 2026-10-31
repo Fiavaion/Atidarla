@@ -16,6 +16,7 @@ every IMG and SIG operator (CLAUDE.md rule 7); each operator's page in
 | [audio-reactive-feedback](audio-reactive-feedback.atidarla/) | The M1 AC1 patch: a feedback loop following a drum loop's spectrum |
 | [beat-switcher](beat-switcher.atidarla/) | A BPM clock switching generators per beat, with triggers and counters |
 | [stage-deck](stage-deck.atidarla/) | A Stage deck: three layers by four columns, quantised launch, fades and wipes, launch modes and a crossfader (M3); play it in the Stage tab |
+| [soak-show](soak-show.atidarla/) | The PT-10 soak patch: the Stage deck plus a 400,000-particle system and an image feedback loop as a fifth column (M6); `atidarla soak` runs it for hours |
 | [ai-live](ai-live.atidarla/) | Every AI operator (M4): Diffusion with Prompt Blend and a Control Prep edge map, the built-in Invert model, the ONNX vision nodes and Video Model, governed at the project frame rate |
 | [speech-chat](speech-chat.atidarla/) | Speech to Text (Whisper) feeding LLM Chat (Ollama) through `Prompt From`, both on this machine, so Sovereign mode stays on (FR-A13) |
 | [batch-wedge](batch-wedge.atidarla/) | Batch Graph (M5): a noise seed × scale wedge through the built-in Invert model, and a 10 prompts × 10 seeds wedge across two LAN hosts; results land in the Stage tab's Media Bin ([`docs/batch.md`](../docs/batch.md)) |
