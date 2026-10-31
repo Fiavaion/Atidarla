@@ -92,14 +92,18 @@ fn a_full_mailbox_keeps_the_waiting_utterance() {
         "overwrote a waiting utterance"
     );
     assert!(link.busy());
+    // Read the reason in the same look as the state: the worker retries,
+    // passing through Routing between two Waiting states.
     let deadline = Instant::now() + Duration::from_secs(5);
-    while !link.with_status(|s| matches!(s.state, LinkState::Waiting(_))) {
+    let why = loop {
+        if let Some(w) = link.with_status(|s| match &s.state {
+            LinkState::Waiting(w) => Some(w.clone()),
+            _ => None,
+        }) {
+            break w;
+        }
         assert!(Instant::now() < deadline);
         std::thread::sleep(Duration::from_millis(5));
-    }
-    let why = link.with_status(|s| match &s.state {
-        LinkState::Waiting(w) => w.clone(),
-        _ => String::new(),
-    });
+    };
     assert!(why.contains("lan:nowhere"), "{why}");
 }
