@@ -9,7 +9,9 @@
 //! on the cook path, anything else in Python a frame late. One number
 //! drives every component of a vector (a colour's red, green and blue); a
 //! Python tuple, or a binding to a whole SIG node with enough channels,
-//! drives them one each (PRD A66). Errors show at the top of the panel,
+//! drives them one each (PRD A66). Python ones run only once the
+//! project's Python is allowed (docs/python-ops.md); until then the panel
+//! says so. Errors show at the top of the panel,
 //! with the operator's status line if it has one (e.g. Share Out's
 //! published name).
 
@@ -46,6 +48,13 @@ pub fn ui(
     ui.label(&schema.summary);
     if let Some(e) = engine.error(node) {
         ui.colored_label(egui::Color32::from_rgb(230, 80, 80), e);
+        if e.contains(atd_core::expr::PYTHON_NOT_ALLOWED) {
+            ui.weak(
+                "Python expressions are not evaluated until you allow this project's Python \
+                 (File > Allow Python Operators…); until then the parameter keeps its stored \
+                 value. Native expressions (time, frame, math, op()) still run.",
+            );
+        }
     }
     if let Some(status) = engine.status(node) {
         ui.label(status);

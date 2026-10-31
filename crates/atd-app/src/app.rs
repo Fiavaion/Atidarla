@@ -195,6 +195,9 @@ impl AtidarlaApp {
                 .as_ref()
                 .map_or(&atd_core::graph::Network::default(), |e| e.network()),
         );
+        // The untitled demo patch is the app's own; a project opened below
+        // waits for its own choice.
+        atd_py::script::allow(true);
         if let (Some(engine), Some(dir)) = (engine.as_mut(), open) {
             viewed = project.run(engine, Action::OpenDir(dir));
             if let Some((msg, true)) = &project.message {
@@ -597,7 +600,7 @@ impl AtidarlaApp {
             .project
             .python
             .as_ref()
-            .is_some_and(|p| !p.is_allowed());
+            .is_some_and(|p| !p.is_allowed() || !atd_py::script::allowed());
         if ui
             .add_enabled(blocked, egui::Button::new("Allow Python Operators…"))
             .on_hover_text("Run this project's ops/*.py (docs/python-ops.md)")
@@ -794,13 +797,11 @@ impl AtidarlaApp {
         if !self.project.python_ask || self.smoke.is_some() {
             return;
         }
-        let scripts: Vec<String> = self.panels.engine.as_ref().map_or_else(Vec::new, |e| {
-            e.network()
-                .nodes()
-                .filter(|n| n.type_id == atd_py::script::TYPE_ID)
-                .map(|n| format!("Script node {}", n.name))
-                .collect()
-        });
+        let scripts: Vec<String> = self
+            .panels
+            .engine
+            .as_ref()
+            .map_or_else(Vec::new, |e| crate::project::network_python(e.network()));
         let Some(python) = &mut self.project.python else {
             return;
         };
@@ -811,12 +812,12 @@ impl AtidarlaApp {
             .collect();
         let mut choice = None;
         let modal = egui::Modal::new(egui::Id::unique("allow_python_ops")).show(ctx, |ui| {
-            ui.heading("Run this project's Python operators?");
+            ui.heading("Run this project's Python?");
             ui.label(
-                "This project contains operators written in Python. They are programs: once \
-                 they run they can do anything your user account can (read and change files, \
-                 use the network). Atidarla does not sandbox them. Allow them only if you \
-                 trust where the project came from.",
+                "This project contains Python: operators, Script nodes or parameter \
+                 expressions. They are programs: once they run they can do anything your user \
+                 account can (read and change files, use the network). Atidarla does not \
+                 sandbox them. Allow them only if you trust where the project came from.",
             );
             ui.add_space(4.0);
             for f in &files {
@@ -824,8 +825,10 @@ impl AtidarlaApp {
             }
             ui.add_space(4.0);
             ui.weak(
-                "Until you allow them, their nodes do not cook. \"Remember\" applies to these \
-                 files exactly as they are; any change asks again.",
+                "Until you allow them, their nodes do not cook and Python expressions keep \
+                 their parameters' stored values. \"Remember\" applies to the ops/ files \
+                 exactly as they are (any change asks again); Script nodes and expressions ask \
+                 on every open.",
             );
             ui.add_space(8.0);
             ui.horizontal(|ui| {
@@ -846,10 +849,11 @@ impl AtidarlaApp {
         let Some(remember) = choice else { return };
         self.project.python_ask = false;
         python.allow();
-        // Script DATs run only on this explicit choice, never from the
-        // remembered hash (it covers ops/ files, not the network's code).
+        // Script DATs and Python expressions run only on this explicit
+        // choice, never from the remembered hash (it covers ops/ files, not
+        // the network's code).
         atd_py::script::allow(true);
-        if remember {
+        if remember && !python.is_empty() {
             let stored = atd_py::ops::TrustStore::user()
                 .ok_or_else(|| "no settings folder".to_owned())
                 .and_then(|s| {

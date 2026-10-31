@@ -34,6 +34,44 @@ enum Dialog {
     ComfyWorkflow(Receiver<Option<PathBuf>>),
 }
 
+/// The Python written in `net` itself, as the Allow dialog lists it: Script
+/// nodes and Python-tier parameter expressions (anything outside the native
+/// subset, PRD A22). It runs only on an explicit Allow: the remembered hash
+/// covers `ops/` files, not network code (docs/python-ops.md).
+pub fn network_python(net: &Network) -> Vec<String> {
+    let mut out = Vec::new();
+    for n in net.nodes() {
+        if n.type_id == atd_py::script::TYPE_ID {
+            out.push(format!("Script node {}", n.name));
+        }
+        for (param, p) in &n.params {
+            let Some(source) = p.expr.as_deref() else {
+                continue;
+            };
+            if atd_core::expr::Expr::parse(source).is_err() {
+                let short: String = source.chars().take(60).collect();
+                let more = if short.len() < source.len() {
+                    "…"
+                } else {
+                    ""
+                };
+                out.push(format!(
+                    "Python expression {}.{param} = {short}{more}",
+                    n.name
+                ));
+            }
+        }
+    }
+    out
+}
+
+/// Whether opening a project must ask before its Python runs: `ops/` files
+/// not remembered, or any network Python (never covered by the remembered
+/// hash, so it asks on every open).
+pub fn must_ask(python: &atd_py::ops::PythonOps, network: &[String]) -> bool {
+    (!python.is_empty() && !python.is_allowed()) || !network.is_empty()
+}
+
 /// A ComfyUI workflow import running on its own thread (it reads the
 /// server's object_info).
 type ComfyImport = Receiver<Result<atd_ops_ai::comfy::Imported, String>>;
@@ -145,6 +183,8 @@ impl ProjectState {
                     atd_ops_pnt::project::clear_custom(r);
                     atd_ops_ai::comfy::clear_custom(r);
                 });
+                // A new project's network Python is the user's own.
+                atd_py::script::allow(true);
                 let opened = self.opened + 1;
                 *self = Self::untitled(engine.network());
                 self.opened = opened;
@@ -178,13 +218,11 @@ impl ProjectState {
                     if let Some(e) = python.errors().first() {
                         self.message = Some((e.to_string(), true));
                     }
-                    // Script DATs are project Python too: they ask as well.
-                    let scripts = engine
-                        .network()
-                        .nodes()
-                        .any(|n| n.type_id == atd_py::script::TYPE_ID);
-                    self.python_ask = (!python.is_empty() && !python.is_allowed()) || scripts;
-                    self.python = (!python.is_empty() || scripts).then_some(python);
+                    // Script DATs and Python expressions are project Python
+                    // too: they ask as well. Kept even without any, so a
+                    // Python expression typed later can be allowed.
+                    self.python_ask = must_ask(&python, &network_python(engine.network()));
+                    self.python = Some(python);
                     self.saved_mappings = meta.mappings.clone();
                     self.saved_timeline = meta.timeline.clone();
                     self.saved_ai = (meta.ai.clone(), meta.models.clone());
@@ -477,7 +515,8 @@ pub fn open(engine: &mut Engine, dir: &Path) -> Result<Opened, String> {
         log::warn!("{}: shader {name} not imported: {e}", dir.display());
     }
     let mut python = atd_py::ops::PythonOps::open(dir);
-    // A new project's Script DATs wait for its own choice.
+    // A new project's Script DATs and Python expressions wait for its own
+    // choice.
     atd_py::script::allow(false);
     for e in python.errors() {
         log::warn!("{}: {e}", dir.display());
@@ -825,6 +864,77 @@ pub(crate) mod tests {
             "still registered"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Python expressions are project Python: opening a project with one
+    /// asks (and the dialog lists it) even when its `ops/` files were
+    /// remembered, since the remembered hash does not cover network code. A
+    /// project with only native expressions does not ask.
+    #[test]
+    fn opening_python_expressions_asks_like_script_nodes() {
+        let Some(mut e) = engine() else { return };
+        let save = |name: &str, source: &str| {
+            let mut reg = atd_core::Registry::default();
+            atd_ops_img::register(&mut reg);
+            let mut net = Network::default();
+            let (white, level) = (net.alloc_id(), net.alloc_id());
+            for edit in [
+                Edit::AddNode {
+                    node: Node::new(white, "img.constant", "white1"),
+                },
+                Edit::AddNode {
+                    node: Node::new(level, "img.level", "level1"),
+                },
+                Edit::SetParam {
+                    node: level,
+                    param: "brightness".into(),
+                    value: Some(Param {
+                        value: json!(1.0),
+                        expr: Some(source.into()),
+                        bind: None,
+                    }),
+                },
+            ] {
+                net.apply(&reg, edit).unwrap();
+            }
+            let dir = std::env::temp_dir().join(format!(
+                "atd-app-pyexpr-{name}-{}.atidarla",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            let mut p = Project::new(name);
+            p.networks.insert(atd_format::MAIN.to_owned(), net);
+            atd_format::save(&dir, &p).unwrap();
+            dir
+        };
+        let python = save("python", "[0.25, 0.5][int(time) % 2]");
+        let native = save("native", "0.5 + 0.5 * sin(time)");
+        let mut state = ProjectState::untitled(&Network::default());
+
+        let view = state.run(&mut e, Action::OpenDir(python.clone()));
+        assert!(view.is_some(), "{:?}", state.message);
+        assert!(state.python_ask, "a Python expression asks");
+        assert!(state.python.is_some(), "so the dialog can allow it");
+        let listed = network_python(e.network());
+        assert_eq!(
+            listed,
+            ["Python expression level1.brightness = [0.25, 0.5][int(time) % 2]"]
+        );
+
+        let view = state.run(&mut e, Action::OpenDir(native.clone()));
+        assert!(view.is_some(), "{:?}", state.message);
+        assert!(!state.python_ask, "native expressions need no Python");
+        assert!(network_python(e.network()).is_empty());
+
+        // Remembered ops/ files do not cover network Python.
+        let mut ops = atd_py::ops::PythonOps::open(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/python-ops.atidarla"),
+        );
+        ops.allow();
+        assert!(must_ask(&ops, &listed));
+        assert!(!must_ask(&ops, &[]));
+        std::fs::remove_dir_all(&python).ok();
+        std::fs::remove_dir_all(&native).ok();
     }
 
     /// Opening a project with kernel files registers each as an operator
