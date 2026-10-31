@@ -37,6 +37,7 @@ All platforms.
 
 - [Beat clock](../../../examples/beat-clock.atidarla/) — `sweep`, `flash`
 - [Compute Shaders](../../../examples/compute-shaders.atidarla/) — `drift`
+- [DAT tables](../../../examples/dat-tables.atidarla/) — `lfo`
 - [Image processing](../../../examples/image-processing.atidarla/) — `move`
 - [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `hue_swing`
 - [Neural Growth](../../../examples/neural-growth.atidarla/) — `sweep`

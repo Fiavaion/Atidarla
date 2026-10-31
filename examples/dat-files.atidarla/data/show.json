@@ -1,0 +1,9 @@
+{
+  "title": "Night Market",
+  "venue": { "name": "Old Hall", "city": "Vilnius" },
+  "acts": [
+    { "name": "Opening", "minutes": 20, "palette": "amber" },
+    { "name": "Main set", "minutes": 60, "palette": "cyan" },
+    { "name": "Encore", "minutes": 10, "palette": "white" }
+  ]
+}

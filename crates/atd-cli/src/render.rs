@@ -784,6 +784,12 @@ pub fn classify(type_id: &str) -> Option<Class> {
         "mat.line" | "mat.matcap" | "mat.pbr" | "mat.point_sprite" | "mat.toon" | "mat.unlit" => {
             Pure
         }
+        // DAT (CPU text and tables): functions of their inputs.
+        "dat.table" | "dat.text" | "dat.json" | "dat.convert" | "dat.select"
+        | "dat.prompt_template" => Pure,
+        // Offline it reads its file on the cook, before the first frame.
+        "dat.file_in" => Waits,
+        "dat.file_out" => Sink,
         "img.movie_in" | "img.text" | "img.wgsl" | "sig.audio_file_in" => Waits,
         // Waits for its compile (and its file).
         "img.kernel" => Waits,

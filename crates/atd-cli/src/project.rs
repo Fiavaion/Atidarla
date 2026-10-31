@@ -140,6 +140,7 @@ pub(crate) fn library_with(
     atd_ops_sig::library(&mut library);
     atd_ops_pnt::library(&mut library);
     atd_ops_mat::library(&mut library);
+    atd_ops_dat::library(&mut library);
     atd_ops_msh::library(&mut library);
     atd_ops_cmp::library(&mut library);
     atd_ops_ai::library_with(&mut library, supervisor);

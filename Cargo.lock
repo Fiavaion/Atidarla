@@ -452,6 +452,8 @@ name = "atd-ops-dat"
 version = "0.0.1"
 dependencies = [
  "atd-core",
+ "atd-gpu",
+ "serde_json",
 ]
 
 [[package]]
