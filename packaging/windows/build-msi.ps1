@@ -123,13 +123,13 @@ function Sign([string]$file) {
 if (-not (Get-Command wix -ErrorAction SilentlyContinue)) {
     throw "WiX v5 not found: dotnet tool install --global wix --version 5.0.2"
 }
-$extensions = wix extension list -g
+# The bundle's extensions, in WiX's per-user cache (adding one already there
+# does nothing).
 foreach ($ext in 'WixToolset.Bal.wixext', 'WixToolset.Util.wixext') {
-    if (-not ($extensions -match [regex]::Escape($ext))) {
-        wix extension add -g "$ext/5.0.2"
-        if ($LASTEXITCODE) { throw "wix extension add $ext failed" }
-    }
+    wix extension add -g "$ext/5.0.2"
+    if ($LASTEXITCODE) { throw "wix extension add $ext failed" }
 }
+wix extension list -g
 
 # The Visual C++ runtime the bundle installs. Microsoft's permalink always
 # serves the latest 14.x build, so it is checked by its Authenticode

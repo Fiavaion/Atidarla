@@ -43,7 +43,8 @@
     <!-- Passed to the MSI; settable on the command line (NAME=value). -->
     <Variable Name="ADDTOPATH" Value="1" bal:Overridable="yes" />
     <Variable Name="DESKTOPSHORTCUT" Value="0" bal:Overridable="yes" />
-    <Variable Name="INSTALLFOLDER" Value="" bal:Overridable="yes" />
+    <!-- Unset by default: the MSI then uses its own default folder. -->
+    <Variable Name="INSTALLFOLDER" bal:Overridable="yes" />
 
     <!-- The installed VC++ 14.x x64 runtime, as its installer records it. -->
     <util:RegistrySearch Id="VcRedistInstalledSearch" Root="HKLM"
