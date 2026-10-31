@@ -967,8 +967,19 @@ pub struct PyRef {
     pub channels: Vec<(Arc<str>, f64)>,
 }
 
+/// Why a Python-tier expression gives no value: the open project's Python
+/// is not allowed yet (`docs/python-ops.md`). Its parameter keeps its
+/// stored value.
+pub const PYTHON_NOT_ALLOWED: &str = "Python expressions in this project are not allowed to run";
+
 /// The Python worker (`atd-py`), as the engine sees it.
 pub trait PythonHost: Send {
+    /// Whether the open project's Python may run. While it may not, the
+    /// engine offers no jobs and its Python-tier expressions report
+    /// [`PYTHON_NOT_ALLOWED`]. Read once per frame: it must be cheap.
+    fn allowed(&self) -> bool {
+        true
+    }
     /// Offers this frame's jobs. Never blocks: when the worker is busy they
     /// are skipped, and results arrive a frame later.
     fn submit(&mut self, jobs: &[PyJob]);

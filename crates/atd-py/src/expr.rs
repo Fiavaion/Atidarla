@@ -8,6 +8,12 @@
 //! An offline render (FR-H1) waits for each frame's results instead
 //! (`submit_wait`), so they are always exactly one frame late.
 //!
+//! Expressions are project code: none is evaluated until the open
+//! project's Python is allowed ([`crate::script::allow`], the same choice
+//! that runs its Python operators and Script DATs; `docs/python-ops.md`).
+//! Until then [`PythonHost::allowed`] is false, so the engine offers no
+//! jobs, and this host refuses any it is offered.
+//!
 //! Expressions see the same names as the native tier (`time`, `frame`,
 //! `me`, `op('name').par.x`, `op('name')['channel']`, the `math` module's
 //! functions, `clamp` and `lerp`), plus the rest of Python.
@@ -163,7 +169,14 @@ impl Drop for PyExprHost {
 }
 
 impl PythonHost for PyExprHost {
+    fn allowed(&self) -> bool {
+        crate::script::allowed()
+    }
+
     fn submit(&mut self, jobs: &[PyJob]) {
+        if !self.allowed() {
+            return;
+        }
         // The worker holds the lock only to swap buffers; if it has it now,
         // this frame's jobs are skipped.
         let Ok(mut inbox) = self.shared.inbox.try_lock() else {
@@ -182,6 +195,9 @@ impl PythonHost for PyExprHost {
     }
 
     fn submit_wait(&mut self, jobs: &[PyJob]) {
+        if !self.allowed() {
+            return;
+        }
         let batch = {
             let mut inbox = self.shared.inbox.lock().unwrap_or_else(|e| e.into_inner());
             inbox.jobs.clear();
@@ -261,15 +277,24 @@ fn run(shared: &Shared) {
             inbox.fresh = false;
             inbox.batch
         };
-        Python::attach(|py| {
-            for job in &jobs {
-                let result = match &helper {
-                    Some(h) => evaluate(h.bind(py), job),
-                    None => Err("the Python expression helper did not load".into()),
-                };
-                done.push((job.key, result));
-            }
-        });
+        // Allowance withdrawn after the batch was offered (another project
+        // opened): nothing in it runs.
+        if !crate::script::allowed() {
+            done.extend(
+                jobs.iter()
+                    .map(|j| (j.key, Err(atd_core::expr::PYTHON_NOT_ALLOWED.to_owned()))),
+            );
+        } else {
+            Python::attach(|py| {
+                for job in &jobs {
+                    let result = match &helper {
+                        Some(h) => evaluate(h.bind(py), job),
+                        None => Err("the Python expression helper did not load".into()),
+                    };
+                    done.push((job.key, result));
+                }
+            });
+        }
         let mut results = shared.results.lock().unwrap_or_else(|e| e.into_inner());
         // Keep only the newest result per key if the engine has not
         // collected the previous batch.

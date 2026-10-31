@@ -38,6 +38,13 @@ fn engine() -> Option<Engine> {
     Some(Engine::new(device, queue, reg, lib, config))
 }
 
+/// A worker for these tests' own expressions: the project's Python is
+/// allowed (gating is `expr_trust.rs`).
+fn host() -> PyExprHost {
+    atd_py::script::allow(true);
+    PyExprHost::start().unwrap()
+}
+
 fn red(e: &mut Engine, node: NodeId, time: f64) -> u8 {
     e.cook(&[node], time).unwrap();
     read_rgba8(e.device(), e.queue(), e.result(node).unwrap()).unwrap()[0]
@@ -46,7 +53,7 @@ fn red(e: &mut Engine, node: NodeId, time: f64) -> u8 {
 #[test]
 fn python_expressions_arrive_a_frame_late_without_blocking() {
     let Some(mut e) = engine() else { return };
-    e.set_python(Box::new(PyExprHost::start().unwrap()));
+    e.set_python(Box::new(host()));
     let (white, level, knobs) = (e.alloc_id(), e.alloc_id(), e.alloc_id());
     e.edit(
         "build",
@@ -145,7 +152,7 @@ fn python_expressions_arrive_a_frame_late_without_blocking() {
 #[test]
 fn offline_python_results_are_exactly_one_frame_late() {
     let Some(mut e) = engine() else { return };
-    e.set_python(Box::new(PyExprHost::start().unwrap()));
+    e.set_python(Box::new(host()));
     e.set_mode(atd_gpu::engine::CookMode::Offline { fps: 60.0 });
     let (white, level) = (e.alloc_id(), e.alloc_id());
     e.edit(
@@ -194,7 +201,7 @@ fn offline_python_results_are_exactly_one_frame_late() {
 #[test]
 fn python_tuples_drive_vectors_one_component_each() {
     let Some(mut e) = engine() else { return };
-    e.set_python(Box::new(PyExprHost::start().unwrap()));
+    e.set_python(Box::new(host()));
     e.set_mode(atd_gpu::engine::CookMode::Offline { fps: 60.0 });
     let (colour, level) = (e.alloc_id(), e.alloc_id());
     let expr = |node: NodeId, param: &str, value: serde_json::Value, source: &str| Edit::SetParam {
@@ -262,7 +269,7 @@ fn python_tuples_drive_vectors_one_component_each() {
 #[test]
 fn offline_waits_for_python_expressions_are_bounded() {
     let Some(mut e) = engine() else { return };
-    let mut host = PyExprHost::start().unwrap();
+    let mut host = host();
     host.set_offline_timeout(Duration::from_millis(300));
     e.set_python(Box::new(host));
     e.set_mode(atd_gpu::engine::CookMode::Offline { fps: 60.0 });

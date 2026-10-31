@@ -108,6 +108,8 @@ const CORPUS: &[&str] = &[
 ];
 
 fn python_results(jobs: &[PyJob]) -> Vec<Result<ExprValue, String>> {
+    // These are the tests' own expressions (gating is `expr_trust.rs`).
+    atd_py::script::allow(true);
     let mut host = PyExprHost::start().unwrap();
     host.submit(jobs);
     let mut got: Vec<Option<Result<ExprValue, String>>> = vec![None; jobs.len()];

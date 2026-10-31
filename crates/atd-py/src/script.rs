@@ -84,9 +84,12 @@ static ALLOWED: AtomicBool = AtomicBool::new(false);
 /// Bumped by every [`allow`] change, so nodes run again when it flips.
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 
-/// Lets Script nodes run (`true`) or stops them (`false`). Process-wide,
-/// like Sovereign mode: one project is open at a time. [`crate::ops::
-/// PythonOps`] sets it with the project's Python operators.
+/// Lets the open project's network Python run (`true`) or stops it
+/// (`false`): Script nodes and Python-tier parameter expressions
+/// ([`crate::expr::PyExprHost`]). Process-wide, like Sovereign mode: one
+/// project is open at a time. Set with the project's Python operators
+/// ([`crate::ops::PythonOps::allow`]), but only on an explicit choice:
+/// the remembered `ops/` hash does not cover network code.
 pub fn allow(on: bool) {
     if ALLOWED.swap(on, Ordering::AcqRel) != on {
         GENERATION.fetch_add(1, Ordering::AcqRel);

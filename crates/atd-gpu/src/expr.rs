@@ -102,6 +102,9 @@ impl Entry {
 pub struct ExprTable {
     nodes: HashMap<NodeId, Vec<Entry>>,
     next_key: u64,
+    /// The Python tier is blocked (the project's Python is not allowed):
+    /// its entries carry [`expr::PYTHON_NOT_ALLOWED`] and no value.
+    blocked: Cell<bool>,
 }
 
 impl ExprTable {
@@ -116,6 +119,7 @@ impl ExprTable {
         let mut table = ExprTable {
             nodes: HashMap::new(),
             next_key: old.next_key,
+            blocked: Cell::new(false),
         };
         let mut extra = HashMap::new();
         let mut changed = Vec::new();
@@ -248,6 +252,40 @@ impl ExprTable {
                     "expression for `{}` needs Python, which is not running here",
                     e.param
                 )));
+            }
+        }
+    }
+
+    /// Blocks the Python tier while the project's Python is not allowed:
+    /// each Python entry drops its value (the parameter uses its stored
+    /// value) and reports [`expr::PYTHON_NOT_ALLOWED`]. Formats once per
+    /// table, never per frame.
+    pub(crate) fn block_python(&self) {
+        if self.blocked.replace(true) {
+            return;
+        }
+        for e in self.nodes.values().flatten() {
+            if matches!(e.tier, Tier::Python { .. }) {
+                e.value.set(None);
+                e.py_fault.set(None);
+                e.error.replace(Some(format!(
+                    "expression for `{}`: {}",
+                    e.param,
+                    expr::PYTHON_NOT_ALLOWED
+                )));
+            }
+        }
+    }
+
+    /// Lifts [`Self::block_python`] once the project's Python is allowed;
+    /// values arrive with the worker's next results.
+    pub(crate) fn unblock_python(&self) {
+        if !self.blocked.replace(false) {
+            return;
+        }
+        for e in self.nodes.values().flatten() {
+            if matches!(e.tier, Tier::Python { .. }) {
+                e.error.replace(None);
             }
         }
     }

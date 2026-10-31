@@ -1902,12 +1902,25 @@ impl Engine {
             ..
         } = self;
         let mode = *mode;
+        // The trust decision, read once so this frame's collect and submit
+        // agree: until the project's Python is allowed no job is offered
+        // and the Python tier falls back to stored values.
+        let py_allowed = python.as_ref().is_some_and(|py| py.allowed());
         // Python results computed from the last frame's values (offline,
         // every one of them: the previous frame waited for the worker).
         match python.as_mut() {
-            Some(py) => {
+            Some(py) if py_allowed => {
+                exprs.unblock_python();
                 py.collect(py_results);
                 exprs.apply_python(py_results);
+            }
+            Some(py) => {
+                // Results from before the block are dropped, not applied.
+                py.collect(py_results);
+                py_results.clear();
+                if !py_jobs.is_empty() {
+                    exprs.block_python();
+                }
             }
             None if !py_jobs.is_empty() => exprs.no_python(),
             None => {}
@@ -2638,6 +2651,7 @@ impl Engine {
 
         queue.submit([encoder.finish()]);
         if let Some(py) = python.as_mut()
+            && py_allowed
             && !py_jobs.is_empty()
         {
             crate::expr::Ctx {
