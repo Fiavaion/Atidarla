@@ -956,7 +956,7 @@ impl Gltf<'_> {
 /// Reads glTF 2.0 (`.glb`, or `.gltf` with data URIs or files next to it):
 /// static meshes of the default scene with node transforms (triangles,
 /// strips, fans, lines and points), `POSITION`, `NORMAL`, `TEXCOORD_0`,
-/// `COLOR_0`. Skins, morph targets and animations are ignored; compressed
+/// `TEXCOORD_1` (as `uv2`), `COLOR_0`. Skins, morph targets and animations are ignored; compressed
 /// meshes are refused.
 pub fn read_gltf(bytes: &[u8], dir: Option<&Path>) -> Result<Mesh, String> {
     let (json_bytes, bin): (&[u8], Option<&[u8]>) = if bytes.starts_with(b"glTF") {
@@ -1100,6 +1100,8 @@ pub fn read_gltf(bytes: &[u8], dir: Option<&Path>) -> Result<Mesh, String> {
 struct Cols {
     n: Option<Vec<[f32; 3]>>,
     uv: Option<Vec<f32>>,
+    /// `TEXCOORD_1` (VAT In finds texels by it).
+    uv2: Option<Vec<f32>>,
     cd: Option<Vec<f32>>,
 }
 
@@ -1110,6 +1112,9 @@ impl Cols {
         }
         if let Some(uv) = self.uv {
             m.set_point_attr(Column::f32(names::UV, 2, uv));
+        }
+        if let Some(uv2) = self.uv2 {
+            m.set_point_attr(Column::f32("uv2", 2, uv2));
         }
         if let Some(cd) = self.cd {
             m.set_point_attr(Column::f32(names::CD, 4, cd));
@@ -1257,6 +1262,14 @@ fn add_mesh(
                 .extend(uv);
         }
         if let Some(uv) = cols.uv.as_mut() {
+            uv.resize((base + count) * 2, 0.0);
+        }
+        if let Some(uv) = read("TEXCOORD_1", 2)? {
+            cols.uv2
+                .get_or_insert_with(|| vec![0.0; base * 2])
+                .extend(uv);
+        }
+        if let Some(uv) = cols.uv2.as_mut() {
             uv.resize((base + count) * 2, 0.0);
         }
         if let Some(cd) = read("COLOR_0", 4)? {
