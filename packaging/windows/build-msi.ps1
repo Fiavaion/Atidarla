@@ -203,7 +203,7 @@ Sign $msi
 $setup = "$dist\Lasair-$version-windows-x64-setup.exe"
 wix build packaging\windows\bundle.wxs -arch x64 `
     -ext WixToolset.BootstrapperApplications.wixext -ext WixToolset.Util.wixext `
-    -d "Version=$msiVersion" -d "Msi=$msi" -d "VcRedist=$vcRedist" -d "VcRedistBld=$vcBld" -o $setup
+    -d "Version=$msiVersion" -d "Msi=$msi" -d "Root=$root" -d "VcRedist=$vcRedist" -d "VcRedistBld=$vcBld" -o $setup
 if ($LASTEXITCODE) { throw "wix build (bundle) failed" }
 if ($signing) {
     # A bundle is signed twice: its engine (detached and put back), then the whole.

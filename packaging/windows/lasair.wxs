@@ -4,7 +4,7 @@
   packaging/windows/build-msi.ps1, which passes:
     -d Version=1.2.3    numeric MSI version
     -d BinDir=...       folder with lasair-app.exe and lasair.exe
-    -d Root=...         repository root (licences)
+    -d Root=...         repository root (licences, the icon)
     -d ExamplesDir=...  a copy of examples\ without .cache folders (WiX
                         cannot exclude a folder name at any depth)
     -d PythonDir=...    the bundled CPython runtime (python-build-standalone,
@@ -67,6 +67,12 @@
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/fiavaion/lasair" />
     <Property Id="ARPNOMODIFY" Value="1" />
 
+    <!-- The app icon (PRD A69; packaging/icons/render_icons.sh): the
+         Settings > Apps entry and both shortcuts. The executables carry the
+         same icon as a resource (build.rs in lsr-app and lsr-cli). -->
+    <Icon Id="LasairIcon.ico" SourceFile="$(Root)\packaging\icons\lasair.ico" />
+    <Property Id="ARPPRODUCTICON" Value="LasairIcon.ico" />
+
     <!-- Set by the setup bundle only (bundle.wxs): its UI level. -->
     <Property Id="LSRBUNDLEUILEVEL" Secure="yes" />
 
@@ -106,7 +112,8 @@
         <File Id="LasairApp" Source="$(BinDir)\lasair-app.exe" KeyPath="yes">
           <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="Lasair"
                     Description="Lasair real-time visual instrument"
-                    WorkingDirectory="INSTALLFOLDER" Advertise="yes" />
+                    WorkingDirectory="INSTALLFOLDER" Advertise="yes"
+                    Icon="LasairIcon.ico" IconIndex="0" />
         </File>
       </Component>
       <!-- The CLI beside the app, so `lasair run` finds lasair-app.exe. -->
@@ -135,7 +142,8 @@
       </Component>
       <Component Id="DesktopShortcut" Condition="DESKTOPSHORTCUT = 1">
         <Shortcut Id="DesktopShortcutLink" Directory="DesktopFolder" Name="Lasair"
-                  Target="[INSTALLFOLDER]lasair-app.exe" WorkingDirectory="INSTALLFOLDER" />
+                  Target="[INSTALLFOLDER]lasair-app.exe" WorkingDirectory="INSTALLFOLDER"
+                  Icon="LasairIcon.ico" IconIndex="0" />
         <RegistryValue Root="HKLM" Key="Software\Lasair" Name="DesktopShortcut" Type="integer"
                        Value="1" KeyPath="yes" />
       </Component>

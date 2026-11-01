@@ -7,6 +7,8 @@
   with
     -d Version=1.2.3    numeric version (the MSI's)
     -d Msi=...          the MSI built from lasair.wxs
+    -d Root=...         repository root (the icon: setup .exe, Settings >
+                        Apps entry and the logo on the setup's pages)
     -d VcRedist=...     vc_redist.x64.exe (Microsoft-signed; checked by the script)
     -d VcRedistBld=N    its build number (14.44.35211 -> 35211)
 
@@ -31,11 +33,13 @@
       Version="$(Version)"
       UpgradeCode="09FDB1F4-0148-4753-B63C-A92A2D39CAD7"
       AboutUrl="https://github.com/fiavaion/lasair"
+      IconSourceFile="$(Root)\packaging\icons\lasair.ico"
       bal:CommandLineVariables="caseInsensitive">
     <BootstrapperApplication>
       <bal:WixStandardBootstrapperApplication
           Theme="hyperlinkLicense"
           LicenseUrl="https://github.com/fiavaion/lasair/blob/main/LICENSE-MIT"
+          LogoFile="$(Root)\packaging\icons\png\lasair-64.png"
           ShowVersion="yes"
           SuppressOptionsUI="yes" />
     </BootstrapperApplication>

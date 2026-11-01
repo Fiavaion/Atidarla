@@ -95,6 +95,9 @@ tungstenite = { version = "0.30", default-features = false, features = ["handsha
 # Windows.
 libc = "0.2"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Devices_Communication"] }
+# The Windows executables' icon resource (build.rs of lsr-app and lsr-cli;
+# Windows hosts only).
+winresource = { version = "0.1", default-features = false }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

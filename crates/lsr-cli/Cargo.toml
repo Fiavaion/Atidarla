@@ -60,6 +60,10 @@ windows-sys = { workspace = true, features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 
+# The exe's icon resource (build.rs, PRD A69).
+[target.'cfg(windows)'.build-dependencies]
+winresource.workspace = true
+
 [dev-dependencies]
 # The mock ComfyUI server shared with lsr-ops-ai's tests (render test).
 tungstenite.workspace = true
