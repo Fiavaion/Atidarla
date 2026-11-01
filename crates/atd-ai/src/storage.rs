@@ -258,12 +258,19 @@ pub fn config_dir() -> Option<PathBuf> {
     } else if cfg!(target_os = "macos") {
         Some(var("HOME")?.join("Library/Application Support/Atidarla"))
     } else {
-        Some(
-            var("XDG_CONFIG_HOME")
-                .or_else(|| var("HOME").map(|h| h.join(".config")))?
-                .join("atidarla"),
-        )
+        xdg_config_dir(var)
     }
+}
+
+/// `$XDG_CONFIG_HOME/atidarla` when that is absolute (the XDG spec says to
+/// ignore a relative one), else `~/.config/atidarla`.
+fn xdg_config_dir(var: impl Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
+    Some(
+        var("XDG_CONFIG_HOME")
+            .filter(|p| p.is_absolute())
+            .or_else(|| var("HOME").map(|h| h.join(".config")))?
+            .join("atidarla"),
+    )
 }
 
 /// Bytes for people, in decimal units as file managers show them.
@@ -529,6 +536,70 @@ mod tests {
         assert!(s.models.symlink_metadata().is_err(), "the link itself goes");
         assert!(outside.join("keep.bin").is_file());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Junctions (what `mklink /J` makes, and what a user without the right
+    /// to make symbolic links uses) are links too: never followed.
+    #[cfg(windows)]
+    #[test]
+    fn junctions_are_never_followed() {
+        let junction = |link: &Path, target: &Path| {
+            let out = std::process::Command::new("cmd")
+                .arg("/C")
+                .arg("mklink")
+                .arg("/J")
+                .arg(link)
+                .arg(target)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{out:?}");
+        };
+        let root = scratch("junctions");
+        let outside = root.join("outside");
+        write(&outside.join("keep.bin"), 500);
+        let s = layout(&root);
+        junction(&s.packages.join("python3.13/link"), &outside);
+        std::fs::remove_dir_all(&s.models).unwrap();
+        junction(&s.models, &outside);
+
+        let list = s.list();
+        assert_eq!(list[0].size, 107, "the junction inside is not counted");
+        assert_eq!(list[1].size, 0, "the junction model folder is not walked");
+
+        let r = s.remove(&Kind::ALL);
+        assert!(r.failed.is_empty(), "{:?}", r.failed);
+        assert!(
+            s.models.symlink_metadata().is_err(),
+            "the junction itself goes"
+        );
+        assert!(!s.packages.exists());
+        assert!(outside.join("keep.bin").is_file());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A relative `XDG_CONFIG_HOME` would point the settings (and their
+    /// removal) at a folder under whatever the current directory is.
+    #[test]
+    fn a_relative_xdg_config_home_is_ignored() {
+        let home = std::env::temp_dir().join("home");
+        let env = |xdg: &'static str| {
+            let home = home.clone();
+            move |k: &str| match k {
+                "XDG_CONFIG_HOME" => Some(PathBuf::from(xdg)),
+                "HOME" => Some(home.clone()),
+                _ => None,
+            }
+        };
+        let abs = std::env::temp_dir().join("xdg");
+        let abs_env = {
+            let abs = abs.clone();
+            move |k: &str| (k == "XDG_CONFIG_HOME").then(|| abs.clone())
+        };
+        assert_eq!(xdg_config_dir(abs_env), Some(abs.join("atidarla")));
+        assert_eq!(
+            xdg_config_dir(env("relative/config")),
+            Some(home.join(".config/atidarla"))
+        );
     }
 
     #[test]
