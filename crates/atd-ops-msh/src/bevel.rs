@@ -10,9 +10,9 @@
 //! polygons of each bevelled edge; the holes left at the corners are
 //! filled: one polygon when it is flat, otherwise a fan of triangles from
 //! its (rounded) centre, or from the original point where a polygon still
-//! keeps it. A strip quad that is twisted (a slid point shared by two
-//! strips sits off each one's offset line) becomes two triangles, so
-//! every polygon stays flat.
+//! keeps it. A strip quad twisted by more than `FLAT_TOLERANCE` of its
+//! size (a slid point shared by two strips sits off each one's offset
+//! line) becomes two triangles; slighter twists stay quads.
 //!
 //! Where one strip ends at an inside point, the point splits: the two
 //! polygons beside the strip lose it to their slid points. With three
@@ -382,7 +382,7 @@ pub fn run(s: &Snap, inputs: &[Option<Mesh>], job: &Job) -> Result<Mesh, String>
             ids.clear();
             ids.extend_from_slice(&quad);
             ids.dedup();
-            if ids.len() == 4 && !flat(&out, &ids) {
+            if ids.len() == 4 && !flat(&out, &ids, FLAT_TOLERANCE) {
                 // Twisted, where a slid point is shared with another strip
                 // (two strips ending at one point between them): two
                 // triangles.
@@ -516,7 +516,7 @@ pub fn run(s: &Snap, inputs: &[Option<Mesh>], job: &Job) -> Result<Mesh, String>
         );
         // A gap that is not flat (where four or more strips meet at a
         // point unevenly) is a fan from its centre instead of one polygon.
-        if flat(&out, &ring) && (segments == 1 || ring.len() <= 4) {
+        if flat(&out, &ring, GAP_TOLERANCE) && (segments == 1 || ring.len() <= 4) {
             patches.push(ring);
             patch_src.push(src);
             continue;
@@ -574,9 +574,22 @@ pub fn run(s: &Snap, inputs: &[Option<Mesh>], job: &Job) -> Result<Mesh, String>
     Ok(out)
 }
 
-/// Whether the polygon `ids` of `m` lies in one plane (to a millionth of
-/// its size).
-fn flat(m: &Mesh, ids: &[u32]) -> bool {
+/// How far off its mean plane a strip quad may be, as a share of its size
+/// (the largest distance of a point from the mean), before it is split
+/// into two triangles. Rounded rims of capped tubes twist their quads by
+/// 1.2–1.6e-3 at 32 columns (about 2e-4 absolute, invisible), and
+/// chamfers ending in a shared slid point by under 3e-4: those stay
+/// quads. Rounded strips ending in a shared slid point twist by 2–10e-3
+/// and are split. Corner gaps are held to `GAP_TOLERANCE`.
+pub const FLAT_TOLERANCE: f64 = 2e-3;
+
+/// The same for a corner gap, filled as one polygon only when it is this
+/// flat (uneven gaps are 2e-3 to 0.1 off and become fans).
+const GAP_TOLERANCE: f64 = 1e-6;
+
+/// Whether the polygon `ids` of `m` lies in one plane, to `tol` of its
+/// size.
+fn flat(m: &Mesh, ids: &[u32], tol: f64) -> bool {
     if ids.len() <= 3 {
         return true;
     }
@@ -591,7 +604,7 @@ fn flat(m: &Mesh, ids: &[u32]) -> bool {
         .map(|&p| v3::len(v3::sub(p, mean)))
         .fold(0.0, f64::max);
     pts.iter()
-        .all(|&p| v3::dot(n, v3::sub(p, mean)).abs() <= 1e-6 * size)
+        .all(|&p| v3::dot(n, v3::sub(p, mean)).abs() <= tol * size)
 }
 
 /// Splits sorted directed edges into the open paths that start at a point
