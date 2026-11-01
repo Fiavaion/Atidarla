@@ -27,6 +27,12 @@
     ADDTOPATH=0|1         put the folder (atidarla.exe) on the system PATH (default 1)
     DESKTOPSHORTCUT=0|1   a desktop shortcut for all users (default 0)
   e.g.  msiexec /i Atidarla-1.0.0-windows-x64.msi /qn /norestart ADDTOPATH=1 /l*v install.log
+
+  Uninstalling (not a major upgrade) also removes what the app keeps for the
+  user who uninstalls (PRD A70): `atidarla storage uninstall`, run as that
+  user before the files go. With the full UI it asks about the model files
+  (keep or remove); a silent uninstall keeps them. Its failure never fails
+  the uninstall.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package
@@ -44,6 +50,23 @@
     <Property Id="DESKTOPSHORTCUT" Value="0" Secure="yes" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/fiavaion/atidarla" />
     <Property Id="ARPNOMODIFY" Value="1" />
+
+    <!-- The per-user data (PRD A70), removed on uninstall only: deferred and
+         impersonated, so it runs as the user and sees their folders, before
+         RemoveFiles takes atidarla.exe away. Return="ignore": an error here
+         leaves the data and the uninstall goes on. -->
+    <CustomAction Id="RemoveUserDataAsk" Directory="INSTALLFOLDER"
+                  ExeCommand="&quot;[INSTALLFOLDER]atidarla.exe&quot; storage uninstall --models ask"
+                  Execute="deferred" Impersonate="yes" Return="ignore" />
+    <CustomAction Id="RemoveUserDataKeep" Directory="INSTALLFOLDER"
+                  ExeCommand="&quot;[INSTALLFOLDER]atidarla.exe&quot; storage uninstall --models keep"
+                  Execute="deferred" Impersonate="yes" Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="RemoveUserDataAsk" Before="RemoveFiles"
+              Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND UILevel &gt;= 5" />
+      <Custom Action="RemoveUserDataKeep" Before="RemoveFiles"
+              Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND UILevel &lt; 5" />
+    </InstallExecuteSequence>
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="Atidarla">
