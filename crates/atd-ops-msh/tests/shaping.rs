@@ -640,6 +640,272 @@ fn bevel_one_edge_from_inside_to_the_border() {
     assert!(close(area(&s), expected, 1e-6), "{} {expected}", area(&s));
 }
 
+/// A mesh of the given points and polygons, with a point group `edge` of
+/// the points `group`.
+fn polyhedron(points: &[[f32; 3]], polygons: &[&[u32]], group: &[u32]) -> Mesh {
+    let mut m = Mesh::new();
+    for &p in points {
+        m.add_point(p);
+    }
+    for p in polygons {
+        m.add_polygon(p);
+    }
+    let bits: Vec<bool> = (0..points.len() as u32)
+        .map(|i| group.contains(&i))
+        .collect();
+    m.set_group(AttrClass::Point, "edge", &bits).unwrap();
+    m
+}
+
+type P = [f64; 3];
+
+fn sub(a: P, b: P) -> P {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+fn dot(a: P, b: P) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn cross(a: P, b: P) -> P {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+/// The point on the edge `v` → `w` at distance `d` from the line `v` → `x`.
+fn slid(v: P, w: P, x: P, d: f64) -> P {
+    let (e, f) = (sub(w, v), sub(x, v));
+    let sin = (dot(cross(e, f), cross(e, f)) / (dot(e, e) * dot(f, f))).sqrt();
+    let t = d / sin / dot(e, e).sqrt();
+    [v[0] + e[0] * t, v[1] + e[1] * t, v[2] + e[2] * t]
+}
+
+/// The volume of the solid with triangle ends `a`, `b`, `c` and `a2`, `b2`,
+/// `c2` and planar sides: what a chamfer cuts off along one edge `a`–`a2`.
+fn wedge(a: P, b: P, c: P, a2: P, b2: P, c2: P) -> f64 {
+    let tet = |p: P, q: P, r: P, s: P| dot(sub(q, p), cross(sub(r, p), sub(s, p))).abs() / 6.0;
+    tet(a, b, c, a2) + tet(b, c, a2, b2) + tet(c, a2, b2, c2)
+}
+
+fn has(m: &Mesh, p: P) -> bool {
+    m.p.iter()
+        .any(|q| (0..3).all(|k| (f64::from(q[k]) - p[k]).abs() < 1e-6))
+}
+
+#[test]
+fn bevel_one_edge_between_four_polygons() {
+    let d = 0.1;
+    // An octahedron: both ends of the edge +X–+Y meet four triangles.
+    let o = polyhedron(
+        &[
+            [1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, -1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, -1.0],
+        ],
+        &[
+            &[0, 2, 4],
+            &[2, 1, 4],
+            &[1, 3, 4],
+            &[3, 0, 4],
+            &[2, 0, 5],
+            &[1, 2, 5],
+            &[3, 1, 5],
+            &[0, 3, 5],
+        ],
+        &[0, 2],
+    );
+    let c = on(
+        "msh.bevel",
+        &[("offset", json!(d)), ("group", json!("edge"))],
+        &o,
+    );
+    assert!(surface(&c).is_empty(), "closed");
+    assert!(watertight(&c));
+    assert_eq!(c.prims(), 8 + 1 + 2, "faces, strip, one triangle per end");
+    assert_eq!(c.points(), 6 + 4);
+    assert_eq!(
+        atd_ops_msh::edit::group_count(&c, AttrClass::Prim, "bevel"),
+        3
+    );
+    let (px, py, pz, nz) = (
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, -1.0],
+    );
+    let (a, b) = (slid(px, pz, py, d), slid(px, nz, py, d));
+    let (a2, b2) = (slid(py, pz, px, d), slid(py, nz, px, d));
+    for p in [a, b, a2, b2] {
+        assert!(has(&c, p), "{p:?}");
+    }
+    // The chamfer's width: 2√(2/3)·d across the 109.47° crease.
+    let width = dot(sub(a, b), sub(a, b)).sqrt();
+    assert!(close(width, 2.0 * (2.0f64 / 3.0).sqrt() * d, 1e-12));
+    let cut = wedge(px, a, b, py, a2, b2);
+    assert!(
+        close(volume(&c), 4.0 / 3.0 - cut, 1e-6),
+        "{} {}",
+        volume(&c),
+        4.0 / 3.0 - cut
+    );
+    // Rounded: each end is a fan of triangles from the kept point.
+    let r = on(
+        "msh.bevel",
+        &[
+            ("offset", json!(d)),
+            ("group", json!("edge")),
+            ("segments", json!(3)),
+        ],
+        &o,
+    );
+    assert!(surface(&r).is_empty());
+    assert!(watertight(&r));
+    assert_eq!(r.prims(), 8 + 3 + 2 * 3);
+    assert_eq!(r.points(), 6 + 4 + 2 * 2);
+    let v = volume(&r);
+    assert!(v > 4.0 / 3.0 - cut && v < 4.0 / 3.0, "{v}");
+    for s in 2..=4 {
+        let r = on(
+            "msh.bevel",
+            &[
+                ("offset", json!(d)),
+                ("group", json!("edge")),
+                ("segments", json!(s)),
+            ],
+            &o,
+        );
+        assert!(surface(&r).is_empty(), "segments {s}");
+        assert_eq!(r.prims(), 8 + 3 * s, "segments {s}");
+    }
+
+    // A square pyramid: the apex meets four sides, the base corner three
+    // polygons (the base is cut along the strip's end).
+    let p = polyhedron(
+        &[
+            [1.0, 0.0, 1.0],
+            [-1.0, 0.0, 1.0],
+            [-1.0, 0.0, -1.0],
+            [1.0, 0.0, -1.0],
+            [0.0, 1.0, 0.0],
+        ],
+        &[
+            &[0, 1, 2, 3],
+            &[4, 1, 0],
+            &[4, 2, 1],
+            &[4, 3, 2],
+            &[4, 0, 3],
+        ],
+        &[0, 4],
+    );
+    assert!(close(volume(&p), 4.0 / 3.0, 1e-12));
+    let c = on(
+        "msh.bevel",
+        &[("offset", json!(d)), ("group", json!("edge"))],
+        &p,
+    );
+    assert!(surface(&c).is_empty());
+    assert_eq!(c.prims(), 5 + 1 + 1, "faces, strip, apex triangle");
+    assert_eq!(c.points(), 5 - 1 + 4);
+    let (corner, apex) = ([1.0, 0.0, 1.0], [0.0, 1.0, 0.0]);
+    let (a, b) = (
+        slid(apex, [-1.0, 0.0, 1.0], corner, d),
+        slid(apex, [1.0, 0.0, -1.0], corner, d),
+    );
+    let (a2, b2) = (
+        slid(corner, [-1.0, 0.0, 1.0], apex, d),
+        slid(corner, [1.0, 0.0, -1.0], apex, d),
+    );
+    for q in [a, b, a2, b2] {
+        assert!(has(&c, q), "{q:?}");
+    }
+    let cut = wedge(apex, a, b, corner, a2, b2);
+    assert!(
+        close(volume(&c), 4.0 / 3.0 - cut, 1e-6),
+        "{} {}",
+        volume(&c),
+        4.0 / 3.0 - cut
+    );
+    let r = on(
+        "msh.bevel",
+        &[
+            ("offset", json!(d)),
+            ("group", json!("edge")),
+            ("segments", json!(4)),
+        ],
+        &p,
+    );
+    // The base, cut by the arc at its three-polygon corner, is not flat
+    // (the base is not square to the edge), so only the topology is
+    // checked here.
+    assert!(watertight(&r));
+    assert_eq!(r.prims(), 5 + 4 + 4);
+    assert_eq!(r.points(), 5 - 1 + 4 + 2 * 3);
+
+    // A box of two divisions, bevelled along half of its top front edge:
+    // the end at the edge's midpoint meets four quads. The chamfer stops
+    // there square to the edge, so the volumes are exact.
+    let b = make("msh.box", &[("divisions", json!(2))]);
+    let g = on(
+        "msh.group",
+        &[
+            ("name", json!("edge")),
+            ("class", json!("point")),
+            ("box_centre", json!([0.25, 0.5, 0.5])),
+            ("box_size", json!([0.6, 0.1, 0.1])),
+        ],
+        &b,
+    );
+    let c = on(
+        "msh.bevel",
+        &[("offset", json!(d)), ("group", json!("edge"))],
+        &g,
+    );
+    assert!(surface(&c).is_empty());
+    assert_eq!(c.prims(), 24 + 1 + 1, "quads, strip, end triangle");
+    assert_eq!(c.points(), 26 - 1 + 4);
+    for q in [[0.0, 0.5 - d, 0.5], [0.0, 0.5, 0.5 - d]] {
+        assert!(has(&c, q), "{q:?}");
+    }
+    assert!(close(volume(&c), 1.0 - d * d / 4.0, 1e-6), "{}", volume(&c));
+    let r2 = 2f64.sqrt();
+    let chamfer = 6.0 - d + d * r2 / 2.0;
+    assert!(close(area(&c), chamfer, 1e-6), "{} {chamfer}", area(&c));
+    // Rounded in three segments: the cross-section cut off is d² less
+    // three 30° triangles of the arc, d²/4.
+    let r = on(
+        "msh.bevel",
+        &[
+            ("offset", json!(d)),
+            ("group", json!("edge")),
+            ("segments", json!(3)),
+        ],
+        &g,
+    );
+    assert!(surface(&r).is_empty());
+    assert_eq!(r.prims(), 24 + 3 + 3);
+    assert_eq!(r.points(), 26 - 1 + 4 + 2 * 2);
+    assert!(close(volume(&r), 1.0 - d * d / 8.0, 1e-6), "{}", volume(&r));
+    assert_eq!(
+        r,
+        on(
+            "msh.bevel",
+            &[
+                ("offset", json!(d)),
+                ("group", json!("edge")),
+                ("segments", json!(3)),
+            ],
+            &g,
+        ),
+        "deterministic"
+    );
+}
+
 /// Mean edge length and the share of edges within `lo..hi`.
 fn edge_stats(m: &Mesh, lo: f64, hi: f64) -> (f64, f64) {
     let mut lens = Vec::new();
