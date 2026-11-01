@@ -92,9 +92,30 @@ Every native expression is also valid Python and gives the same answer in both t
 | `me.digits` | The number at the end of the node's name (`level3` gives 3) |
 | `op('name').par.param`, `op('name').par.param[1]` | Another node's parameter, or one component of a vector or colour |
 | `op('name')['channel']` | The current value of a SIG node's channel |
+| `op('name')[row, col]` | A cell of a DAT table, as a number (below) |
 
 Mistakes are errors, not silent zeros: dividing by zero, `sqrt(-1)`, `log(0)` and an unknown
 name all report an error.
+
+### Reading a table cell
+
+`op('table1')[row, col]` reads one cell of a [Table](../operators/dat/table.md) (or any DAT
+node) as a number. Rows and columns count from 0, and the header is row 0. Either one can be a
+number, a formula, or a name in quotes: a column name picks the column with that header, a row
+name the row whose first cell is that name. With the table
+
+```text
+name	level
+dim	0.2
+full	1
+```
+
+`op('table1')['dim', 'level']` and `op('table1')[1, 1]` both give 0.2, and
+`op('table1')[1 + int(time) % 2, 'level']` switches between the two rows every second. A missing
+cell, or one that holds text, is an error that names the cell, and the parameter keeps its stored
+value. Changing the table updates the parameter. In a Python expression a cell that is not a
+number gives its text instead. The example
+[`dat-tables`](../../examples/dat-tables.atidarla/) reads its `looks` table this way.
 
 ### Things to know
 
