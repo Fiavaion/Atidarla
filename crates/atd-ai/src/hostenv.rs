@@ -252,6 +252,7 @@ pub fn pip_command(
             "install",
             "--disable-pip-version-check",
             "--no-input",
+            "--no-cache-dir",
         ])
         .args(["--require-hashes", "--no-deps", "--only-binary", ":all:"])
         .arg("--target")
