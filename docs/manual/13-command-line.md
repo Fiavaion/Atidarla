@@ -243,15 +243,19 @@ question for scripts.
 ```sh
 atidarla ai-host status
 atidarla ai-host check [--timeout <SECONDS>]
-atidarla ai-host install <EXTRA>... [--allow-internet | --wheelhouse <FOLDER>]
+atidarla ai-host install <EXTRA>... | --recommended [--cpu] [--allow-internet | --wheelhouse <FOLDER>]
 atidarla ai-host remove
 ```
 
 `status` shows which local host runs (`ATD_AI_HOST_CMD`, the one bundled with the app, or a
-development checkout), the extras offered and those installed. `check` starts the local host and
-lists its adapters and built-in models. `install` adds optional adapters' packages (`vision`,
-`stt`, `diffusion`, `cloud`) to the bundled host, in your user folder, from the hash-pinned
-versions shipped with the app; Sovereign mode refuses the download without `--allow-internet`.
+development checkout), the extras offered, those installed and those recommended for this machine,
+with the reason. `check` starts the local host and lists its adapters and built-in models.
+`install` adds optional adapters' packages (`vision`, `stt`, `diffusion`, `diffusion-cuda`,
+`cloud`) to the bundled host, in your user folder, from the hash-pinned versions shipped with the
+app; Sovereign mode refuses the download without `--allow-internet`. `diffusion` becomes
+`diffusion-cuda` (PyTorch's CUDA build) on a Windows or Linux machine with NVIDIA driver 580 or
+later, unless `--cpu`; the two replace each other. `--recommended` installs `vision`, `stt` and the
+diffusion build that suits the machine.
 `remove` deletes every installed extra. See chapter 8 and
 [`docs/install.md`](../install.md#optional-ai-adapters).
 

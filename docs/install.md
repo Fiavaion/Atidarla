@@ -38,11 +38,14 @@ installing first (PRD A68):
 
 The heavier adapters need packages that are not in the installer: `vision` (ONNX vision models,
 ONNX Runtime), `stt` (speech to text, faster-whisper), `diffusion` (SD-Turbo-class img2img,
-torch and diffusers; gigabytes) and `cloud` (Decart's SDK). Install one only when you want it:
+torch and diffusers; gigabytes), `diffusion-cuda` (the same on PyTorch's CUDA build, see
+[CUDA](#cuda-on-an-nvidia-pc)) and `cloud` (Decart's SDK). Install one only when you want it:
 
 ```sh
-atidarla ai-host status                              # extras offered and installed, folders
+atidarla ai-host status                              # extras offered, installed and recommended
 atidarla ai-host install vision --allow-internet     # download from PyPI, this once
+atidarla ai-host install --recommended --allow-internet      # vision, stt and this machine's diffusion
+atidarla ai-host install diffusion --cpu --allow-internet    # the standard torch even on NVIDIA
 atidarla ai-host install vision stt --wheelhouse D:\wheels   # offline, from a folder of wheels
 atidarla ai-host remove                              # remove every extra
 ```
@@ -73,13 +76,36 @@ The CLI is `/Applications/Atidarla.app/Contents/MacOS/atidarla` on macOS,
 
   To prepare wheels for another platform, add pip's `--platform` (for example
   `win_amd64`, `macosx_11_0_arm64`), `--python-version 3.13` and `--implementation cp`.
+  For `diffusion-cuda.txt` also add `--extra-index-url https://download.pytorch.org/whl/cu134`.
   Then `atidarla ai-host install vision --wheelhouse wheels` on the offline machine.
 - **Models** are separate: download them with the model manager (`atidarla models`,
   [`docs/models.md`](models.md)).
-- **Torch on Windows.** The `diffusion` extra installs torch from PyPI, which on Windows is the
-  CPU build. For real-time diffusion with an NVIDIA GPU, run a host from a source checkout with
-  a CUDA torch (`ai-host/README.md`) and point the app at it with `ATD_AI_HOST_CMD` or add it as
-  a LAN host.
+
+### CUDA on an NVIDIA PC
+
+PyPI's torch is the CPU build on Windows, so real-time diffusion there needs PyTorch's own CUDA
+wheels. `diffusion-cuda` is the `diffusion` extra with torch `2.15.0+cu134` (**CUDA 13.4**) from
+`download.pytorch.org/whl/cu134` on Windows and Linux; everything else, and on Linux the CUDA
+libraries torch needs, comes from PyPI. Every file is still hash-pinned in
+`requirements/diffusion-cuda.txt`, whichever server sends it.
+
+- **GPU and driver.** An NVIDIA GPU from Turing on (RTX 20, 30, 40 and 50 series, including
+  Blackwell) and **NVIDIA driver 580 or later**: every CUDA 13 build runs on R580 and newer.
+  `nvidia-smi` prints the driver version.
+- **Automatic.** On Windows and Linux, `atidarla ai-host install diffusion` asks `nvidia-smi` for
+  the driver version (giving up after two seconds) and, with 580 or later, installs
+  `diffusion-cuda` instead and says so. With no NVIDIA driver, or an older one, it installs the
+  standard build and says why, for example: "NVIDIA driver 566.36 is older than 580 needed for
+  CUDA 13.4; installing the CPU build. Update the driver for real-time diffusion." `--cpu` always
+  takes the standard build. `atidarla ai-host status` prints the same recommendation. macOS
+  always gets the standard build (Metal).
+- **One at a time.** `diffusion` and `diffusion-cuda` replace each other: installing one removes
+  the other from your installed extras.
+- **Size.** The CUDA download is about **2.2 GB** on Windows (torch alone is 2.16 GB) against
+  0.19 GB for the CPU build, and several GB unpacked; on Linux both are about 3 GB (PyPI's Linux
+  torch already carries CUDA libraries).
+- **Servers.** pypi.org and files.pythonhosted.org, plus download.pytorch.org for torch. Sovereign
+  mode still needs `--allow-internet` for the download.
 
 `ATD_AI_HOST_CMD` still overrides the bundled host, for a host you run from a source checkout.
 
