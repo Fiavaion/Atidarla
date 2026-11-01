@@ -228,6 +228,11 @@ pub enum InstallError {
     },
     #[error("pip failed ({0}); the installed extras are unchanged")]
     Pip(std::process::ExitStatus),
+    /// pip failed and said why (the last lines of its error output).
+    #[error("pip failed ({0}): {1}; the installed extras are unchanged")]
+    PipSaid(std::process::ExitStatus, String),
+    #[error("cancelled; the installed extras are unchanged")]
+    Cancelled,
 }
 
 fn io(what: impl Into<String>) -> impl FnOnce(std::io::Error) -> InstallError {
@@ -314,14 +319,48 @@ pub fn merge_extras(
 /// consistent set of locked packages) into a fresh folder, then swaps it in.
 /// `diffusion` and `diffusion-cuda` replace each other ([`merge_extras`]).
 /// A failed install leaves the previous packages as they were. Blocks while
-/// pip runs; call it from a command or a worker thread, never the render
-/// thread. Returns the extras now installed.
+/// pip runs, its output on this process's; call it from a command or a
+/// worker thread, never the render thread. Returns the extras now installed.
 pub fn install(
     bundled: &Bundled,
     root: &Path,
     extras: &[String],
     source: &Source,
     allow_internet_once: bool,
+) -> Result<Vec<String>, InstallError> {
+    install_with(bundled, root, extras, source, allow_internet_once, None)
+}
+
+/// [`install`] for an app: pip runs without a console window and its output
+/// is kept back (the last lines of its errors go in [`InstallError::PipSaid`]).
+/// `cancelled` is asked ten times a second; once it says yes pip is killed,
+/// its half-filled folder removed and the previous packages stay as they
+/// were ([`InstallError::Cancelled`]).
+pub fn install_cancellable(
+    bundled: &Bundled,
+    root: &Path,
+    extras: &[String],
+    source: &Source,
+    allow_internet_once: bool,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Vec<String>, InstallError> {
+    install_with(
+        bundled,
+        root,
+        extras,
+        source,
+        allow_internet_once,
+        Some(cancelled),
+    )
+}
+
+fn install_with(
+    bundled: &Bundled,
+    root: &Path,
+    extras: &[String],
+    source: &Source,
+    allow_internet_once: bool,
+    cancelled: Option<&dyn Fn() -> bool>,
 ) -> Result<Vec<String>, InstallError> {
     let known = bundled.extras();
     for extra in extras {
@@ -356,12 +395,17 @@ pub fn install(
                 .map_err(io(format!("removing {}", leftover.display())))?;
         }
     }
-    let status = pip_command(bundled, &all, &fresh, source)
-        .status()
-        .map_err(io(format!("starting {}", bundled.python().display())))?;
-    if !status.success() {
-        let _ = std::fs::remove_dir_all(&fresh);
-        return Err(InstallError::Pip(status));
+    let mut pip = pip_command(bundled, &all, &fresh, source);
+    let starting = io(format!("starting {}", bundled.python().display()));
+    match cancelled {
+        None => {
+            let status = pip.status().map_err(starting)?;
+            if !status.success() {
+                let _ = std::fs::remove_dir_all(&fresh);
+                return Err(InstallError::Pip(status));
+            }
+        }
+        Some(cancelled) => run_quietly(pip, cancelled, &fresh, starting)?,
     }
     let site = packages.site();
     if site.exists() {
@@ -376,6 +420,113 @@ pub fn install(
         let _ = std::fs::remove_dir_all(&old);
     }
     Ok(all)
+}
+
+/// How many of pip's last error lines [`InstallError::PipSaid`] keeps.
+const PIP_TAIL: usize = 4;
+
+/// Runs pip with no window and no output, polling `cancelled`; removes
+/// `fresh` when pip fails or is cancelled.
+fn run_quietly(
+    mut pip: Command,
+    cancelled: &dyn Fn() -> bool,
+    fresh: &Path,
+    starting: impl FnOnce(std::io::Error) -> InstallError,
+) -> Result<(), InstallError> {
+    pip.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        pip.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = pip.spawn().map_err(starting)?;
+    // Read on a thread so a chatty pip never fills the pipe and stalls.
+    let tail = child.stderr.take().map(|err| {
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            let mut last = std::collections::VecDeque::with_capacity(PIP_TAIL);
+            for line in std::io::BufReader::new(err).lines().map_while(Result::ok) {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                if last.len() == PIP_TAIL {
+                    last.pop_front();
+                }
+                last.push_back(line);
+            }
+            Vec::from(last).join(" ")
+        })
+    });
+    let status = loop {
+        if cancelled() {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = std::fs::remove_dir_all(fresh);
+            // The reader ends when the pipe closes; nothing waits for it.
+            return Err(InstallError::Cancelled);
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => std::thread::sleep(Duration::from_millis(100)),
+            Err(source) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = std::fs::remove_dir_all(fresh);
+                return Err(InstallError::Io {
+                    what: "waiting for pip".into(),
+                    source,
+                });
+            }
+        }
+    };
+    if status.success() {
+        return Ok(());
+    }
+    let _ = std::fs::remove_dir_all(fresh);
+    let said = tail.and_then(|t| t.join().ok()).unwrap_or_default();
+    Err(if said.is_empty() {
+        InstallError::Pip(status)
+    } else {
+        InstallError::PipSaid(status, said)
+    })
+}
+
+/// A rough download size for `extras`, in bytes, for the question asked
+/// before downloading: the locked wheels for this platform, rounded up. pip
+/// downloads every extra it installs, also those installed before
+/// ([`install`]), so pass them all.
+pub fn download_estimate(extras: &[String]) -> u64 {
+    const MB: u64 = 1_000_000;
+    // PyPI's Linux torch carries CUDA itself (about 3 GB with its NVIDIA
+    // wheels); Windows and macOS get a CPU or Metal build (about 0.3 GB with
+    // diffusers and transformers). PyTorch's CUDA build: about 2.2 GB.
+    let linux = cfg!(target_os = "linux");
+    extras
+        .iter()
+        .map(|e| match e.as_str() {
+            "vision" => 60 * MB,
+            "stt" => 150 * MB,
+            "cloud" => 120 * MB,
+            DIFFUSION | DIFFUSION_CUDA if linux => 3_000 * MB,
+            DIFFUSION => 300 * MB,
+            DIFFUSION_CUDA => 2_200 * MB,
+            _ => 100 * MB,
+        })
+        .sum()
+}
+
+/// The servers an install of `extras` from the index reaches: PyPI (whose
+/// files are on files.pythonhosted.org) and, for `diffusion-cuda`,
+/// PyTorch's index.
+pub fn index_servers(extras: &[String]) -> Vec<&'static str> {
+    let mut out = vec!["pypi.org", "files.pythonhosted.org"];
+    if extras.iter().any(|e| e == DIFFUSION_CUDA) {
+        out.push("download.pytorch.org");
+    }
+    out
 }
 
 /// Removes every installed extra (the built-in adapter keeps working).
@@ -834,6 +985,88 @@ mod tests {
         remove_all(&b, &root.join("data")).unwrap();
         assert!(p.installed().is_empty());
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Makes the layout's Python a shell script: it creates pip's `--target`
+    /// folder with a file in it, then runs `then`.
+    #[cfg(unix)]
+    fn fake_pip(b: &Bundled, then: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        let python = b.python();
+        std::fs::create_dir_all(python.parent().unwrap()).unwrap();
+        let script = format!(
+            "#!/bin/sh\nwhile [ $# -gt 0 ]; do\n  if [ \"$1\" = --target ]; then mkdir -p \"$2\" && \
+             touch \"$2/pkg.py\"; fi\n  shift\ndone\n{then}\n"
+        );
+        std::fs::write(&python, script).unwrap();
+        std::fs::set_permissions(&python, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_quiet_install_swaps_in_reports_pip_errors_and_can_be_cancelled() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let root = scratch("quiet");
+        let b = layout(&root);
+        let data = root.join("data");
+        let wheels = Source::Wheelhouse(root.clone());
+        let p = b.packages(&data);
+        let never = || false;
+
+        fake_pip(&b, "exit 0");
+        let got = install_cancellable(&b, &data, &["vision".into()], &wheels, false, &never);
+        assert_eq!(got.unwrap(), ["vision"]);
+        assert!(p.site().join("pkg.py").is_file());
+
+        fake_pip(
+            &b,
+            "echo 'ERROR: No matching distribution for onnxruntime' >&2\nexit 1",
+        );
+        let err =
+            install_cancellable(&b, &data, &["stt".into()], &wheels, false, &never).unwrap_err();
+        assert!(matches!(err, InstallError::PipSaid(..)), "{err}");
+        assert!(
+            err.to_string().contains("No matching distribution"),
+            "{err}"
+        );
+        assert_eq!(p.installed(), ["vision"], "the old packages stay");
+
+        // Cancelled while pip runs: killed, its folder gone, the old stay.
+        fake_pip(&b, "exec sleep 30");
+        let stop = AtomicBool::new(false);
+        let started = Instant::now();
+        let err = std::thread::scope(|s| {
+            s.spawn(|| {
+                std::thread::sleep(Duration::from_millis(300));
+                stop.store(true, Ordering::Release);
+            });
+            install_cancellable(&b, &data, &["stt".into()], &wheels, false, &|| {
+                stop.load(Ordering::Acquire)
+            })
+            .unwrap_err()
+        });
+        assert!(matches!(err, InstallError::Cancelled), "{err}");
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "pip was killed"
+        );
+        assert!(!p.dir.join("site-packages.new").exists());
+        assert_eq!(p.installed(), ["vision"]);
+        assert!(p.site().join("pkg.py").is_file());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn the_download_estimate_and_servers_follow_the_extras() {
+        let cuda = strings(&["diffusion-cuda", "stt", "vision"]);
+        let cpu = strings(&["diffusion", "stt", "vision"]);
+        assert!(download_estimate(&cuda) >= 2_000_000_000);
+        assert!(download_estimate(&strings(&["vision"])) < 100_000_000);
+        if !cfg!(target_os = "linux") {
+            assert!(download_estimate(&cpu) < 1_000_000_000);
+        }
+        assert!(index_servers(&cuda).contains(&"download.pytorch.org"));
+        assert_eq!(index_servers(&cpu), ["pypi.org", "files.pythonhosted.org"]);
     }
 
     #[test]

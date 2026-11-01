@@ -239,9 +239,9 @@ pub fn start_list(storage: Storage) -> Job<Vec<Entry>> {
 
 /// The settings folder: `%APPDATA%\Atidarla` on Windows,
 /// `~/Library/Application Support/Atidarla` on macOS, else
-/// `$XDG_CONFIG_HOME/atidarla` (or `~/.config/atidarla`), as
-/// `atd-app::settings::config_dir` has it.
-fn config_dir() -> Option<PathBuf> {
+/// `$XDG_CONFIG_HOME/atidarla` (or `~/.config/atidarla`). The app keeps
+/// `ui.toml` and `learn.toml` here (`atd-app::settings::config_dir` is this).
+pub fn config_dir() -> Option<PathBuf> {
     let var = |k: &str| {
         std::env::var_os(k)
             .filter(|v| !v.is_empty())
@@ -261,6 +261,39 @@ fn config_dir() -> Option<PathBuf> {
                 .join("atidarla"),
         )
     }
+}
+
+/// Bytes for people, in decimal units as file managers show them.
+pub fn human_size(bytes: u64) -> String {
+    let b = bytes as f64;
+    if bytes >= 1_000_000_000 {
+        format!("{:.2} GB", b / 1e9)
+    } else if bytes >= 1_000_000 {
+        format!("{:.1} MB", b / 1e6)
+    } else if bytes >= 1_000 {
+        format!("{:.1} KB", b / 1e3)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+/// Why the model files are kept unless asked (PRD A70 c), for the
+/// uninstall's question and the Storage panel: their size, their folder and
+/// who may reuse them. `kept` is the [`Kind::Models`] entries.
+pub fn models_explanation(kept: &[Entry]) -> String {
+    let size: u64 = kept.iter().map(|e| e.size).sum();
+    let folder = kept
+        .iter()
+        .find(|e| e.what == "model files")
+        .or(kept.first())
+        .map(|e| e.path.display().to_string())
+        .unwrap_or_default();
+    format!(
+        "The model files ({}, in {folder}) may be reused: a reinstall of Atidarla, or other \
+         tools pointed at that folder, can use them without downloading them again. Models \
+         that other tools manage themselves, such as Ollama's own store, are never touched.",
+        human_size(size)
+    )
 }
 
 /// Bytes under `path`, counting a symbolic link as itself and never what it
@@ -442,6 +475,39 @@ mod tests {
         assert!(s.models.symlink_metadata().is_err(), "the link itself goes");
         assert!(outside.join("keep.bin").is_file());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn sizes_read_like_a_file_manager() {
+        assert_eq!(human_size(40), "40 B");
+        assert_eq!(human_size(1_500), "1.5 KB");
+        assert_eq!(human_size(2_340_000), "2.3 MB");
+        assert_eq!(human_size(4_200_000_000), "4.20 GB");
+    }
+
+    #[test]
+    fn the_models_explanation_names_the_folder_size_and_reuse() {
+        let kept = [
+            Entry {
+                kind: Kind::Models,
+                what: "licence acceptances".into(),
+                path: "/c/Atidarla/accepted.toml".into(),
+                size: 0,
+            },
+            Entry {
+                kind: Kind::Models,
+                what: "model files".into(),
+                path: "/c/Atidarla/models".into(),
+                size: 2_000_000_000,
+            },
+        ];
+        let text = models_explanation(&kept);
+        assert!(text.contains("2.00 GB, in /c/Atidarla/models"), "{text}");
+        assert!(
+            text.contains("reinstall") && text.contains("other tools"),
+            "{text}"
+        );
+        assert!(text.contains("never touched"), "{text}");
     }
 
     #[test]

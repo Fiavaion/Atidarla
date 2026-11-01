@@ -5,7 +5,7 @@
 use std::io::{BufRead, IsTerminal, Write};
 
 use anyhow::{Result, bail};
-use atd_ai::storage::{Entry, Kind, Removal, Storage};
+use atd_ai::storage::{Entry, Kind, Removal, Storage, human_size, models_explanation};
 use clap::{Subcommand, ValueEnum};
 
 #[derive(Debug, Subcommand)]
@@ -88,7 +88,7 @@ fn line(e: &Entry) -> String {
     format!(
         "{:<9} {:>9}  {:<26} {}",
         e.kind.as_str(),
-        human(e.size),
+        human_size(e.size),
         e.what,
         e.path.display()
     )
@@ -111,41 +111,18 @@ fn report(r: &Removal) -> Result<()> {
     if !r.failed.is_empty() {
         bail!("{} item(s) could not be removed", r.failed.len());
     }
-    println!("freed {}", human(r.freed()));
+    println!("freed {}", human_size(r.freed()));
     Ok(())
-}
-
-/// Bytes for people, in decimal units as file managers show them.
-fn human(bytes: u64) -> String {
-    let b = bytes as f64;
-    if bytes >= 1_000_000_000 {
-        format!("{:.2} GB", b / 1e9)
-    } else if bytes >= 1_000_000 {
-        format!("{:.1} MB", b / 1e6)
-    } else if bytes >= 1_000 {
-        format!("{:.1} KB", b / 1e3)
-    } else {
-        format!("{bytes} B")
-    }
 }
 
 /// The question A70 asks about the model files.
 fn question(kept: &[Entry]) -> String {
-    let size: u64 = kept.iter().map(|e| e.size).sum();
-    let folder = kept
-        .iter()
-        .find(|e| e.what == "model files")
-        .or(kept.first())
-        .map(|e| e.path.display().to_string())
-        .unwrap_or_default();
     format!(
-        "Atidarla removed its AI Host packages, caches, logs and settings.\n\n\
-         Its model files ({}, in {folder}) are still in storage. They may be \
-         reused: a reinstall of Atidarla, or other tools pointed at that \
-         folder, can use them without downloading them again.\n\n\
+        "Atidarla removed its AI Host packages, caches, logs and settings. Its model files are \
+         still in storage.\n\n{}\n\n\
          Remove the model files too?\n\n\
          Yes removes them. No keeps them in storage.",
-        human(size)
+        models_explanation(kept)
     )
 }
 
@@ -205,14 +182,6 @@ fn dialog(_text: &str) -> Option<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn sizes_read_like_a_file_manager() {
-        assert_eq!(human(40), "40 B");
-        assert_eq!(human(1_500), "1.5 KB");
-        assert_eq!(human(2_340_000), "2.3 MB");
-        assert_eq!(human(4_200_000_000), "4.20 GB");
-    }
 
     #[test]
     fn the_question_names_the_folder_size_and_reuse() {
