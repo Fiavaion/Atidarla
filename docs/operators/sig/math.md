@@ -33,7 +33,7 @@ All platforms.
 
 ## Examples
 
-- [Audio-reactive feedback](../../../examples/audio-reactive-feedback.atidarla/) — `loudness`
-- [Beat clock](../../../examples/beat-clock.atidarla/) — `hue`
-- [Beat switcher](../../../examples/beat-switcher.atidarla/) — `index`, `flash`, `spin`
-- [Live control](../../../examples/live-control.atidarla/) — `degrees`
+- [Audio-reactive feedback](../../../examples/audio-reactive-feedback.lasair/) — `loudness`
+- [Beat clock](../../../examples/beat-clock.lasair/) — `hue`
+- [Beat switcher](../../../examples/beat-switcher.lasair/) — `index`, `flash`, `spin`
+- [Live control](../../../examples/live-control.lasair/) — `degrees`

@@ -31,5 +31,5 @@ All platforms.
 
 ## Examples
 
-- [Signal scope](../../../examples/signal-scope.atidarla/) — `waveform`, `trace`, `bars`, `others`
-- [Speech and chat](../../../examples/speech-chat.atidarla/) — `bars`
+- [Signal scope](../../../examples/signal-scope.lasair/) — `waveform`, `trace`, `bars`, `others`
+- [Speech and chat](../../../examples/speech-chat.lasair/) — `bars`

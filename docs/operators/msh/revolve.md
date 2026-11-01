@@ -34,4 +34,4 @@ All platforms.
 
 ## Examples
 
-- [Mesh Construction](../../../examples/mesh-construction.atidarla/) — `cup`
+- [Mesh Construction](../../../examples/mesh-construction.lasair/) — `cup`

@@ -44,4 +44,4 @@ All platforms.
 
 ## Examples
 
-- [Neural Growth](../../../examples/neural-growth.atidarla/) — `organism`, `coral`
+- [Neural Growth](../../../examples/neural-growth.lasair/) — `organism`, `coral`

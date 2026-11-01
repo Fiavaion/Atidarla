@@ -32,4 +32,4 @@ All platforms.
 
 ## Examples
 
-- [Mesh Primitives](../../../examples/mesh-primitives.atidarla/) — `cone`
+- [Mesh Primitives](../../../examples/mesh-primitives.lasair/) — `cone`

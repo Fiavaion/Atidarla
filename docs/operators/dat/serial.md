@@ -36,4 +36,4 @@ All platforms.
 
 ## Examples
 
-- [DAT serial](../../../examples/dat-serial.atidarla/) — `board`
+- [DAT serial](../../../examples/dat-serial.lasair/) — `board`

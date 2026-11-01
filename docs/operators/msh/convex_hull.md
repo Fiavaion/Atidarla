@@ -28,4 +28,4 @@ All platforms.
 
 ## Examples
 
-- [Mesh Construction](../../../examples/mesh-construction.atidarla/) — `hull`
+- [Mesh Construction](../../../examples/mesh-construction.lasair/) — `hull`

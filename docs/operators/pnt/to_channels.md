@@ -30,4 +30,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Outputs](../../../examples/pnt-outputs.atidarla/) — `positions`
+- [PNT Outputs](../../../examples/pnt-outputs.lasair/) — `positions`

@@ -26,4 +26,4 @@ All platforms.
 
 ## Examples
 
-- [PNT For-Each](../../../examples/pnt-foreach.atidarla/) — `merge_copies`, `merge_bands`
+- [PNT For-Each](../../../examples/pnt-foreach.lasair/) — `merge_copies`, `merge_bands`

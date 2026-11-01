@@ -10,9 +10,9 @@ and For-Each: [`docs/design/solver-foreach.md`](../../design/solver-foreach.md).
 ## What was built
 
 Every operator ships complete (CLAUDE.md rule 7): schema with a cook budget, a generated page in
-`docs/operators/pnt/`, a GPU test with expected values (`crates/atd-ops-pnt/tests/batch/`), use
+`docs/operators/pnt/`, a GPU test with expected values (`crates/lsr-ops-pnt/tests/batch/`), use
 in an example project (a unit test checks every PNT operator appears in `examples/`), and an
-offline class in `classify()` (`crates/atd-cli/src/render.rs`, `docs/render.md`).
+offline class in `classify()` (`crates/lsr-cli/src/render.rs`, `docs/render.md`).
 
 | Group | Operators | Where |
 |---|---|---|
@@ -48,10 +48,10 @@ reuse:
 
 | Project | Shows |
 |---|---|
-| `examples/pnt-fountain.atidarla` | Emitter from a Scatter ring into a Particles loop: Gravity, Vortex, Turbulence, Wind, Drag, Collide; Colour by speed |
-| `examples/pnt-deformers.atidarla` | Twist, Delete (a window), Taper, Bend, Wave on a column; Randomize, Group, Delete, Subset, Copy to Points, Transform, Merge |
-| `examples/pnt-constellation.atidarla` | Scatter sphere, Noise, Smooth, Normals, Colour (N.z), Sort, Connect drawn as lines under sprites; a Subset star field |
-| `examples/pnt-solver.atidarla` | Attribute (noise into `v`), Piece, Randomize keyed by piece, Solver with Attract, Turbulence, Drag, Integrate, Age; Attribute Math |
+| `examples/pnt-fountain.lasair` | Emitter from a Scatter ring into a Particles loop: Gravity, Vortex, Turbulence, Wind, Drag, Collide; Colour by speed |
+| `examples/pnt-deformers.lasair` | Twist, Delete (a window), Taper, Bend, Wave on a column; Randomize, Group, Delete, Subset, Copy to Points, Transform, Merge |
+| `examples/pnt-constellation.lasair` | Scatter sphere, Noise, Smooth, Normals, Colour (N.z), Sort, Connect drawn as lines under sprites; a Subset star field |
+| `examples/pnt-solver.lasair` | Attribute (noise into `v`), Piece, Randomize keyed by piece, Solver with Attract, Turbulence, Drag, Integrate, Age; Attribute Math |
 
 ## Evidence (actually run, 2026-10-18, RTX 5070 Ti, Windows 11, DX12)
 
@@ -59,13 +59,13 @@ Other agents were compiling and running GPU work on the same machine, so timings
 
 | Check | Result |
 |---|---|
-| `cargo test -p atd-ops-pnt` | lib 6, `alloc` 1, `alloc_batch` 1, `batch` 24, `ops` 6 passed; spikes and the fusion bench ignored |
+| `cargo test -p lsr-ops-pnt` | lib 6, `alloc` 1, `alloc_batch` 1, `batch` 24, `ops` 6 passed; spikes and the fusion bench ignored |
 | `cargo test --workspace` | 443 passed, 0 failed, 6 ignored (the four spikes, the fusion bench, one existing) |
 | `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all -- --check` | clean |
-| `cargo run -p atd-cli -- docs --check` | up to date |
-| `cargo run -p atd-cli -- check --gpu --allow-python-ops examples/*.atidarla` | 25 of 25 ok (including the four new ones) |
-| `atidarla render` twice, frames 0-120, SHA-256 per frame (release) | pnt-fountain, pnt-deformers, pnt-constellation, pnt-solver: 120/120 identical each, 120 distinct frames each; the core's particles and points (Particles changed, see below) still 120/120 |
-| `atidarla bench` (release), after the Particles change | `pt2.particles_2m` p50 1.87 ms, p95 2.05 ms, GPU simulate 0.80 ms, simulate + draw 1.80 ms, no creations after warm-up (core: 1.86 / 2.02 / 0.75 / 1.78 ms); `pt1.img_chain_4k` p50 5.56 ms |
+| `cargo run -p lsr-cli -- docs --check` | up to date |
+| `cargo run -p lsr-cli -- check --gpu --allow-python-ops examples/*.lasair` | 25 of 25 ok (including the four new ones) |
+| `lasair render` twice, frames 0-120, SHA-256 per frame (release) | pnt-fountain, pnt-deformers, pnt-constellation, pnt-solver: 120/120 identical each, 120 distinct frames each; the core's particles and points (Particles changed, see below) still 120/120 |
+| `lasair bench` (release), after the Particles change | `pt2.particles_2m` p50 1.87 ms, p95 2.05 ms, GPU simulate 0.80 ms, simulate + draw 1.80 ms, no creations after warm-up (core: 1.86 / 2.02 / 0.75 / 1.78 ms); `pt1.img_chain_4k` p50 5.56 ms |
 | Rule 2, `tests/alloc_batch.rs`: four animated chains (particle loop with Emitter and five forces; deformer stack with Delete, Attribute Math, Randomize; Noise, Normals, Connect with lines; a Solver loop with Attract, Integrate, Age), 24 node-cooks per frame, 100 frames after 40 of warm-up | 0 buffers, 0 bind groups, 0 textures created; 40.0 heap allocations per node-cook (bound 45, the geometry core's; nearly all wgpu's per pass and per `write_buffer`) |
 | S3 follow-up (`tests/fusion.rs`, release): 30 Transform deformers over 2M points | GPU p50 1.67 ms, p95 1.94 ms unfused; the same stack composed into one Transform (what fusion would dispatch; outputs agree to 1.6e-6): p50 0.15 ms, p95 0.21 ms |
 | Same run: the geometry core's 30 curl-noise deformers over 2M points | GPU p50 4.19 ms, p95 4.69 ms (4.53 / 5.23 ms in the core's run) |
@@ -106,14 +106,14 @@ Mark ratified all three for M2 on 2026-10-30 (questions 1-3 below). Design and c
 [`solver-foreach.md`](../../design/solver-foreach.md) (loops, sub-steps, For-Each) and
 [`geometry-attributes.md`](../../design/geometry-attributes.md) §9 "Deformer fusion".
 
-- **Engine loops** (`atd_gpu::engine`, `GeoOp::repeat`, `Repeat`, `GeoCtx::iteration` and
+- **Engine loops** (`lsr_gpu::engine`, `GeoOp::repeat`, `Repeat`, `GeoCtx::iteration` and
   `iterations`): a GEO node with a feedback input heads a loop; the engine unrolls the frame's
   plan into passes, submits between passes and divides `dt` for sub-steps. No format change.
 - **Solver** gains Sub-steps (1-64): four sub-steps at 50 fps are bit-identical to one step at
   200 fps.
 - **For-Each** (`pnt.foreach`) and **For-Each End** (`pnt.foreach_end`): count or pieces, up to
   256 passes, `iteration` on every point; End merges the passes (compacting GPU counts on the
-  GPU). Example `examples/pnt-foreach.atidarla`; offline class Pure.
+  GPU). Example `examples/pnt-foreach.lasair`; offline class Pure.
 - **Deformer fusion** (`GeoOp::point_stage`, `PointFuser`, `OpLibrary::set_point_fuser`,
   `Engine::set_fusion`, `Engine::fused_last_frame`; `src/fuse.rs`): Bend, Twist, Taper, Wave,
   Attract, Vortex, Drag, Gravity, Collide, Integrate and Transform fuse; Wind and Turbulence do
@@ -168,6 +168,6 @@ Evidence: the 2026-10-30 row of the pre-work log in [`../M2.md`](../M2.md).
 - **Connect writes topology on the GPU** (`__kind`, `__start`, `__corners` attributes without
   CPU copies): an MSH operator reading it must read it back (`readback`).
 - **Merge and Copy to Points are point-only**; an MSH Merge needs to offset corner indices.
-- **Shared glue touched**: one block of `classify()` arms in `crates/atd-cli/src/render.rs`,
+- **Shared glue touched**: one block of `classify()` arms in `crates/lsr-cli/src/render.rs`,
   the PNT lines of `docs/render.md`'s class table, four rows of `examples/README.md`; nothing in
-  `atd-gpu` or `atd-core`.
+  `lsr-gpu` or `lsr-core`.

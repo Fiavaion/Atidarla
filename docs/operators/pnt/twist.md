@@ -31,5 +31,5 @@ All platforms.
 
 ## Examples
 
-- [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `twist`
-- [PNT For-Each](../../../examples/pnt-foreach.atidarla/) — `swirl`
+- [PNT Deformers](../../../examples/pnt-deformers.lasair/) — `twist`
+- [PNT For-Each](../../../examples/pnt-foreach.lasair/) — `swirl`

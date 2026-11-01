@@ -1,6 +1,6 @@
 # Accessibility
 
-Atidarla can be used without a mouse, at any interface size, and with colour-blind-safe wire
+Lasair can be used without a mouse, at any interface size, and with colour-blind-safe wire
 colours. View > Accessibility shows the scale, the wire legend and the keys below. The same keys
 work on Windows and macOS (Ctrl on Windows and Linux is Cmd on macOS).
 
@@ -12,11 +12,11 @@ account, for every project, in `ui.toml` in the app's settings folder:
 
 | OS | Folder |
 |---|---|
-| Windows | `%APPDATA%\Atidarla` |
-| macOS | `~/Library/Application Support/Atidarla` |
-| Linux | `$XDG_CONFIG_HOME/atidarla` (or `~/.config/atidarla`) |
+| Windows | `%APPDATA%\Lasair` |
+| macOS | `~/Library/Application Support/Lasair` |
+| Linux | `$XDG_CONFIG_HOME/lasair` (or `~/.config/lasair`) |
 
-`atidarla-app --smoke` ignores the file and never writes it.
+`lasair-app --smoke` ignores the file and never writes it.
 
 ## Keyboard
 
@@ -71,7 +71,7 @@ cue: each type has its own socket shape, socket tooltips name the type, and View
 | Material | vermillion `#D55E00` | hexagon | MAT |
 | Composition | grey `#BBBBBB` | ring | CMP |
 
-`crates/atd-app/src/wires.rs` tests the palette: with the Machado, Oliveira & Fernandes (2009)
+`crates/lsr-app/src/wires.rs` tests the palette: with the Machado, Oliveira & Fernandes (2009)
 simulation at full severity, every pair stays at least 15 ΔE\*ab apart in normal vision and under
 each dichromacy (the closest pair is yellow and orange under deuteranopia, 17), every colour has
 at least 3:1 contrast against the dark canvas, and labels have at least 4.5:1 on their wire.

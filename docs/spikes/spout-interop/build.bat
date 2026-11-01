@@ -1,5 +1,5 @@
 @echo off
-rem Builds the Spout SDK interop peers (Atidarla, MIT OR Apache-2.0).
+rem Builds the Spout SDK interop peers (Lasair, MIT OR Apache-2.0).
 rem usage: build.bat <path to Spout2 SPOUTSDK folder> [output folder]
 rem Compiles the same sources as the SDK's SpoutDX_static CMake target
 rem (SpoutDirectX\SpoutDX\CMakeLists.txt) with MSVC, then links each peer.

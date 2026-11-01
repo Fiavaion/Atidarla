@@ -31,10 +31,10 @@ All platforms.
 
 ## Examples
 
-- [Mesh Boolean to glTF](../../../examples/mesh-boolean-gltf.atidarla/) — `ball`
-- [Mesh Construction](../../../examples/mesh-construction.atidarla/) — `ball`
-- [Mesh Modelling](../../../examples/mesh-modelling.atidarla/) — `ball`
-- [Mesh Primitives](../../../examples/mesh-primitives.atidarla/) — `ball`
-- [Scatter to Iso Surface](../../../examples/mesh-scatter-iso.atidarla/) — `base`
-- [Mesh Shaping](../../../examples/mesh-shaping.atidarla/) — `ball`
-- [PNT Motion](../../../examples/pnt-motion.atidarla/) — `ball`
+- [Mesh Boolean to glTF](../../../examples/mesh-boolean-gltf.lasair/) — `ball`
+- [Mesh Construction](../../../examples/mesh-construction.lasair/) — `ball`
+- [Mesh Modelling](../../../examples/mesh-modelling.lasair/) — `ball`
+- [Mesh Primitives](../../../examples/mesh-primitives.lasair/) — `ball`
+- [Scatter to Iso Surface](../../../examples/mesh-scatter-iso.lasair/) — `base`
+- [Mesh Shaping](../../../examples/mesh-shaping.lasair/) — `ball`
+- [PNT Motion](../../../examples/pnt-motion.lasair/) — `ball`

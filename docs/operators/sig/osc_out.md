@@ -24,7 +24,7 @@ Sink: requested every frame even when nothing downstream is viewed, because it h
 |---|---|---|---|---|---|
 | `host` | Host | string | `"127.0.0.1"` |  | Destination host name or IP address. |
 | `port` | Port | int | `9001` | 1 – 65535 | Destination UDP port. |
-| `prefix` | Prefix | string | `"/atd"` |  | Address prefix for every message. |
+| `prefix` | Prefix | string | `"/lsr"` |  | Address prefix for every message. |
 
 ## Platforms
 
@@ -32,4 +32,4 @@ All platforms.
 
 ## Examples
 
-- [Live control](../../../examples/live-control.atidarla/) — `osc_out1`
+- [Live control](../../../examples/live-control.lasair/) — `osc_out1`

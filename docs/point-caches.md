@@ -5,19 +5,19 @@ points, and depth sensors. The operators:
 
 | Operator | Use |
 |---|---|
-| [Point File In](operators/pnt/file_in.md) (`pnt.file_in`) | A point file or a numbered sequence: `.atdpc`, PLY, CSV, XYZ/PTS. |
+| [Point File In](operators/pnt/file_in.md) (`pnt.file_in`) | A point file or a numbered sequence: `.lsrpc`, PLY, CSV, XYZ/PTS. |
 | [Points from Image](operators/pnt/points_from_image.md) (`pnt.points_from_image`) | A grid of points coloured by an image, optionally pushed out by its brightness. |
 | [Points from Depth](operators/pnt/points_from_depth.md) (`pnt.points_from_depth`) | A depth image back-projected through a pinhole camera. |
 | [Attribute from Image](operators/pnt/attribute_from_image.md) (`pnt.attribute_from_image`) | An image looked up at each point (uv, a planar projection or the point number). |
 | [Sensor In](operators/pnt/sensor_in.md) (`pnt.sensor_in`) | Depth and body tracking: a test scene, recordings, live K4A cameras. |
 
-Example: [`examples/pnt-capture.atidarla`](../examples/pnt-capture.atidarla/).
+Example: [`examples/pnt-capture.lasair`](../examples/pnt-capture.lasair/).
 
 ## Point File In
 
 Reads on a worker thread (CLAUDE.md rule 1): the file is parsed and its attributes uploaded to
 the GPU there, and the node swaps the result in when it is ready. Live, the last file stays on
-screen until the next arrives; offline (`atidarla render`) each frame waits for its own file.
+screen until the next arrives; offline (`lasair render`) each frame waits for its own file.
 
 | Column or property | Becomes |
 |---|---|
@@ -32,22 +32,22 @@ At most 16 attributes are read from one file. Without an `id` column the point n
 written as `id`.
 
 **Sequences.** `$F` in the file name is the Frame parameter; `$F4` pads it to four digits
-(`cache.$F4.atdpc` → `cache.0012.atdpc`), as Houdini names caches. Drive Frame with an
+(`cache.$F4.lsrpc` → `cache.0012.lsrpc`), as Houdini names caches. Drive Frame with an
 expression, for example `frame + 1`, or `int(time * 24) % 120 + 1` to loop 120 frames at 24
 fps. A missing frame is a node error.
 
-**Show bundles.** `atidarla export-show` copies single files; it does not yet expand `$F`
+**Show bundles.** `lasair export-show` copies single files; it does not yet expand `$F`
 sequences, so a project that plays one reports the pattern as missing. Keep sequences inside
 the project folder and copy the folder.
 
-## The `.atdpc` format
+## The `.lsrpc` format
 
-Atidarla's own point cache: binary, little-endian, so a frame of a sequence loads with no
+Lasair's own point cache: binary, little-endian, so a frame of a sequence loads with no
 parsing. Version 1:
 
 | Bytes | Field |
 |---|---|
-| 6 | magic `ATDPC\0` |
+| 6 | magic `LSRPC\0` |
 | 2 | version (`u16`, 1) |
 | 4 | point count (`u32`) |
 | 4 | attribute count (`u32`) |
@@ -57,23 +57,23 @@ parsing. Version 1:
 ## Converting caches
 
 ```sh
-atidarla points convert scan.ply scan.atdpc
-atidarla points convert 'sim/fluid.$F4.csv' 'cache/fluid.$F4.atdpc' --range 1-240
-atidarla points convert scan_cm.xyz scan.atdpc --scale 0.01   # centimetres to metres
-atidarla points info cache/fluid.0001.atdpc
+lasair points convert scan.ply scan.lsrpc
+lasair points convert 'sim/fluid.$F4.csv' 'cache/fluid.$F4.lsrpc' --range 1-240
+lasair points convert scan_cm.xyz scan.lsrpc --scale 0.01   # centimetres to metres
+lasair points info cache/fluid.0001.lsrpc
 ```
 
-`convert` reads `.atdpc`, PLY, CSV and XYZ/PTS and writes `.atdpc`, PLY or CSV (chosen by the
+`convert` reads `.lsrpc`, PLY, CSV and XYZ/PTS and writes `.lsrpc`, PLY or CSV (chosen by the
 output's extension); quote names with `$F` so the shell leaves them alone.
 
 **Houdini `.bgeo` / `.bgeo.sc`** and other formats without an open specification are not read
-by Atidarla (no GPL or closed code in core crates, rule 3). Convert them with the application
-that wrote them, then with `atidarla points convert`:
+by Lasair (no GPL or closed code in core crates, rule 3). Convert them with the application
+that wrote them, then with `lasair points convert`:
 
 ```sh
 # Houdini (Apprentice and Indie included) ships gconvert:
 for f in fluid.*.bgeo.sc; do gconvert "$f" "${f%.bgeo.sc}.ply"; done
-atidarla points convert 'fluid.$F4.ply' 'fluid.$F4.atdpc' --range 1001-1240
+lasair points convert 'fluid.$F4.ply' 'fluid.$F4.lsrpc' --range 1001-1240
 ```
 
 From a Houdini scene, a ROP Geometry Output node writing `.ply` does the same. Alembic point
@@ -112,12 +112,12 @@ Points draws them with Draw set to lines or both).
 **Capability (PRD A19).** Live capture needs the K4A SDK, which is Windows-first: the operator
 declares `win+sdk:k4a` with a Degrade fallback. Where the flag does not hold the node still
 loads and runs the test scene and recordings; the `k4a` device reports why it is not
-available, and `atidarla check --gpu` lists such a node as not available on this platform
+available, and `lasair check --gpu` lists such a node as not available on this platform
 rather than failing.
 
 **Status.** No SDK is linked into the core crates, so `cargo deny` and the macOS build are
 unaffected. The capture backend is planned as a plugin crate that loads `k4a.dll` (and the body
 tracking SDK) at run time and registers the `sdk:k4a` capability when it finds them; until it
 lands, the `k4a` device reports that it is not in this build. To play a session today, export
-its frames as PLY point clouds with the vendor's tools and convert them with `atidarla points
+its frames as PLY point clouds with the vendor's tools and convert them with `lasair points
 convert`.

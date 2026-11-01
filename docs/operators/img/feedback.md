@@ -29,5 +29,5 @@ All platforms.
 
 ## Examples
 
-- [Audio-reactive feedback](../../../examples/audio-reactive-feedback.atidarla/) — `feedback1`
-- [Soak show](../../../examples/soak-show.atidarla/) — `feedback`
+- [Audio-reactive feedback](../../../examples/audio-reactive-feedback.lasair/) — `feedback1`
+- [Soak show](../../../examples/soak-show.lasair/) — `feedback`

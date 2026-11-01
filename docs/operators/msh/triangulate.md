@@ -26,4 +26,4 @@ All platforms.
 
 ## Examples
 
-- [Mesh Modelling](../../../examples/mesh-modelling.atidarla/) — `tris`
+- [Mesh Modelling](../../../examples/mesh-modelling.lasair/) — `tris`

@@ -34,4 +34,4 @@ All platforms.
 
 ## Examples
 
-- [DAT network](../../../examples/dat-network.atidarla/) — `socket`
+- [DAT network](../../../examples/dat-network.lasair/) — `socket`

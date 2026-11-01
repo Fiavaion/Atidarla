@@ -27,4 +27,4 @@ All platforms.
 
 ## Examples
 
-- [Gaussian Splats](../../../examples/splats.atidarla/) — `ply_in`, `spz_in`, `sog_in`
+- [Gaussian Splats](../../../examples/splats.lasair/) — `ply_in`, `spz_in`, `sog_in`

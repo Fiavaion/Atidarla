@@ -32,4 +32,4 @@ All platforms.
 
 ## Examples
 
-- [Simulations](../../../examples/simulations.atidarla/) — `wobble`
+- [Simulations](../../../examples/simulations.lasair/) — `wobble`

@@ -33,10 +33,10 @@ All platforms.
 
 ## Examples
 
-- [Scatter to Iso Surface](../../../examples/mesh-scatter-iso.atidarla/) — `wobble`
-- [Mesh Shaping](../../../examples/mesh-shaping.atidarla/) — `bumps`
-- [Particles](../../../examples/particles.atidarla/) — `flow`
-- [PNT Constellation](../../../examples/pnt-constellation.atidarla/) — `flow`
-- [PNT Fields](../../../examples/pnt-fields.atidarla/) — `wander`, `swirl`
-- [Points](../../../examples/points.atidarla/) — `swirl`, `ripple`
-- [Soak show](../../../examples/soak-show.atidarla/) — `flow`
+- [Scatter to Iso Surface](../../../examples/mesh-scatter-iso.lasair/) — `wobble`
+- [Mesh Shaping](../../../examples/mesh-shaping.lasair/) — `bumps`
+- [Particles](../../../examples/particles.lasair/) — `flow`
+- [PNT Constellation](../../../examples/pnt-constellation.lasair/) — `flow`
+- [PNT Fields](../../../examples/pnt-fields.lasair/) — `wander`, `swirl`
+- [Points](../../../examples/points.lasair/) — `swirl`, `ripple`
+- [Soak show](../../../examples/soak-show.lasair/) — `flow`

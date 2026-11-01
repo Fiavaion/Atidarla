@@ -29,5 +29,5 @@ All platforms.
 
 ## Examples
 
-- [Keying](../../../examples/keying.atidarla/) — `mix`
-- [Time effects](../../../examples/time-effects.atidarla/) — `echo`
+- [Keying](../../../examples/keying.lasair/) — `mix`
+- [Time effects](../../../examples/time-effects.lasair/) — `echo`

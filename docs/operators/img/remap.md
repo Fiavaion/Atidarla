@@ -27,4 +27,4 @@ All platforms.
 
 ## Examples
 
-- [Image processing](../../../examples/image-processing.atidarla/) — `remapped`
+- [Image processing](../../../examples/image-processing.lasair/) — `remapped`

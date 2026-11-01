@@ -32,4 +32,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `bend`
+- [PNT Deformers](../../../examples/pnt-deformers.lasair/) — `bend`

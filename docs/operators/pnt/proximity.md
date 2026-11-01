@@ -30,4 +30,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Fields](../../../examples/pnt-fields.atidarla/) — `near_brush`
+- [PNT Fields](../../../examples/pnt-fields.lasair/) — `near_brush`

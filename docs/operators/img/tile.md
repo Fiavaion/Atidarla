@@ -29,4 +29,4 @@ All platforms.
 
 ## Examples
 
-- [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `tile1`
+- [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.lasair/) — `tile1`

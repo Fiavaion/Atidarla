@@ -50,6 +50,6 @@ All platforms.
 
 ## Examples
 
-- [Particles](../../../examples/particles.atidarla/) — `system`
-- [PNT Fountain](../../../examples/pnt-fountain.atidarla/) — `system`
-- [Soak show](../../../examples/soak-show.atidarla/) — `system`
+- [Particles](../../../examples/particles.lasair/) — `system`
+- [PNT Fountain](../../../examples/pnt-fountain.lasair/) — `system`
+- [Soak show](../../../examples/soak-show.lasair/) — `system`

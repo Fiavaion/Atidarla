@@ -1,15 +1,15 @@
 # Soak on macOS, 60 minutes (PT-10 smoke test)
 
 PT-10 is judged on the Windows lab image (RTX 4070) over 24 hours. This is the 60-minute macOS run
-of the same command, to prove `atidarla soak` and look for leaks and stalls early.
+of the same command, to prove `lasair soak` and look for leaks and stalls early.
 
 ```sh
-caffeinate -i atidarla soak examples/soak-show.atidarla --minutes 60 --warmup 120 --sample 10 --cycle-seconds 8 --out <dir>
+caffeinate -i lasair soak examples/soak-show.lasair --minutes 60 --warmup 120 --sample 10 --cycle-seconds 8 --out <dir>
 ```
 
 - Machine: Apple M5 Pro, 48 GB, macOS 26.6.2, Metal. Release build of commit `8ebfd38`
-  (`atidarla soak` as committed).
-- Patch: `examples/soak-show.atidarla`: the Stage deck of `stage-deck` (3 layers × 5 columns,
+  (`lasair soak` as committed).
+- Patch: `examples/soak-show.lasair`: the Stage deck of `stage-deck` (3 layers × 5 columns,
   120 BPM clock, fades and wipes) plus a 400,000-particle system with bloom and an image
   feedback loop as the fifth column, 1280×720. Headless, every node cooks every frame.
 - Stage: the next column launched every 8 s (449 launches per run).
@@ -55,4 +55,4 @@ nothing else running, passes.
 ## Still to do for PT-10
 
 The 24-hour run on the NCAD Windows lab image (RTX 4070):
-`atidarla soak examples/soak-show.atidarla --hours 24 --warmup 300 --cycle-seconds 8 --out soak-24h`.
+`lasair soak examples/soak-show.lasair --hours 24 --warmup 300 --cycle-seconds 8 --out soak-24h`.

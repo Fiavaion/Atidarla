@@ -21,19 +21,19 @@ PT-3 says ≥30 fps (floor 24) on an RTX 4070. Confirm it or propose a revised n
 
 ## Implementation
 
-`ai-host/src/atd_ai_host/adapters/diffusion.py` (adapter `diffusion.sd`), written from the paper's
+`ai-host/src/lsr_ai_host/adapters/diffusion.py` (adapter `diffusion.sd`), written from the paper's
 equations (arXiv 2312.12491): SDEdit noising, stream batch (one U-Net pass advances a batch whose
 elements sit at different steps; deterministic DDIM step between them), R-CFG `self` and `onetime`,
 the stochastic similarity filter, TAESD (`AutoencoderTiny`), Prompt Blend. diffusers/transformers
 only load the networks. `steps` is the number of U-Net steps; `strength` sets the first timestep
 (`t0 = round(1000·strength) − 1`, trailing spacing below it).
 
-Run: `uv run --extra diffusion atd-ai-host bench --model sd-turbo --size 512 --steps N --frames 600 [...]`
+Run: `uv run --extra diffusion lsr-ai-host bench --model sd-turbo --size 512 --steps N --frames 600 [...]`
 (30 warm-up frames, then 600 timed; moving 8-frame test pattern unless `--static`).
 
 **Licence:** SD-Turbo is under the Stability AI community licence (non-commercial use without a
 membership; RESEARCH §4.9). Mark accepted it for benchmarking on 2026-10-30. Weights live in the
-model cache (`~/Library/Caches/Atidarla/models/sd-turbo`), never in the repo. A commercial-safe
+model cache (`~/Library/Caches/Lasair/models/sd-turbo`), never in the repo. A commercial-safe
 model through the same pipeline is still to do.
 
 ## Results
@@ -79,7 +79,7 @@ U-Net 65 ms, TAESD decode 9.8 ms, download 1.3 ms. `channels_last` makes the MPS
 
 ### RTX 4070 12 GB, Windows — to run
 
-`uv run --extra diffusion atd-ai-host bench --model sd-turbo --steps 1` (and `--steps 2`,
+`uv run --extra diffusion lsr-ai-host bench --model sd-turbo --steps 1` (and `--steps 2`,
 `--rcfg self`, `--similarity 0.98 --static`, `--via-protocol`). TensorRT engine cache not implemented yet.
 
 ### RTX 4090 — to run (PT-4)

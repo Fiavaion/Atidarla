@@ -28,7 +28,7 @@ All platforms.
 
 ## Examples
 
-- [Beat clock](../../../examples/beat-clock.atidarla/) — `cycle_fraction`
-- [Beat switcher](../../../examples/beat-switcher.atidarla/) — `bar_phase`, `beat_phase`
-- [Live control](../../../examples/live-control.atidarla/) — `x`, `y`
-- [Signal scope](../../../examples/signal-scope.atidarla/) — `luma`
+- [Beat clock](../../../examples/beat-clock.lasair/) — `cycle_fraction`
+- [Beat switcher](../../../examples/beat-switcher.lasair/) — `bar_phase`, `beat_phase`
+- [Live control](../../../examples/live-control.lasair/) — `x`, `y`
+- [Signal scope](../../../examples/signal-scope.lasair/) — `luma`

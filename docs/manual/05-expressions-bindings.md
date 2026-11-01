@@ -58,7 +58,7 @@ op('level1').par.contrast * 0.5       # half of another node's Contrast
 ```
 
 (The first is from the example
-[`kaleidoscope-tunnel`](../../examples/kaleidoscope-tunnel.atidarla/).)
+[`kaleidoscope-tunnel`](../../examples/kaleidoscope-tunnel.lasair/).)
 
 On a vector or colour the result drives every component, as a binding does: `1 + 0.25 * sin(time)`
 on a Transform's **Scale** pulses the image evenly, `0.5` on a colour makes it mid-grey with its
@@ -87,7 +87,7 @@ Every native expression is also valid Python and gives the same answer in both t
 | `and`, `or`, `not`, `a if c else b` | Logic |
 | `abs min max round int float bool pow` | Built-in functions |
 | `sqrt exp log log2 log10 sin cos tan asin acos atan atan2 hypot degrees radians floor ceil trunc` | Maths |
-| `clamp(x, low, high)`, `lerp(a, b, t)` | Atidarla's own helpers |
+| `clamp(x, low, high)`, `lerp(a, b, t)` | Lasair's own helpers |
 | `time`, `frame` | Seconds and frames since start. The node then cooks every frame |
 | `me.digits` | The number at the end of the node's name (`level3` gives 3) |
 | `op('name').par.param`, `op('name').par.param[1]` | Another node's parameter, or one component of a vector or colour |
@@ -115,7 +115,7 @@ full	1
 cell, or one that holds text, is an error that names the cell, and the parameter keeps its stored
 value. Changing the table updates the parameter. In a Python expression a cell that is not a
 number gives its text instead. The example
-[`dat-tables`](../../examples/dat-tables.atidarla/) reads its `looks` table this way.
+[`dat-tables`](../../examples/dat-tables.lasair/) reads its `looks` table this way.
 
 ### Things to know
 
@@ -135,11 +135,11 @@ number gives its text instead. The example
   by the assistant, waits for **File, Allow Python...** on its own, while the rest keeps running.
   "Allow and remember" remembers the `ops/` files only, so a project with Python expressions
   asks every time it opens. A Python expression you type yourself in the parameter panel runs
-  straight away. Headless, `atidarla check`, `render`, `serve` and the other commands run them
+  straight away. Headless, `lasair check`, `render`, `serve` and the other commands run them
   only with `--allow-python-ops`.
 
 Full reference: [`docs/expressions.md`](../expressions.md). Another example:
-[`live-control`](../../examples/live-control.atidarla/) uses a Python expression on Contrast.
+[`live-control`](../../examples/live-control.lasair/) uses a Python expression on Contrast.
 
 ## Which should I use?
 

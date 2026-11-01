@@ -20,7 +20,7 @@ Draws text (several lines allowed) over the input or a background colour, in a b
 
 | Name | Label | Type | Default | Range / options | Description |
 |---|---|---|---|---|---|
-| `text` | Text | string | `"Atidarla"` |  | The text; several lines are allowed. |
+| `text` | Text | string | `"Lasair"` |  | The text; several lines are allowed. |
 | `font` | Font | menu | `"sans"` | `sans`, `mono` | Built-in font: `sans` (Ubuntu Light) or `mono` (Hack). |
 | `font_file` | Font File | path | `""` |  | Path to a .ttf or .otf file; overrides Font when set. |
 | `size` | Size | float | `0.1` | ≥ 0 | Line height as a fraction of the image height. |
@@ -37,10 +37,10 @@ All platforms.
 
 ## Examples
 
-- [Beat switcher](../../../examples/beat-switcher.atidarla/) — `title`
-- [Pack: Chromatic Aberration](../../../examples/pack-chromatic-aberration.atidarla/) — `title`
-- [Pack: Duotone](../../../examples/pack-duotone.atidarla/) — `title`
-- [Pack: Film Grain](../../../examples/pack-film-grain.atidarla/) — `title`
-- [Pack: Neon Edges](../../../examples/pack-neon-edges.atidarla/) — `label`
-- [Soak show](../../../examples/soak-show.atidarla/) — `title`
-- [Stage deck](../../../examples/stage-deck.atidarla/) — `title`
+- [Beat switcher](../../../examples/beat-switcher.lasair/) — `title`
+- [Pack: Chromatic Aberration](../../../examples/pack-chromatic-aberration.lasair/) — `title`
+- [Pack: Duotone](../../../examples/pack-duotone.lasair/) — `title`
+- [Pack: Film Grain](../../../examples/pack-film-grain.lasair/) — `title`
+- [Pack: Neon Edges](../../../examples/pack-neon-edges.lasair/) — `label`
+- [Soak show](../../../examples/soak-show.lasair/) — `title`
+- [Stage deck](../../../examples/stage-deck.lasair/) — `title`

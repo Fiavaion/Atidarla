@@ -16,23 +16,23 @@ Each area has its own notes file (what was built, evidence actually run, open qu
 | MAT + 3D render | `img.render` (perspective/ortho, depth, 4x MSAA, one light) and 6 materials; `msh.platonic` as a test source | `mat-render.md` | 1M triangles at 1080p about 0.4 ms (noisy); frames inspected by eye |
 | Packs (FR-P4) | Nested networks, promoted parameters, versions, lock/unlock, update in place, folder format, 15 shipped Packs (the ≥15 the Palette needs) | `packs.md`, `../../packs.md` | flattened before the cook; fuzzed; Pack examples render identically |
 | NCA + compute (FR-K5) | `img.nca` (hand-built weights only) and `img.compute` (`#bind`, tile, iterations) | `nca-compute.md`, `../../compute.md`, `../../nca.md` | NCA 1.2 ms/frame at 640x360, 8 steps; CPU-reference matches |
-| Python operators | `@atidarla.op` operators in a project's `ops/`, schema without running code, opt-in trust gate, hot reload that keeps state | `python-ops.md`, `../../python-ops.md` | nothing in `ops/` runs until allowed |
+| Python operators | `@lasair.op` operators in a project's `ops/`, schema without running code, opt-in trust gate, hot reload that keeps state | `python-ops.md`, `../../python-ops.md` | nothing in `ops/` runs until allowed |
 | Kernel DSL (A12, ratified 2026-10-30) | Compiler crate only (parser, typed IR, WGSL, CPU reference), isolated and removable | `kernel-dsl.md`, `../../kernel-dsl.md` | GPU results match the CPU reference; not wired to the engine |
-| Offline render (FR-H1) | `atidarla render`: fixed-step PNG sequence, byte-identical across runs | `../../render.md` | CI compares two renders on Windows and macOS |
+| Offline render (FR-H1) | `lasair render`: fixed-step PNG sequence, byte-identical across runs | `../../render.md` | CI compares two renders on Windows and macOS |
 
 Operator counts now: IMG 45, SIG 29, PNT 34, MSH 26, MAT 6.
 
 ## Try these first
 
 ```
-cargo run -p atd-app -- examples/particles.atidarla          # GPU particles
-cargo run -p atd-app -- examples/pnt-fountain.atidarla
-cargo run -p atd-app -- examples/render-solids.atidarla       # lit 3D shapes
-cargo run -p atd-app -- examples/mesh-scatter-iso.atidarla    # points -> surface -> noise
-cargo run -p atd-app -- examples/neural-growth.atidarla       # neural cellular automaton
-cargo run -p atd-app -- examples/pack-kaleido-tunnel.atidarla # a Pack, shown expanded (read-only)
-cargo run -p atd-cli --release -- bench                       # includes pt2.particles_2m, render.mesh_1m
-cargo run -p atd-cli --release -- render examples/pnt-solver.atidarla --out .scratch/r --range 0-120
+cargo run -p lsr-app -- examples/particles.lasair          # GPU particles
+cargo run -p lsr-app -- examples/pnt-fountain.lasair
+cargo run -p lsr-app -- examples/render-solids.lasair       # lit 3D shapes
+cargo run -p lsr-app -- examples/mesh-scatter-iso.lasair    # points -> surface -> noise
+cargo run -p lsr-app -- examples/neural-growth.lasair       # neural cellular automaton
+cargo run -p lsr-app -- examples/pack-kaleido-tunnel.lasair # a Pack, shown expanded (read-only)
+cargo run -p lsr-cli --release -- bench                       # includes pt2.particles_2m, render.mesh_1m
+cargo run -p lsr-cli --release -- render examples/pnt-solver.lasair --out .scratch/r --range 0-120
 ```
 
 ## Decisions I need from you
@@ -47,7 +47,7 @@ All of these are listed with their context in the notes files. Proposed decision
 6. **Boolean**: BSP is not robust (T-junctions, 200k-triangle cap). Acceptable for M2, or exact-predicate Boolean (PT-12)?
 7. **Deformer fusion** in the planner: worth building in M2 (a 10x gain on long transform stacks)? **Solver sub-steps and For-Each loops**: designed, not built.
 8. **Conventions** (MAT/render): counter-clockwise front faces, Y up, `uv` with v up, screen-door transparency without sorting.
-9. **`.mov` output** for `atidarla render`: HAP encoder or FFmpeg encoding.
+9. **`.mov` output** for `lasair render`: HAP encoder or FFmpeg encoding.
 10. **The AC1 example** strobes to full white on loud beats (see `../M1.md`): calmer?
 
 **Answered 2026-10-30** (all recorded in PRD §0): 1 A12 ratified; 2 A25 and A24 ratified; 3 A46 (and A28); 4 A40, A41 (flatten before cook, `cmp.pack_<name>` IDs), A44 (engine owns the edited network and a flattened copy), A45 (`project.toml` does not list Packs); 5 A47; 6 A48; 7 A49; 8 A50 (and A39); 9 A51; 10 A52. The proposed rows from the notes files were accepted as A26-A43, and A9 was ratified too.
@@ -75,5 +75,5 @@ Eight agents worked in parallel git worktrees; I reviewed and merged each branch
 - One agent **deleted the whole shared scratchpad** (temp files, logs and another agent's prototype) with a non-recoverable delete. Nothing in the repository was lost; no scratch output was important.
 - One agent left a stray file in the repository root and I committed it by accident with `git add -A`; it was removed in the next commit.
 - Several agents signed commits as "Claude Opus 5.5" instead of the Sonnet 5.5 trailer; I rewrote those before pushing.
-- Merging uncovered a **real race** in the Python operators (two Python hosts in one process shared one `atidarla` module); fixed in `ops_host.py`. CI confirmed it independently.
+- Merging uncovered a **real race** in the Python operators (two Python hosts in one process shared one `lasair` module); fixed in `ops_host.py`. CI confirmed it independently.
 - Worktrees were created from the wrong base commit; each agent reset to the right one.

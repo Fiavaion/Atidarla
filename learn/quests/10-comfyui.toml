@@ -3,16 +3,16 @@ title = "A ComfyUI workflow as a node"
 summary = "Open a project whose operator is a ComfyUI workflow, feed it your own picture and learn what runs where."
 minutes = 12
 prerequisites = ["first-patch"]
-start = "examples/comfy-invert.atidarla"
+start = "examples/comfy-invert.lasair"
 
 [[step]]
 title = "Open the example"
 text = '''
-ComfyUI is a separate program for building image-generation workflows. Atidarla does not include or start it: you run a ComfyUI server yourself, on this computer or on your network, and Atidarla talks to it. A workflow you export from ComfyUI becomes an **operator** of your project.
+ComfyUI is a separate program for building image-generation workflows. Lasair does not include or start it: you run a ComfyUI server yourself, on this computer or on your network, and Lasair talks to it. A workflow you export from ComfyUI becomes an **operator** of your project.
 
 Press **Open the example project** above. It opens `comfy-invert`, whose workflow loads an image, inverts it and saves it. This step ticks when the project is open.
 '''
-hint = "If the button cannot find the example, use File, Open Project and choose examples/comfy-invert.atidarla in your Atidarla folder."
+hint = "If the button cannot find the example, use File, Open Project and choose examples/comfy-invert.lasair in your Lasair folder."
 check = { kind = "node_exists", type = "comfy.*" }
 
 [[step]]

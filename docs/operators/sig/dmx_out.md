@@ -34,6 +34,6 @@ All platforms.
 
 ## Examples
 
-- [Live control](../../../examples/live-control.atidarla/) — `dmx1`
-- [Pixel map](../../../examples/pixel-map.atidarla/) — `dmx_out1`
-- [PNT Outputs](../../../examples/pnt-outputs.atidarla/) — `dmx_out1`
+- [Live control](../../../examples/live-control.lasair/) — `dmx1`
+- [Pixel map](../../../examples/pixel-map.lasair/) — `dmx_out1`
+- [PNT Outputs](../../../examples/pnt-outputs.lasair/) — `dmx_out1`

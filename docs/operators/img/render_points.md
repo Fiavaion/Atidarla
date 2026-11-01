@@ -36,21 +36,21 @@ All platforms.
 
 ## Examples
 
-- [Kernel Particles](../../../examples/kernel-particles.atidarla/) — `draw`
-- [Mesh Boolean to glTF](../../../examples/mesh-boolean-gltf.atidarla/) — `draw`
-- [Mesh Files](../../../examples/mesh-files.atidarla/) — `draw`
-- [Mesh Modelling](../../../examples/mesh-modelling.atidarla/) — `draw`
-- [Mesh Primitives](../../../examples/mesh-primitives.atidarla/) — `draw`
-- [Scatter to Iso Surface](../../../examples/mesh-scatter-iso.atidarla/) — `draw_blob`, `draw_seeds`, `draw_frame`
-- [Particles](../../../examples/particles.atidarla/) — `draw`
-- [PNT Capture](../../../examples/pnt-capture.atidarla/) — `draw`, `draw_body`
-- [PNT Constellation](../../../examples/pnt-constellation.atidarla/) — `draw`, `draw_stars`
-- [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `draw`
-- [PNT Fields](../../../examples/pnt-fields.atidarla/) — `draw`, `draw_swarm`
-- [PNT For-Each](../../../examples/pnt-foreach.atidarla/) — `draw`
-- [PNT Fountain](../../../examples/pnt-fountain.atidarla/) — `draw`
-- [PNT Motion](../../../examples/pnt-motion.atidarla/) — `draw_blob`, `draw_cage`, `draw_flock`, `draw_wrap`
-- [PNT Outputs](../../../examples/pnt-outputs.atidarla/) — `draw`
-- [PNT Solver](../../../examples/pnt-solver.atidarla/) — `draw`
-- [Points](../../../examples/points.atidarla/) — `draw_cloud`, `draw_grid`
-- [Soak show](../../../examples/soak-show.atidarla/) — `draw`
+- [Kernel Particles](../../../examples/kernel-particles.lasair/) — `draw`
+- [Mesh Boolean to glTF](../../../examples/mesh-boolean-gltf.lasair/) — `draw`
+- [Mesh Files](../../../examples/mesh-files.lasair/) — `draw`
+- [Mesh Modelling](../../../examples/mesh-modelling.lasair/) — `draw`
+- [Mesh Primitives](../../../examples/mesh-primitives.lasair/) — `draw`
+- [Scatter to Iso Surface](../../../examples/mesh-scatter-iso.lasair/) — `draw_blob`, `draw_seeds`, `draw_frame`
+- [Particles](../../../examples/particles.lasair/) — `draw`
+- [PNT Capture](../../../examples/pnt-capture.lasair/) — `draw`, `draw_body`
+- [PNT Constellation](../../../examples/pnt-constellation.lasair/) — `draw`, `draw_stars`
+- [PNT Deformers](../../../examples/pnt-deformers.lasair/) — `draw`
+- [PNT Fields](../../../examples/pnt-fields.lasair/) — `draw`, `draw_swarm`
+- [PNT For-Each](../../../examples/pnt-foreach.lasair/) — `draw`
+- [PNT Fountain](../../../examples/pnt-fountain.lasair/) — `draw`
+- [PNT Motion](../../../examples/pnt-motion.lasair/) — `draw_blob`, `draw_cage`, `draw_flock`, `draw_wrap`
+- [PNT Outputs](../../../examples/pnt-outputs.lasair/) — `draw`
+- [PNT Solver](../../../examples/pnt-solver.lasair/) — `draw`
+- [Points](../../../examples/points.lasair/) — `draw_cloud`, `draw_grid`
+- [Soak show](../../../examples/soak-show.lasair/) — `draw`

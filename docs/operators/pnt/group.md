@@ -46,4 +46,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `diagonal`
+- [PNT Deformers](../../../examples/pnt-deformers.lasair/) — `diagonal`

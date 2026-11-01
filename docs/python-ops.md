@@ -2,11 +2,11 @@
 
 A project can define its own SIG and IMG operators in Python: one `.py` file per group of
 operators in the project's `ops/` folder. Each operator declares its parameters, inputs and
-state; Atidarla derives the operator's schema from the declaration, so the operator appears in
+state; Lasair derives the operator's schema from the declaration, so the operator appears in
 the palette (under **Project**), gets a parameter panel like any built-in operator, saves in
-the project file and is checked by `atidarla check`, with no UI code of its own. PRD: §9 M2
+the project file and is checked by `lasair check`, with no UI code of its own. PRD: §9 M2
 ("Python custom ops with schema-derived UI"), FR-K4 (state-preserving hot reload), §5.2
-`atd-py`. Status and evidence: `docs/milestones/m2/python-ops.md`.
+`lsr-py`. Status and evidence: `docs/milestones/m2/python-ops.md`.
 
 **Python operators run arbitrary code with your user account's privileges.** A project's
 Python operators do not run until you allow them (see [Trust](#trust-running-code-from-a-project)).
@@ -14,16 +14,16 @@ Python operators do not run until you allow them (see [Trust](#trust-running-cod
 ## Writing an operator
 
 ```python
-# myshow.atidarla/ops/motion.py
-import atidarla as atd
+# myshow.lasair/ops/motion.py
+import lasair as lsr
 
-@atd.op(
+@lsr.op(
     family="SIG",
     label="Counter",
     summary="Counts up by Step every frame.",
     params=[
-        atd.Float("step", default=1.0, min=0.0, max=10.0, help="Added every frame."),
-        atd.Toggle("hold", help="Stops counting while on."),
+        lsr.Float("step", default=1.0, min=0.0, max=10.0, help="Added every frame."),
+        lsr.Toggle("hold", help="Stops counting while on."),
     ],
     state={"count": 0.0},
 )
@@ -36,34 +36,34 @@ def counter(ctx):
 The node type is `py.<file>.<function>` (here `py.motion.counter`): that is what the project
 file stores, so renaming the file or the function renames the operator type.
 
-### The declaration (`@atd.op(...)`)
+### The declaration (`@lsr.op(...)`)
 
 | Argument | Meaning |
 |---|---|
 | `family` | `"SIG"` (outputs channels) or `"IMG"` (outputs an image). Required. |
 | `label`, `summary` | Palette label (default: the function name) and one-line description. |
 | `params` | A list of parameters, below. |
-| `inputs` | A list of `atd.Input("name")`: SIG inputs (channels). Default: none. |
+| `inputs` | A list of `lsr.Input("name")`: SIG inputs (channels). Default: none. |
 | `state` | A dict of state fields and their initial values (see [State](#state-and-hot-reload)). |
 | `size` | IMG only: the output size in pixels, `(width, height)`. Default `(64, 64)`. |
 | `timeout` | Seconds one cook may take before it is stopped and reported. Default 2, at most 60. |
 
 | Parameter | Panel widget |
 |---|---|
-| `atd.Float(name, label=None, default=0.0, min=None, max=None, help="")` | Number (dragged, kept within the limits) |
-| `atd.Int(name, label=None, default=0, min=None, max=None, help="")` | Integer (dragged, kept within the limits) |
-| `atd.Toggle(name, label=None, default=False, help="")` | Check box |
-| `atd.Menu(name, label=None, options=("a", "b"), default=None, help="")` | Drop-down (default: first option) |
-| `atd.String(name, label=None, default="", help="")` | Text |
-| `atd.Colour(name, label=None, default=(1, 1, 1, 1), help="")` | Colour picker (RGBA) |
-| `atd.Vec(name, label=None, default=(0.0, 0.0), help="")` | 1 to 4 numbers |
+| `lsr.Float(name, label=None, default=0.0, min=None, max=None, help="")` | Number (dragged, kept within the limits) |
+| `lsr.Int(name, label=None, default=0, min=None, max=None, help="")` | Integer (dragged, kept within the limits) |
+| `lsr.Toggle(name, label=None, default=False, help="")` | Check box |
+| `lsr.Menu(name, label=None, options=("a", "b"), default=None, help="")` | Drop-down (default: first option) |
+| `lsr.String(name, label=None, default="", help="")` | Text |
+| `lsr.Colour(name, label=None, default=(1, 1, 1, 1), help="")` | Colour picker (RGBA) |
+| `lsr.Vec(name, label=None, default=(0.0, 0.0), help="")` | 1 to 4 numbers |
 
 The label defaults to the name with `_` as spaces and each word capitalised. Float, Int and
 Toggle parameters can follow a channel or an expression like any other parameter.
 
-**The declaration is read without running the file.** Atidarla parses the file with Python's
+**The declaration is read without running the file.** Lasair parses the file with Python's
 `ast` module and reads the decorator's arguments as literals: numbers, strings, `True`/`False`/
-`None`, lists, tuples, dicts, and the `atd.Float(...)`-style calls above with literal arguments.
+`None`, lists, tuples, dicts, and the `lsr.Float(...)`-style calls above with literal arguments.
 A variable or a computed value in the declaration is an error with its line number. This is
 what lets a project show its operators, panels and wires before you decide whether to run its
 code.
@@ -89,7 +89,7 @@ Python operators cook on every frame (like Python expressions, they are time-dep
 The operator API offers nothing beyond `ctx`: no file, network or process helpers. Your code
 can still import any module the embedded Python can import (see [Trust](#trust-running-code-from-a-project)).
 
-**Numpy is optional.** Atidarla neither needs nor bundles it. If the Python that Atidarla
+**Numpy is optional.** Lasair neither needs nor bundles it. If the Python that Lasair
 embeds has numpy installed, an operator may `import numpy` and return
 `array.astype(numpy.uint8).tobytes()` (or the array itself: it has the buffer protocol).
 Without numpy, pure Python is fast enough for small images (the 64×64 default) and for
@@ -101,14 +101,14 @@ DAT/PNT/MSH families, Pulse and Path parameters, and imports between files in `o
 ## Threads, latency and offline renders
 
 Python operators never run on the render thread (CLAUDE.md rule 1). They run on one Python
-worker thread per project (`atd-py`, a sibling of the expression worker, so a stuck operator
+worker thread per project (`lsr-py`, a sibling of the expression worker, so a stuck operator
 does not stop expressions and the operators' worker can be restarted on its own).
 
-- **Live** (the app, `atidarla check`): each cook hands the node's parameters and inputs to
+- **Live** (the app, `lasair check`): each cook hands the node's parameters and inputs to
   the worker and shows the newest result that has arrived, so an operator's output is a frame
   late (sometimes more under load). The render thread never waits, and nothing it does for a
   Python operator allocates once warm (tested).
-- **Offline** (`atidarla render`): the cook waits for the operator's result for this frame, so
+- **Offline** (`lasair render`): the cook waits for the operator's result for this frame, so
   a deterministic operator gives the same frames on every render (tested). The wait is
   bounded: a cook still running at its timeout is stopped as below, and the cook thread never
   waits longer than the timeout plus 3 s; the frame then fails with the node's error.
@@ -125,7 +125,7 @@ does not stop expressions and the operators' worker can be restarted on its own)
 An operator keeps everything it needs between frames in `ctx.state`, declared up front:
 
 ```python
-@atd.op(family="SIG", state={"phase": 0.0, "hits": 0})
+@lsr.op(family="SIG", state={"phase": 0.0, "hits": 0})
 def wobble(ctx): ...
 ```
 
@@ -156,7 +156,7 @@ Opening the project again, or a worker restart after a stuck operator, starts al
 
 A Python operator is a program. A project folder someone sends you, or that you clone, can
 contain any Python in `ops/`, and once it runs it can do whatever your user account can: read
-and write your files, use the network, start programs. **Atidarla does not sandbox Python
+and write your files, use the network, start programs. **Lasair does not sandbox Python
 operators.** The only protection is that a project's Python operators do not run until you
 allow them:
 
@@ -166,39 +166,39 @@ allow them:
   project are not allowed to run".
 - **The app asks**, listing the files: *Allow and remember*, *Allow this time*, or *Don't run*.
   "Remember" stores a SHA-256 of the `ops/` files (names and contents, line endings
-  normalised) in your user settings (`allowed-python-ops.txt` in the Atidarla settings folder:
-  `%APPDATA%\Atidarla` on Windows, `~/Library/Application Support/Atidarla` on macOS,
-  `$XDG_CONFIG_HOME/atidarla` elsewhere), never in the project. The next time a project with
+  normalised) in your user settings (`allowed-python-ops.txt` in the Lasair settings folder:
+  `%APPDATA%\Lasair` on Windows, `~/Library/Application Support/Lasair` on macOS,
+  `$XDG_CONFIG_HOME/lasair` elsewhere), never in the project. The next time a project with
   exactly those files opens, it runs without asking; any change to any file in `ops/` (or a
   new file) asks again.
 - While a project is open and allowed, your own edits hot-reload without asking (you are the
   one editing). They do not update the remembered hash, so the next open asks again.
-- **Headless:** `atidarla check`, `render`, `bake`, `batch`, `serve`, `soak` and `agent ask` /
+- **Headless:** `lasair check`, `render`, `bake`, `batch`, `serve`, `soak` and `agent ask` /
   `agent eval` run a project's Python (operators, Script nodes and Python expressions) only with
   `--allow-python-ops` (for that run; nothing is remembered). Without it, `check` reports the
   nodes and expressions it did not run and still passes, `render` fails if the rendered image
   needs one, and `serve` cooks the show without them. With it, the network Python the project
   holds as opened is allowed (see below); under `serve`, Python that an agent with the
   `python.exec` scope writes later is allowed too, since there is no dialog headless (an agent
-  without the scope cannot write Python at all). `atidarla run --allow-python-ops` (an
+  without the scope cannot write Python at all). `lasair run --allow-python-ops` (an
   unattended show, which cannot answer the Allow dialog) passes the flag on to the app
-  (`atidarla-app <project> --allow-python-ops`), which allows the opened project's Python after
+  (`lasair-app <project> --allow-python-ops`), which allows the opened project's Python after
   every restart without asking.
 - **Agents** need the `python.exec` scope to write Python expressions or Script code, or to
   promote a Script's code to a Pack parameter ([`agent.md`](agent.md)). In the app, Python an
   agent writes is not allowed until you allow it in the dialog.
 
 **Threat model.** In scope: a project file from someone else running code when you open it.
-Out of scope: anything that can already write to your disk (it can change Atidarla itself);
+Out of scope: anything that can already write to your disk (it can change Lasair itself);
 and a malicious file crashing the app while its declaration is parsed (deeply nested
 expressions can exhaust Python's parser; files over 1 MB are refused). Files are only read from
 `ops/` itself (not subfolders); `ops/` is not on Python's import path, so a stray `.pyc` or
 module there is never imported.
 
 **Network Python** is the Python written in the network itself: a Script DAT's `code`
-(`dat.script`, `crates/atd-py/src/script.rs`) and any parameter expression outside the native
+(`dat.script`, `crates/lsr-py/src/script.rs`) and any parameter expression outside the native
 subset (a Python-tier expression, PRD A22). It runs only from an **allow-list by content**
-(`crates/atd-py/src/allow.rs`, PRD A67): each item is a node of the network the engine cooks
+(`crates/lsr-py/src/allow.rs`, PRD A67): each item is a node of the network the engine cooks
 (Packs expanded, so a promoted parameter is its inner target) with its parameter and full text,
 and only an item whose exact content is on the list runs. Everything else keeps its stored value
 (an expression) or does not cook (a Script), and its node reports "Python expressions in this
@@ -238,20 +238,20 @@ The render thread never waits for any of this. Offline, a frame waits at most th
 
 ## Where it lives
 
-`crates/atd-py/src/ops/`: `read.rs` (the `ast` reader, no execution), `host.rs` (worker,
+`crates/lsr-py/src/ops/`: `read.rs` (the `ast` reader, no execution), `host.rs` (worker,
 supervisor, slots), `node.rs` (the engine side: SIG and IMG nodes), `trust.rs` (the remembered
 hashes), `mod.rs` (`PythonOps`: registration, hot reload, `stale_edits`); the Python half is
-`crates/atd-py/src/ops_host.py`. The allow-list for network Python (Script DATs, Python
-expressions) is `crates/atd-py/src/allow.rs`. The registry knows these operators by their `py.` type IDs and
+`crates/lsr-py/src/ops_host.py`. The allow-list for network Python (Script DATs, Python
+expressions) is `crates/lsr-py/src/allow.rs`. The registry knows these operators by their `py.` type IDs and
 `python.custom` provenance (`Registry::replace_custom`, `Registry::provenance`). Tests:
-`crates/atd-py/tests/ops.rs` and `ops_alloc.rs`, plus `check`/`render` tests in `atd-cli` and
-the open/palette tests in `atd-app`.
+`crates/lsr-py/tests/ops.rs` and `ops_alloc.rs`, plus `check`/`render` tests in `lsr-cli` and
+the open/palette tests in `lsr-app`.
 
 ## Commands
 
 ```sh
-atidarla check --gpu --allow-python-ops examples/python-ops.atidarla
-atidarla render examples/python-ops.atidarla --out renders/py --range 0-60 --allow-python-ops
+lasair check --gpu --allow-python-ops examples/python-ops.lasair
+lasair render examples/python-ops.lasair --out renders/py --range 0-60 --allow-python-ops
 ```
 
 `check` reports a missing file (`node counter1 uses py.motion.counter: ops/motion.py does not
@@ -259,5 +259,5 @@ exist`), a declaration error with its line, and, with `--gpu`, cook errors with 
 
 ## Example
 
-[`python-ops`](../examples/python-ops.atidarla/): a SIG counter, a SIG LFO with parameters and
+[`python-ops`](../examples/python-ops.lasair/): a SIG counter, a SIG LFO with parameters and
 an IMG pattern generator written in Python, driving built-in operators.

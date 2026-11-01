@@ -33,4 +33,4 @@ All platforms.
 
 ## Examples
 
-- [Time effects](../../../examples/time-effects.atidarla/) — `slit_scan`
+- [Time effects](../../../examples/time-effects.lasair/) — `slit_scan`

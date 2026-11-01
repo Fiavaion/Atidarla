@@ -1,6 +1,6 @@
 # 3. The three views
 
-Atidarla has three ways to work on one project: **Patch**, **Stage** and **Timeline**. They are
+Lasair has three ways to work on one project: **Patch**, **Stage** and **Timeline**. They are
 views of the same graph. There is no second copy of your work. Change a parameter in one view
 and the others see it. A fourth tab, **Outputs**, sets up projectors and screens.
 
@@ -12,7 +12,7 @@ The Patch is where you build. You added nodes, wired them and changed parameters
 [chapter 2](02-first-patch.md). A few more things you will use all the time:
 
 - **Wire types.** A wire only joins sockets of the same type (IMG to IMG, SIG to SIG, and so
-  on). Atidarla refuses a mismatched wire, and refuses a wire that would make a loop, except
+  on). Lasair refuses a mismatched wire, and refuses a wire that would make a loop, except
   into a socket made for loops such as the `loop` input of [Feedback](../operators/img/feedback.md).
   See [chapter 4](04-operator-families.md).
 - **Parameters** can be a number you set, a **binding** to a signal, or an **expression**
@@ -39,7 +39,7 @@ node. The Stage reads a **deck** that you build in the Patch.
 
 The Learn quest [Your first clip deck](../../learn/quests/03-first-clip-deck.toml) walks
 through exactly this. The example
-[`stage-deck`](../../examples/stage-deck.atidarla/) is a finished deck of three layers by four
+[`stage-deck`](../../examples/stage-deck.lasair/) is a finished deck of three layers by four
 columns. If the Stage shows "No deck yet", there is no Mixer in the project.
 
 ### Playing the Stage
@@ -85,7 +85,7 @@ and press **Use as clip**, or drag it onto an empty cell. See
 
 The Timeline animates parameters over time and fires cues. It is a view over the same graph. It
 owns no media. Full reference: [`docs/timeline.md`](../timeline.md). Try it with
-[`timeline-show`](../../examples/timeline-show.atidarla/).
+[`timeline-show`](../../examples/timeline-show.lasair/).
 
 ### Keyframes
 

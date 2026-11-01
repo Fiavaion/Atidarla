@@ -32,10 +32,10 @@ All platforms.
 
 ## Examples
 
-- [Audio-reactive feedback](../../../examples/audio-reactive-feedback.atidarla/) — `transform1`
-- [Compute Shaders](../../../examples/compute-shaders.atidarla/) — `orbit`
-- [Neural Growth](../../../examples/neural-growth.atidarla/) — `eraser`
-- [Pack: Beat Flash](../../../examples/pack-beat-flash.atidarla/) — `kick`
-- [Pack: Feedback Trails](../../../examples/pack-feedback-trails.atidarla/) — `orbit`
-- [Simulations](../../../examples/simulations.atidarla/) — `orbiting`
-- [Soak show](../../../examples/soak-show.atidarla/) — `swirl`
+- [Audio-reactive feedback](../../../examples/audio-reactive-feedback.lasair/) — `transform1`
+- [Compute Shaders](../../../examples/compute-shaders.lasair/) — `orbit`
+- [Neural Growth](../../../examples/neural-growth.lasair/) — `eraser`
+- [Pack: Beat Flash](../../../examples/pack-beat-flash.lasair/) — `kick`
+- [Pack: Feedback Trails](../../../examples/pack-feedback-trails.lasair/) — `orbit`
+- [Simulations](../../../examples/simulations.lasair/) — `orbiting`
+- [Soak show](../../../examples/soak-show.lasair/) — `swirl`

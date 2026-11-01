@@ -34,4 +34,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Constellation](../../../examples/pnt-constellation.atidarla/) — `back_to_front`
+- [PNT Constellation](../../../examples/pnt-constellation.lasair/) — `back_to_front`

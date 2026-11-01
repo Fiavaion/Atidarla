@@ -31,4 +31,4 @@ All platforms.
 
 ## Examples
 
-- [Image processing](../../../examples/image-processing.atidarla/) — `swapped`
+- [Image processing](../../../examples/image-processing.lasair/) — `swapped`

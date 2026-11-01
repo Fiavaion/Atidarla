@@ -8,11 +8,11 @@ decision-log rows are at the end. Reference for the model and the format: [`docs
 
 | Task (brief) | State | Where |
 |---|---|---|
-| 1. Core model: nested network node, promoted parameters, sockets by wire type, validation (types, cycles through nesting, feedback inputs), cook semantics, undo/redo, help, semver, lock/unlock, update in place | **Done** | `crates/atd-core/src/pack.rs` |
-| 2. Format: Pack folders in projects, Pack libraries by name+version, canonical form, round-trip/diff/fuzz tests | **Done** | `crates/atd-format/src/pack.rs` |
-| 3. CLI: `check` (errors with file names), `fmt`, `render` and `check --gpu` cook projects with Packs | **Done** (also `check`/`fmt` of a Pack folder) | `crates/atd-cli/src/project.rs`, `render.rs` |
-| 4. ≥5 useful Packs with help, promoted parameters, a version and an example each | **Done: 15** (7 on 2026-10-18, 8 more on 2026-10-22: the ≥15 the Palette needs) | `packs/`, `examples/pack-*.atidarla` |
-| 5. App UI: Make Pack, Palette, enter/leave, version indicator | **Not done.** First step only: the app opens and plays projects with Packs (expanded, saving refused) | `crates/atd-app/src/project.rs` |
+| 1. Core model: nested network node, promoted parameters, sockets by wire type, validation (types, cycles through nesting, feedback inputs), cook semantics, undo/redo, help, semver, lock/unlock, update in place | **Done** | `crates/lsr-core/src/pack.rs` |
+| 2. Format: Pack folders in projects, Pack libraries by name+version, canonical form, round-trip/diff/fuzz tests | **Done** | `crates/lsr-format/src/pack.rs` |
+| 3. CLI: `check` (errors with file names), `fmt`, `render` and `check --gpu` cook projects with Packs | **Done** (also `check`/`fmt` of a Pack folder) | `crates/lsr-cli/src/project.rs`, `render.rs` |
+| 4. ≥5 useful Packs with help, promoted parameters, a version and an example each | **Done: 15** (7 on 2026-10-18, 8 more on 2026-10-22: the ≥15 the Palette needs) | `packs/`, `examples/pack-*.lasair` |
+| 5. App UI: Make Pack, Palette, enter/leave, version indicator | **Not done.** First step only: the app opens and plays projects with Packs (expanded, saving refused) | `crates/lsr-app/src/project.rs` |
 
 ### Decisions taken inside the slice (smallest version; for review)
 
@@ -46,14 +46,14 @@ at `f30b841`), with four other agents building and running GPU tests on the same
 | Check | Result |
 |---|---|
 | `cargo test --workspace` | **323 passed, 0 failed, 1 ignored** (the ignored test is the existing one) |
-| New tests | atd-core `pack::tests` 15 (versions; schema; 14 kinds of invalid definition; int/menu promotion; nesting at the depth limit, one deeper, 5000 deep (error, no stack overflow), cycles incl. self; wiring/cycles/ranges/undo of instances; flattening with stable IDs and deterministic planning; nested promotion and expression renaming; feedback through a Pack; lock/unlock/edit/relock; update with report; update inside other Packs; Make Pack gives back the original graph and one undo restores it; reference rewriting; 400 random Pack sets never panic) + `tests/pack_plan_alloc.rs` 1 (209-node flat network from 3-level nesting: 0 allocations over 100 plan+record frames, same order every frame). atd-format `pack_tests` 7 (canonical sample, one-line diffs, hand-written equivalents, errors, 199 random Packs round-trip byte-stable, 3000 mutated `pack.toml` never panic, project save/load incl. stale removal, libraries by version). atd-cli 3 (shipped Packs complete and example copies current; Pack errors name their file and `fmt` fixes canonical form; Pack examples render identically twice, and an expression inside a Pack and one naming a Pack's channel evaluate). atd-app 1 (a Pack project opens expanded, the viewer starts on the Pack output, it cooks, saving is refused and the files stay unchanged). |
+| New tests | lsr-core `pack::tests` 15 (versions; schema; 14 kinds of invalid definition; int/menu promotion; nesting at the depth limit, one deeper, 5000 deep (error, no stack overflow), cycles incl. self; wiring/cycles/ranges/undo of instances; flattening with stable IDs and deterministic planning; nested promotion and expression renaming; feedback through a Pack; lock/unlock/edit/relock; update with report; update inside other Packs; Make Pack gives back the original graph and one undo restores it; reference rewriting; 400 random Pack sets never panic) + `tests/pack_plan_alloc.rs` 1 (209-node flat network from 3-level nesting: 0 allocations over 100 plan+record frames, same order every frame). lsr-format `pack_tests` 7 (canonical sample, one-line diffs, hand-written equivalents, errors, 199 random Packs round-trip byte-stable, 3000 mutated `pack.toml` never panic, project save/load incl. stale removal, libraries by version). lsr-cli 3 (shipped Packs complete and example copies current; Pack errors name their file and `fmt` fixes canonical form; Pack examples render identically twice, and an expression inside a Pack and one naming a Pack's channel evaluate). lsr-app 1 (a Pack project opens expanded, the viewer starts on the Pack output, it cooks, saving is refused and the files stay unchanged). |
 | `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all -- --check` | clean |
-| `atidarla docs --check` | ok (pages regenerated: the new examples use more operators) |
-| `atidarla check --gpu examples/*.atidarla` | 18 ok (11 existing + 7 Pack examples), every node cooked 60 frames, every binding found its channel |
-| `atidarla check --gpu packs/*/` | 7 ok (one instance of each, nothing connected) |
-| `atidarla render` twice, frames 0–60, SHA-256 per frame | pack-feedback-trails 60/60 identical (60 distinct), pack-audio-pulse 60/60 (26 distinct), pack-kaleido-tunnel 60/60 (60 distinct) |
+| `lasair docs --check` | ok (pages regenerated: the new examples use more operators) |
+| `lasair check --gpu examples/*.lasair` | 18 ok (11 existing + 7 Pack examples), every node cooked 60 frames, every binding found its channel |
+| `lasair check --gpu packs/*/` | 7 ok (one instance of each, nothing connected) |
+| `lasair render` twice, frames 0–60, SHA-256 per frame | pack-feedback-trails 60/60 identical (60 distinct), pack-audio-pulse 60/60 (26 distinct), pack-kaleido-tunnel 60/60 (60 distinct) |
 | Looked at rendered frames | Chromatic Aberration, Feedback Trails, Neon Edges, Vignette, Beat Flash checked by eye |
-| `atd-app -- examples/pack-kaleido-tunnel.atidarla --smoke 90 --screenshot` | ok: both tunnels expanded in the patch, viewer showing the composite |
+| `lsr-app -- examples/pack-kaleido-tunnel.lasair --smoke 90 --screenshot` | ok: both tunnels expanded in the patch, viewer showing the composite |
 
 Not checked: macOS (rule 6). Nothing in this slice is platform-specific, and CI's `check packs/*/`
 step runs on both OSes, but it has not run yet.
@@ -87,7 +87,7 @@ Noise → Connect → Render Points). After A12 (Kernel DSL): kernel-based Packs
 ## Not done, and the next step for the app
 
 The app UI (brief task 5) is not built beyond opening Pack projects read-only. **Why:** the
-engine (`atd-gpu`, another agent's area) holds the network the app edits and cooks that same
+engine (`lsr-gpu`, another agent's area) holds the network the app edits and cooks that same
 network. Editing with Packs needs the engine to keep the **edited** network (with instances; for
 `Edit`, history and saving) and cook a **flattened copy** of it. Changing the engine was outside
 this slice, and so was rewriting the app's ~50 edit paths around a wrapper.
@@ -111,12 +111,12 @@ Proposed design (about a day; needs Mark's yes, see Q1):
 
 Also not done: a Pack's own `cook_budget_us` is the sum of its inner budgets (no measured budget
 or bench case per Pack); the docs generator does not give Packs pages (their `help.md` is the
-page); Packs in `atidarla bench` (FR-H4).
+page); Packs in `lasair bench` (FR-H4).
 
 ## Questions for Mark
 
 1. **Engine change for the app** (the design above): may the engine own "edited network + flat
-   copy"? It touches `atd-gpu/src/engine.rs`, which the geometry agent is also changing; it would
+   copy"? It touches `lsr-gpu/src/engine.rs`, which the geometry agent is also changing; it would
    be a new A25-style extension point.
 2. **Type IDs** `cmp.pack_<name>` (instances are CMP operators): fine, or a separate namespace
    such as `pack.<name>` (which would need a ninth prefix outside A10's eight families)?
@@ -146,15 +146,15 @@ page); Packs in `atidarla bench` (FR-H4).
   then `flatten`, then `Engine::load(flat.network)`). The CLI and app do. The engine never sees
   `cmp.pack_*` types, so no `OpLibrary` entry is needed for them. `classify()` returns `Pure` for
   the prefix only so the classification test can cover them.
-- `atd_format::Project` has a new `packs: PackSet` field. Build projects with `Project::new` or
+- `lsr_format::Project` has a new `packs: PackSet` field. Build projects with `Project::new` or
   `with_main`.
 - Pack schemas are per project (like ISF shaders). Do not hard-code registry counts that include
   them. `builtin_registry()` is unchanged.
-- `crates/atd-cli/src/project.rs` was restructured (`load_checked`, `cook`, `check_pack`), and
+- `crates/lsr-cli/src/project.rs` was restructured (`load_checked`, `cook`, `check_pack`), and
   `render.rs` `Renderer::load` now flattens; both files are LF now (rustfmt normalised them).
   Expect conflicts there; keep the flatten step when merging.
 - `docs/operators/*` were regenerated because the new examples use more operators; regenerate
-  after merging (`atidarla docs`).
+  after merging (`lasair docs`).
 - CI has a new step, `check packs/*/`.
 - PNT/MSH, Kernel and Python operators will work inside Packs with no Pack changes, as long as
   they are ordinary registry operators: promoted parameters take any parameter kind, and sockets

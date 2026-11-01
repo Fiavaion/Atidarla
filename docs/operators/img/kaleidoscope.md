@@ -29,7 +29,7 @@ All platforms.
 
 ## Examples
 
-- [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `kaleidoscope1`
-- [Soak show](../../../examples/soak-show.atidarla/) — `tunnel`
-- [Stage deck](../../../examples/stage-deck.atidarla/) — `tunnel`
-- [Timeline show](../../../examples/timeline-show.atidarla/) — `kaleido`
+- [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.lasair/) — `kaleidoscope1`
+- [Soak show](../../../examples/soak-show.lasair/) — `tunnel`
+- [Stage deck](../../../examples/stage-deck.lasair/) — `tunnel`
+- [Timeline show](../../../examples/timeline-show.lasair/) — `kaleido`

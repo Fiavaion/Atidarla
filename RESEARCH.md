@@ -1,4 +1,4 @@
-# Atidarla — RESEARCH.md
+# Lasair — RESEARCH.md
 
 **Version:** 1.0 · **Date:** 15 October 2026 · **Author:** Mark (with Claude)
 **Status:** Research complete; feeds `PRD.md` v1.0
@@ -17,7 +17,7 @@
 3. **AI has arrived, but only at the edges.** Resolume 7.26 added MCP servers (build-time only, by Resolume's own description) and 7.28 added segmentation/depth nodes; MadMapper has prompt-to-material ("MadAI"); TouchDesigner has no first-party AI — everything is third party (dotsimulate's StreamDiffusionTD and LOPs, a fragmented set of MCP servers). Live diffusion is bolted on through Spout/NDI from separate apps (Daydream Scope). **No mainstream product treats generative AI as a first-class, tempo-synced, performable layer.**
 4. **Real-time diffusion is real on NVIDIA and still not elsewhere.** SD-Turbo with StreamDiffusion techniques reaches ~94–106 fps on an RTX 4090 (author numbers) and ~24 fps on a 4070 laptop. No published Apple Silicon or AMD numbers reach real time. Streaming *video* models (StreamDiffusionV2, Self-Forcing, LongLive, Krea Realtime) are Apache-2.0 but need 18–28 GB VRAM or cloud GPUs. Cloud real-time (Decart, Daydream, self-hosted on Runpod) fills the gap for Mac/AMD users at a per-second cost.
 5. **Houdini 22 (July 2026) validates the direction.** Copernicus (GPU image network) now carries ONNX inference, SAM2 masks, MoGe-2 depth and neural cellular automata — Houdini is converging on "GPU image graph + ML nodes", i.e. TouchDesigner TOPs with AI. Its attribute model, Wrangle/VEX, HDAs, compiled blocks and PDG task graphs are the most valuable concepts to port; heavy solvers (FLIP, sparse pyro, RBD) are not real-time and should be imported as bakes (VAT).
-6. **TouchDesigner's 2025–26 POPs confirm the GPU-resident point model** NascD already planned — but POPs are closed. Atidarla's equivalent should follow Houdini's attribute model more closely than TD's.
+6. **TouchDesigner's 2025–26 POPs confirm the GPU-resident point model** NascD already planned — but POPs are closed. Lasair's equivalent should follow Houdini's attribute model more closely than TD's.
 7. **The July stack holds, with three corrections:** keep Rust + wgpu (v30) + egui (0.37) + PyO3 (0.30); but (a) run all torch/TensorRT/ComfyUI workloads in **supervised out-of-process AI hosts**, (b) do not depend on free-threaded Python, (c) budget for a hand-written node canvas and a thin per-OS GPU-interop crate on `wgpu-hal`.
 8. **Licensing shapes architecture.** ComfyUI (GPL-3.0) and Ableton Link (GPLv2+ or proprietary) must stay out-of-process or optional plugins to keep an Apache-2.0 core. Many fast models are non-commercial (SD-Turbo, SDXL-Turbo, FLUX dev, Depth Anything 3 large variants, Scope per its GitHub licence). Models must be user-downloaded with visible licence badges.
 
@@ -79,9 +79,9 @@
 | AI | None first-party. Third party: StreamDiffusionTD, LOPs, YOLO (Patreon), Embody (free, text "TDN" diffable format, Claude Code), touchdesigner-mcp (MIT; exposes unsandboxed `execute_python_script`), TwoZero, tdmcp, TDPilot |
 | Pain points | No Linux; Mac fidelity gaps; binary `.toe` defeats Git (community workarounds export DATs to text); main-thread limits; licence friction (node-locked keys, dongles, cloud-licence issues); MCP fragmentation and unsafe code-exec tools |
 
-**Operator families — what Atidarla must replicate:**
+**Operator families — what Lasair must replicate:**
 
-| TD family | Purpose | Replicate in Atidarla as |
+| TD family | Purpose | Replicate in Lasair as |
 |---|---|---|
 | TOP | GPU texture/image processing (Render, Composite, GLSL, Movie File In/Out, Layer Mix, NDI/Spout/Syphon) | **IMG** family on a Copernicus-style typed-layer model (§2.3) |
 | CHOP | Time-sliced channels: control, audio, MIDI/OSC; exports to parameters | **SIG** family with shared timebase, sample-rate-aware, exportable to any parameter (Bitwig "modulate anything" ergonomics) |
@@ -119,9 +119,9 @@ Cross-cutting ideas to keep: lazy pull cook, parameter expressions and exports, 
 | Licences | Apprentice free (NC); Indie ~$299/yr (<$100k revenue); Core ~$1,995 perpetual / ~$1,475 yr; FX ~$4,495 / ~$3,505 yr; Education ~$95; Engine for Unreal/Unity free [U — secondary sources] |
 | OS | Windows, macOS (Apple Silicon only), Linux |
 
-**Concept map (Houdini → TD → feasibility at 60 fps → Atidarla decision):**
+**Concept map (Houdini → TD → feasibility at 60 fps → Lasair decision):**
 
-| Houdini concept | TD equivalent | RT feasibility | Atidarla decision |
+| Houdini concept | TD equivalent | RT feasibility | Lasair decision |
 |---|---|---|---|
 | Attribute model (point/vertex/prim/detail + groups) | POP attributes | High (SoA GPU buffers) | **v1 core** of the shared GEO type (PNT + MSH); vertex attributes deferred |
 | SOPs | SOP/POP | Medium (GPU point ops) / CPU (topology) | Split: GPU point ops in **PNT**; topology/modelling ops (boolean, extrude, bevel, subdivide, polyreduce, remesh, sweep, UV) in **MSH** on CPU with automatic GPU upload |
@@ -159,13 +159,13 @@ Cross-cutting ideas to keep: lazy pull cook, parameter expressions and exports, 
 | Notch | W | $279–2,589/yr | – | ✔ | – | ✔ | ✔ | – | – | – | – | render nodes |
 | MadMapper | W M | €399+ | – | – | cue | ✔ | – | ✔✔ | ✔ | prompt-to-material | – | MiniMad |
 | Daydream Scope | W M (L soon) | free / cloud billing | NC licence [U] | pipeline | – | ✔ | – | – | – | ✔ | – | – |
-| **Atidarla (target)** | **W M** (L best-effort) | **free** | **Apache-2.0** | **✔** | **✔** | **✔** | **✔** | **✔** | **✔** | **✔ (first-class)** | **✔ (show-safe)** | **✔ (free)** |
+| **Lasair (target)** | **W M** (L best-effort) | **free** | **Apache-2.0** | **✔** | **✔** | **✔** | **✔** | **✔** | **✔** | **✔ (first-class)** | **✔ (show-safe)** | **✔ (free)** |
 
 ---
 
 ## 3. Feature subsets to adopt
 
-These are the subsets Atidarla takes from each reference. Detail and phasing live in `PRD.md`.
+These are the subsets Lasair takes from each reference. Detail and phasing live in `PRD.md`.
 
 ### 3.1 From Resolume (performance layer — "Stage")
 - Composition → decks → layers × columns; clip triggering (launch/legato/retrigger/one-shot), column launch, crossfader A/B, layer groups.
@@ -240,7 +240,7 @@ These are the subsets Atidarla takes from each reference. Detail and phasing liv
 
 ### 4.4 ComfyUI (v0.40.0, 13 Oct 2026; GPL-3.0)
 - HTTP (`POST /prompt`, `/queue`, `/interrupt`, `/history`, `/view`, `/upload/image`, `/object_info`, Jobs API) + WebSocket `/ws` progress events; OpenAPI 3.1 spec since v0.20.
-- Two JSON formats: UI workflow (nodes/links/groups) vs **API format** (what `/prompt` accepts). `/object_info` exposes every node's input schema — ideal for auto-generating Atidarla parameter UIs.
+- Two JSON formats: UI workflow (nodes/links/groups) vs **API format** (what `/prompt` accepts). `/object_info` exposes every node's input schema — ideal for auto-generating Lasair parameter UIs.
 - Subgraphs official since Aug 2025; Manager + custom-node ecosystem; partner/API nodes for closed models billed in Comfy credits (`--disable-partner-nodes`, `--offline` flags).
 - Comfy Cloud: $20 / $35 / $100 / $700 per month; queue-based, not low latency.
 - Integration precedent: Krita AI Diffusion (Live Painting over a local/remote ComfyUI backend), ComfyUI-TD nodes, Blender add-ons; **ComfyStream** (Livepeer) streams video frames through a ComfyUI graph over WebRTC.
@@ -304,7 +304,7 @@ These are the subsets Atidarla takes from each reference. Detail and phasing liv
 
 ### 5.1 Stack (July → October 2026)
 
-| Component | NascD choice | Evidence (Oct 2026) | Atidarla decision |
+| Component | NascD choice | Evidence (Oct 2026) | Lasair decision |
 |---|---|---|---|
 | GPU API | wgpu | v30.0.1 (Aug 2026); compute, storage buffers, subgroups, 64-bit atomics (Metal Apple9+), timestamp queries, binding arrays, HDR colour spaces; mesh shaders and ray tracing still experimental; ~quarterly breaking majors | **Keep**; pin one major per release train; feature-gate experimental paths |
 | Raw Vulkan + MoltenVK | — | TD's Mac limits come from MoltenVK | **Reject** — wgpu's native Metal backend is an advantage |
@@ -408,9 +408,9 @@ Each is tied to a gap above. Effort: S/M/L. All are proposals for Mark to ratify
 
 ## 9. What changed since NascD v0.4 (July 2026)
 
-| NascD v0.4 | Atidarla v1.0 | Why |
+| NascD v0.4 | Lasair v1.0 | Why |
 |---|---|---|
-| Name NascD, `.nascd` | **Atidarla**; `.atidarla` project folder; CLI/module `atidarla` | Mark, 15 Oct 2026 |
+| Name NascD, `.nascd` | **Lasair**; `.lasair` project folder; CLI/module `lasair` | Mark, 15 Oct 2026 |
 | Performance mode as a feature | **Stage view as a peer of Patch and Timeline** (D1) | Strongest market gap |
 | AI runtime embedded via Python | **Out-of-process AI Hosts** (local, LAN, cloud) | Crash isolation, packaging, licensing |
 | D5: real-time diffusion NVIDIA-only | **Tiered by capability**: local real-time is a Windows + NVIDIA platform feature (like Kinect); Mac/AMD interactive locally with LAN/cloud for real time | Cloud real-time now viable; ratified 15 Oct 2026 |
@@ -432,7 +432,7 @@ Each is tied to a gap above. Effort: S/M/L. All are proposals for Mark to ratify
 3. `wgpu-hal` import of DX12 shared handles and Metal IOSurfaces.
 4. NDI SDK Linux support and current licence text.
 5. Scope licence (CC BY-NC-SA vs Apache-2.0) and Daydream API pricing.
-6. dotsimulate StreamDiffusionTD licence/terms (for clean-room boundaries — Atidarla must not copy its code).
+6. dotsimulate StreamDiffusionTD licence/terms (for clean-room boundaries — Lasair must not copy its code).
 7. Whether DXV is decodable via FFmpeg.
 8. Slang WGSL/Metal targets leaving experimental status.
 9. Houdini current prices (vendor page did not render).

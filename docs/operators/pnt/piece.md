@@ -34,5 +34,5 @@ All platforms.
 
 ## Examples
 
-- [PNT For-Each](../../../examples/pnt-foreach.atidarla/) — `bands`
-- [PNT Solver](../../../examples/pnt-solver.atidarla/) — `cells`
+- [PNT For-Each](../../../examples/pnt-foreach.lasair/) — `bands`
+- [PNT Solver](../../../examples/pnt-solver.lasair/) — `cells`

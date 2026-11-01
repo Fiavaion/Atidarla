@@ -34,4 +34,4 @@ All platforms.
 
 ## Examples
 
-- [Simulations](../../../examples/simulations.atidarla/) — `pond`
+- [Simulations](../../../examples/simulations.lasair/) — `pond`

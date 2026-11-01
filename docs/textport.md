@@ -1,14 +1,14 @@
 # Textport
 
-The Textport is a Python console inside Atidarla. Type a line of Python, press Enter, and see
+The Textport is a Python console inside Lasair. Type a line of Python, press Enter, and see
 the result straight away. It can read the open project (nodes, parameter values, the current
 frame and time) and change parameters, and every change it makes can be undone like a change
-made by hand. PRD: FR-P5 ("Textport/REPL bound to the `atidarla` Python module"), §9 M2.
+made by hand. PRD: FR-P5 ("Textport/REPL bound to the `lasair` Python module"), §9 M2.
 
 ## Opening it
 
 Choose **View > Textport**. The Textport opens as a tab in the bottom area, next to Timeline.
-It is closed when Atidarla starts; its **Close** button closes it again. Like any tab, you can
+It is closed when Lasair starts; its **Close** button closes it again. Like any tab, you can
 drag it to another area.
 
 ## Typing
@@ -51,32 +51,32 @@ Variables, functions and imports stay from one entry to the next. When you open 
 or start a new one (File > New, File > Open), the Textport starts afresh and says so. Saving
 does not reset it.
 
-## The `atidarla` API
+## The `lasair` API
 
-The name `atidarla` is ready to use; you do not need to import it.
+The name `lasair` is ready to use; you do not need to import it.
 
 | Call | Returns |
 |---|---|
-| `atidarla.nodes()` | The names of the nodes in the patch, oldest first, as a list of strings. |
-| `atidarla.optype(name)` | The operator type of a node, such as `'img.noise'`. |
-| `atidarla.params(name)` | Every parameter of a node, as a dictionary of name to value. |
-| `atidarla.par(name, param)` | One parameter's value. |
-| `atidarla.set_par(name, param, value)` | Sets a parameter. Returns `None` once the change is made. |
-| `atidarla.frame()` | The number of the frame the app cooked last. |
-| `atidarla.time()` | The time of that frame, in seconds. |
-| `atidarla.version()` | Atidarla's version. |
-| `atidarla.platform()` | The operating system and processor, as a dictionary. |
+| `lasair.nodes()` | The names of the nodes in the patch, oldest first, as a list of strings. |
+| `lasair.optype(name)` | The operator type of a node, such as `'img.noise'`. |
+| `lasair.params(name)` | Every parameter of a node, as a dictionary of name to value. |
+| `lasair.par(name, param)` | One parameter's value. |
+| `lasair.set_par(name, param, value)` | Sets a parameter. Returns `None` once the change is made. |
+| `lasair.frame()` | The number of the frame the app cooked last. |
+| `lasair.time()` | The time of that frame, in seconds. |
+| `lasair.version()` | Lasair's version. |
+| `lasair.platform()` | The operating system and processor, as a dictionary. |
 
 Examples:
 
 ```python
->>> atidarla.nodes()
+>>> lasair.nodes()
 ['noise1', 'kaleidoscope1', 'level1', 'drift', 'spin']
->>> atidarla.par('noise1', 'scale')
+>>> lasair.par('noise1', 'scale')
 3.0
->>> atidarla.set_par('noise1', 'scale', 7.5)
->>> for n in atidarla.nodes():
-...     print(n, atidarla.optype(n))
+>>> lasair.set_par('noise1', 'scale', 7.5)
+>>> for n in lasair.nodes():
+...     print(n, lasair.optype(n))
 ...
 ```
 

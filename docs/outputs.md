@@ -3,7 +3,7 @@
 An output is a **Window** node (`cmp.window`). Wire your composition into its `in` input; the
 node maps it into an image at the output's resolution, and the app shows that image in a
 native window, on a display of your choice. Add as many as you have projectors or screens.
-Example: [`examples/two-outputs.atidarla`](../examples/two-outputs.atidarla/) (two projectors
+Example: [`examples/two-outputs.lasair`](../examples/two-outputs.lasair/) (two projectors
 side by side with an overlap). Reference: [`operators/cmp/window.md`](operators/cmp/window.md).
 
 ## The window
@@ -75,7 +75,7 @@ times alpha.
 
 ## Headless and offline
 
-The mapping is the node's cook, so `atidarla check --gpu`, `atidarla render --node <window>`
+The mapping is the node's cook, so `lasair check --gpu`, `lasair render --node <window>`
 and tests produce exactly the image a projector gets; nothing opens a window. Renders of the
 same project and range are identical (`docs/render.md`: Window is *pure*).
 

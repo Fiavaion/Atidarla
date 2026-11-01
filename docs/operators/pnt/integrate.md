@@ -28,5 +28,5 @@ All platforms.
 
 ## Examples
 
-- [PNT Motion](../../../examples/pnt-motion.atidarla/) — `fly`
-- [PNT Solver](../../../examples/pnt-solver.atidarla/) — `move`
+- [PNT Motion](../../../examples/pnt-motion.lasair/) — `fly`
+- [PNT Solver](../../../examples/pnt-solver.lasair/) — `move`

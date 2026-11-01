@@ -29,4 +29,4 @@ All platforms.
 
 ## Examples
 
-- [Image processing](../../../examples/image-processing.atidarla/) — `warped`
+- [Image processing](../../../examples/image-processing.lasair/) — `warped`

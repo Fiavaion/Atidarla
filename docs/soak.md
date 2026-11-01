@@ -1,16 +1,16 @@
-# Soak test (`atidarla soak`, PT-10)
+# Soak test (`lasair soak`, PT-10)
 
-`atidarla soak` runs a project headless for hours and checks PT-10: after a warm-up, the
+`lasair soak` runs a project headless for hours and checks PT-10: after a warm-up, the
 process's resident memory grows by no more than **100 MB** and no frame takes longer than
 **50 ms**. It behaves the same on Windows and macOS (Linux too).
 
 ```sh
-atidarla soak examples/soak-show.atidarla --hours 24 --warmup 300 --cycle-seconds 8 --out soak-24h
+lasair soak examples/soak-show.lasair --hours 24 --warmup 300 --cycle-seconds 8 --out soak-24h
 ```
 
 | Option | Meaning |
 |---|---|
-| `<project>` | Project folder (`*.atidarla`). |
+| `<project>` | Project folder (`*.lasair`). |
 | `--hours H`, `--minutes M`, `--seconds S` | How long to run; the three add up. Without any of them the run lasts 24 hours. |
 | `--warmup S` | Seconds at the start that are not judged (default 120): shader compiles, pools filling, caches warming. The run must be longer than this. |
 | `--cycle-seconds S` | Launch the next column of the Stage deck every S seconds (wrapping), as a performer would. Without it the deck plays what the project saved. |
@@ -22,7 +22,7 @@ it.
 
 ## What it does
 
-The project cooks at 60 frames a second as under `atidarla serve` (every node, every frame, not
+The project cooks at 60 frames a second as under `lasair serve` (every node, every frame, not
 only what a viewer shows, so it is a heavier load than the app). For each frame it measures:
 
 - **cook**: the CPU time of the engine's cook (graph evaluation and GPU submission);
@@ -60,5 +60,5 @@ elapsed_s,phase,rss_mb,frames,mean_frame_ms,max_frame_ms,max_cook_ms,max_interva
   not the show's.
 - PT-10 is judged on the Windows lab image (RTX 4070). Shorter runs on other machines are useful
   smoke tests; `docs/milestones/m6/` keeps their reports.
-- `examples/soak-show.atidarla` is the reference patch: the Stage deck of `stage-deck` with a
+- `examples/soak-show.lasair` is the reference patch: the Stage deck of `stage-deck` with a
   400,000-particle system and an image feedback loop as a fifth column.

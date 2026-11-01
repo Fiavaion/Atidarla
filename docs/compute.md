@@ -49,15 +49,15 @@ optional features (WebGPU core), so a shader that compiles on one machine compil
 Metal and Vulkan alike. `rgba32float` and `r32float` cannot be read through the filtering
 sampler `samp`; read them with `textureLoad`. `r32float` shows as red.
 
-Names must be WGSL identifiers, unique, and not one of the generated names (`atd`, `atd_*`,
+Names must be WGSL identifiers, unique, and not one of the generated names (`lsr`, `lsr_*`,
 `samp`, `kernel`, `time`, `frame`, `size`, `iteration`, `iterations`, `TILE_X`, `TILE_Y`,
-`AtdParams`, `in0` to `in3`, `p1` to `p8`).
+`LsrParams`, `in0` to `in3`, `p1` to `p8`).
 
 **Limits (all within what every adapter guarantees, `wgpu::Limits::downlevel_defaults`):** at
 most 4 output and state images together (`max_storage_textures_per_shader_stage` is 4), at most
 4 buffers (`max_storage_buffers_per_shader_stage` is 4 at the downlevel floor), a buffer no
 larger than the device's `max_storage_buffer_binding_size` (128 MiB by default), at most 256
-iterations. The limits test in `crates/atd-ops-img/src/compute.rs` checks these numbers and
+iterations. The limits test in `crates/lsr-ops-img/src/compute.rs` checks these numbers and
 the format guarantees against wgpu's tables; `tests/compute.rs` runs every format on the real
 device.
 
@@ -90,7 +90,7 @@ fails, the last program that compiled keeps running (when it fails, the node sho
 keeps its last image, as WGSL does). If the new program has the same images and buffers, they
 are kept, so editing the code does not lose the state.
 
-Offline (`atidarla render`) the cook waits for the compiler, and a file is compiled once, as it
+Offline (`lasair render`) the cook waits for the compiler, and a file is compiled once, as it
 was when the render started (`docs/render.md`). Compute is in the "waits" class there; its
 persistent states and buffers also make it stateful (frames of a render started part-way differ,
 as for Feedback).

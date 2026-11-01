@@ -29,5 +29,5 @@ All platforms.
 
 ## Examples
 
-- [PNT Fountain](../../../examples/pnt-fountain.atidarla/) — `air`
-- [PNT Solver](../../../examples/pnt-solver.atidarla/) — `damp`
+- [PNT Fountain](../../../examples/pnt-fountain.lasair/) — `air`
+- [PNT Solver](../../../examples/pnt-solver.lasair/) — `damp`

@@ -30,4 +30,4 @@ All platforms.
 
 ## Examples
 
-- [Image processing](../../../examples/image-processing.atidarla/) — `mask`
+- [Image processing](../../../examples/image-processing.lasair/) — `mask`

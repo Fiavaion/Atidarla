@@ -30,4 +30,4 @@ All platforms.
 
 ## Examples
 
-- [Keying](../../../examples/keying.atidarla/) — `key`
+- [Keying](../../../examples/keying.lasair/) — `key`

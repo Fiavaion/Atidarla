@@ -41,4 +41,4 @@ All platforms.
 
 ## Examples
 
-- [Simulations](../../../examples/simulations.atidarla/) — `smoke`
+- [Simulations](../../../examples/simulations.lasair/) — `smoke`

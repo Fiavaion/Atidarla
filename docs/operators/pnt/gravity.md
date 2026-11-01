@@ -28,4 +28,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Fountain](../../../examples/pnt-fountain.atidarla/) — `gravity`
+- [PNT Fountain](../../../examples/pnt-fountain.lasair/) — `gravity`

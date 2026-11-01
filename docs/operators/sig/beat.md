@@ -43,7 +43,7 @@ All platforms.
 
 ## Examples
 
-- [Beat clock](../../../examples/beat-clock.atidarla/) — `clock`
-- [Beat switcher](../../../examples/beat-switcher.atidarla/) — `clock`
-- [Soak show](../../../examples/soak-show.atidarla/) — `clock`
-- [Stage deck](../../../examples/stage-deck.atidarla/) — `clock`
+- [Beat clock](../../../examples/beat-clock.lasair/) — `clock`
+- [Beat switcher](../../../examples/beat-switcher.lasair/) — `clock`
+- [Soak show](../../../examples/soak-show.lasair/) — `clock`
+- [Stage deck](../../../examples/stage-deck.lasair/) — `clock`

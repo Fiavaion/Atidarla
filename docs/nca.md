@@ -40,7 +40,7 @@ threshold).
 ## Built-in rules: hand-built, not trained
 
 Rule 4 forbids shipping weights from elsewhere, so the built-in rules are written by hand, unit
-by unit, by `GrowRule` in `crates/atd-ops-img/src/nca.rs` (8 channels, 20 hidden units):
+by unit, by `GrowRule` in `crates/lsr-ops-img/src/nca.rs` (8 channels, 20 hidden units):
 
 - alpha grows into neighbours (a unit on the Laplacian of alpha), rises once a cell is alive and
   is pulled back above 0.9, so the organism spreads from any live cell and saturates;
@@ -62,7 +62,7 @@ good save carries on from the state the last good weights left.
 
 ```json
 {
-  "format": "atidarla-nca",
+  "format": "lasair-nca",
   "version": 1,
   "name": "coral",
   "licence": "MIT OR Apache-2.0",
@@ -87,8 +87,8 @@ good save carries on from the state the last good weights left.
   A model trained elsewhere goes through the model manager with its licence (rule 4), not into a
   project or this repository.
 
-`examples/neural-growth.atidarla/nca/coral.json` is written by the generator
-(`cargo test -p atd-ops-img --test nca -- --ignored write_example_weights`), and a test checks
+`examples/neural-growth.lasair/nca/coral.json` is written by the generator
+(`cargo test -p lsr-ops-img --test nca -- --ignored write_example_weights`), and a test checks
 the shipped file still equals the generator's output.
 
 ## Performance and limits
@@ -101,5 +101,5 @@ in registers. Cells whose neighbourhood is dead skip the network. Measured on an
 is two `f32` storage buffers of `grid cells × channels`; a grid that would need more than the
 device's largest storage buffer (128 MiB by default) is an error asking for a larger Cell Size.
 
-Offline (`atidarla render`) it is stateful: identical across runs of the same range; it waits for
+Offline (`lasair render`) it is stateful: identical across runs of the same range; it waits for
 its pipelines and its weights file.

@@ -1,16 +1,16 @@
-# Supervised run (`atidarla run`, FR-H2)
+# Supervised run (`lasair run`, FR-H2)
 
-`atidarla run` keeps the app running on a show machine: it launches `atidarla-app` on a project,
+`lasair run` keeps the app running on a show machine: it launches `lasair-app` on a project,
 restarts it when it crashes or freezes, and stops it on Ctrl-C. It behaves the same on Windows
 and macOS (Linux too).
 
 ```sh
-atidarla run examples/audio-reactive-feedback.atidarla --kiosk
+lasair run examples/audio-reactive-feedback.lasair --kiosk
 ```
 
 | Option | Meaning |
 |---|---|
-| `<project>` | Project folder (`*.atidarla`). |
+| `<project>` | Project folder (`*.lasair`). |
 | `--kiosk` | Show mode: the app opens full screen with no window frame, shows only the viewer (no menu, no editor panels) and hides the cursor. Output windows of the project (`cmp.window`, `docs/outputs.md`) open as usual. |
 | `--allow-python-ops` | Run the project's Python (operators in `ops/`, Script nodes, Python expressions) without the Allow dialog, which an unattended show cannot answer; passed to the app on every launch. Only for projects you trust (`docs/python-ops.md`). |
 | `--max-restarts N` | Restarts in a row before giving up (default 10; 0 never restarts). A run that lasts a minute counts as healthy and resets the count. |
@@ -18,8 +18,8 @@ atidarla run examples/audio-reactive-feedback.atidarla --kiosk
 | `--heartbeat-timeout S` | Seconds without a heartbeat before the app is killed and restarted (default 15; 0 turns the watch off). |
 | `--startup-grace S` | Seconds the app gets from launch to its first heartbeat (default 90): project load and shader compiles come first. |
 
-The app binary is looked up as `atidarla-app` (`.exe` on Windows) beside the `atidarla`
-executable, or at `$ATD_APP`.
+The app binary is looked up as `lasair-app` (`.exe` on Windows) beside the `lasair`
+executable, or at `$LSR_APP`.
 
 ## What counts as a failure
 
@@ -46,4 +46,4 @@ Not covered: a hang inside a worker (the UI keeps drawing and beating) and a win
 has stopped drawing (a minimised or covered window can pause repaints; kiosk mode is full
 screen). `--heartbeat-timeout 0` turns the watch off for such setups.
 
-Running the app by hand: `atidarla-app project.atidarla --kiosk --heartbeat beat.txt`.
+Running the app by hand: `lasair-app project.lasair --kiosk --heartbeat beat.txt`.

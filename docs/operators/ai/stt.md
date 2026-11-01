@@ -42,4 +42,4 @@ All platforms.
 
 ## Examples
 
-- [Speech and chat](../../../examples/speech-chat.atidarla/) — `speech`
+- [Speech and chat](../../../examples/speech-chat.lasair/) — `speech`

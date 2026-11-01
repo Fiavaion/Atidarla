@@ -18,20 +18,20 @@
 | D7 | Spawn and death | Fixed capacity, compacted every frame by an integer prefix sum while the state is copied (stable, deterministic order); no atomics decide where a particle goes | Designer |
 | D8 | Draw path | Instanced quads with vertex pulling from storage buffers, sized by an indirect draw | Designer |
 | D9 | Deformer stacks | Hand the buffer over in place first; fuse runs of per-point operators into one dispatch only if spike S3 shows it is needed (it did: built 2026-10-30, §9) | Designer, after S3 |
-| D10 | Kernel and WGSL contract | The schema, layout and binding generator live in `atd-core`/`atd-gpu`. A Kernel (A12) and a `pnt.wgsl` node with `#bind` (FR-K5) are both clients | Designer; A12 itself is Mark's |
+| D10 | Kernel and WGSL contract | The schema, layout and binding generator live in `lsr-core`/`lsr-gpu`. A Kernel (A12) and a `pnt.wgsl` node with `#bind` (FR-K5) are both clients | Designer; A12 itself is Mark's |
 | D11 | Files | Networks stay text. Generated geometry is never saved. Bakes are rebuildable caches in `.cache/`; assets leave through glTF/PLY | Designer; bake policy needs Mark (Q3) |
 | D12 | Limits | Rely only on wgpu `Limits::default()` (the WebGPU defaults), which is what the app and CLI request today; ask for more where the adapter offers it | Designer |
 
 ## 0. What exists today (what the design must fit)
 
-- **Wire type.** `WireType::Geo` exists (`crates/atd-core/src/registry.rs`). Wires connect only between equal types (`Network::validate_wire`, `crates/atd-core/src/graph.rs`), so PNT↔MSH wiring with no conversion is already enforced by type. Sockets may be `feedback` (they read the previous frame's result, so a loop is allowed).
-- **Scheduler.** `crates/atd-core/src/cook.rs` plans pull-cooks in dependency order: a node cooks if it is dirty, never cooked, time-dependent, fed by a feedback input, or downstream of a node cooking this frame. The plan allocates nothing once warm (`tests/plan_alloc.rs`). It has no notion of a node's data type.
-- **Engine.** `crates/atd-gpu/src/engine.rs` keeps per-node results as `HashMap<NodeId, wgpu::Texture>` (IMG) and `HashMap<NodeId, Channels>` (SIG). It sends every node whose first output is not SIG down the IMG path, so a GEO node today would be cooked as an IMG node. It records all GPU work into one encoder per frame and releases replaced textures to the pool after submit. `CookMode::{Live, Offline}` and `CookMode::receive` implement the offline rules in `docs/render.md` (A25).
-- **Pools.** Only a texture pool exists (`crates/atd-gpu/src/pool.rs`: bucketed by key, a free texture is dropped after 300 frames, free memory is capped at 512 MiB). There is no buffer pool. `FullscreenPass` (`crates/atd-gpu/src/fullscreen.rs`) caches bind groups by input identity (an LRU), so ping-ponged pooled resources hit the cache. GEO dispatches can reuse that pattern.
-- **Stateful precedent.** The IMG solvers keep `PingPong` textures inside the operator (`crates/atd-ops-img/src/stateful.rs`, `fluid.rs`) and copy the result to a pooled output.
-- **Stubs.** `atd-ops-pnt`, `atd-ops-msh` and `atd-ops-mat` register nothing and depend only on `atd-core`. `atd-kernel` has no dependencies. `atidarla bake` prints "not yet (M2)" (`crates/atd-cli/src/main.rs`).
-- **Device limits.** `atd-app/src/main.rs` asks for `wgpu::Limits::default()` (with `max_texture_dimension_2d` raised to 8192). `GpuContext::headless` and the render tests ask for the default too. So today every device has 8 storage buffers per stage, a 128 MiB storage binding and a 256 MiB buffer, whatever the hardware can do.
-- **FR-K5 gap (found while reading).** `img.wgsl` (`crates/atd-ops-img/src/wgsl.rs`) is a full-screen fragment shader with fixed inputs `in0`/`in1` and parameters `p1()`…`p4()`. It has no `#bind` declarations, no tile size and no iterations, which FR-K5 asks for. `M2.md` lists FR-K5 as done in M1; for geometry it is not (see §5).
+- **Wire type.** `WireType::Geo` exists (`crates/lsr-core/src/registry.rs`). Wires connect only between equal types (`Network::validate_wire`, `crates/lsr-core/src/graph.rs`), so PNT↔MSH wiring with no conversion is already enforced by type. Sockets may be `feedback` (they read the previous frame's result, so a loop is allowed).
+- **Scheduler.** `crates/lsr-core/src/cook.rs` plans pull-cooks in dependency order: a node cooks if it is dirty, never cooked, time-dependent, fed by a feedback input, or downstream of a node cooking this frame. The plan allocates nothing once warm (`tests/plan_alloc.rs`). It has no notion of a node's data type.
+- **Engine.** `crates/lsr-gpu/src/engine.rs` keeps per-node results as `HashMap<NodeId, wgpu::Texture>` (IMG) and `HashMap<NodeId, Channels>` (SIG). It sends every node whose first output is not SIG down the IMG path, so a GEO node today would be cooked as an IMG node. It records all GPU work into one encoder per frame and releases replaced textures to the pool after submit. `CookMode::{Live, Offline}` and `CookMode::receive` implement the offline rules in `docs/render.md` (A25).
+- **Pools.** Only a texture pool exists (`crates/lsr-gpu/src/pool.rs`: bucketed by key, a free texture is dropped after 300 frames, free memory is capped at 512 MiB). There is no buffer pool. `FullscreenPass` (`crates/lsr-gpu/src/fullscreen.rs`) caches bind groups by input identity (an LRU), so ping-ponged pooled resources hit the cache. GEO dispatches can reuse that pattern.
+- **Stateful precedent.** The IMG solvers keep `PingPong` textures inside the operator (`crates/lsr-ops-img/src/stateful.rs`, `fluid.rs`) and copy the result to a pooled output.
+- **Stubs.** `lsr-ops-pnt`, `lsr-ops-msh` and `lsr-ops-mat` register nothing and depend only on `lsr-core`. `lsr-kernel` has no dependencies. `lasair bake` prints "not yet (M2)" (`crates/lsr-cli/src/main.rs`).
+- **Device limits.** `lsr-app/src/main.rs` asks for `wgpu::Limits::default()` (with `max_texture_dimension_2d` raised to 8192). `GpuContext::headless` and the render tests ask for the default too. So today every device has 8 storage buffers per stage, a 128 MiB storage binding and a 256 MiB buffer, whatever the hardware can do.
+- **FR-K5 gap (found while reading).** `img.wgsl` (`crates/lsr-ops-img/src/wgsl.rs`) is a full-screen fragment shader with fixed inputs `in0`/`in1` and parameters `p1()`…`p4()`. It has no `#bind` declarations, no tile size and no iterations, which FR-K5 asks for. `M2.md` lists FR-K5 as done in M1; for geometry it is not (see §5).
 
 ## 1. Data model: what a `GEO` value is
 
@@ -92,11 +92,11 @@ Operators that move every attribute (Delete, Sort, Merge, compaction) use one ge
 2. When the map completes, the input (CPU copies) goes to an MSH worker thread with the job. Manifold, meshoptimizer and xatlas run there (`docs/spikes/msh-licences.md`).
 3. The worker uploads the result. I infer that `wgpu::Queue::write_buffer` can be called from a worker (wgpu 30's `Queue` is `Send + Sync` outside wasm); spike S3 must confirm this. The worker writes into buffers it takes from a thread-safe pool handle, so the render thread only swaps a pointer.
 4. **Live:** the node outputs its last finished result (empty before the first) and sets `cook_again`, as `img.wgsl` does while a shader compiles. A GPU-resident input therefore makes an MSH result at least one frame late, and a cook longer than a frame keeps the previous mesh. That is the "over its frame budget" warning of PRD §6.
-5. **Offline** (`CookMode::Offline`, `docs/render.md` rules 2–3): the cook waits. It calls `device.poll(wait)` for the readback, then `CookMode::receive` for the worker's result, so frame *i* uses the inputs of frame *i*. Classify every MSH op as "Waits" in `classify()` (`crates/atd-cli/src/render.rs`). **Library determinism is not known:** Manifold's TBB `parallel` feature may reorder floating-point work. The task that adds Boolean must check it: run the same Boolean twice, with and without `parallel`, and compare the output. If two runs differ, offline MSH cooks run the library single-threaded.
+5. **Offline** (`CookMode::Offline`, `docs/render.md` rules 2–3): the cook waits. It calls `device.poll(wait)` for the readback, then `CookMode::receive` for the worker's result, so frame *i* uses the inputs of frame *i*. Classify every MSH op as "Waits" in `classify()` (`crates/lsr-cli/src/render.rs`). **Library determinism is not known:** Manifold's TBB `parallel` feature may reorder floating-point work. The task that adds Boolean must check it: run the same Boolean twice, with and without `parallel`, and compare the output. If two runs differ, offline MSH cooks run the library single-threaded.
 
 ### 2.4 Rule 2 (no allocation after warm-up): pools and growth
 
-- **Buffer pool** (new, in `atd-gpu`). Keyed by (size class, usage). Size classes are powers of two from 4 KiB, so a dragged Scatter count reuses a buffer instead of creating one per value. Trimming follows `TexturePool`: keep a free buffer for 300 frames and cap free memory, so a slider sweep cannot pin VRAM. Staging buffers for readback and upload are pooled the same way. Bind groups are cached by buffer identity, as `FullscreenPass` does.
+- **Buffer pool** (new, in `lsr-gpu`). Keyed by (size class, usage). Size classes are powers of two from 4 KiB, so a dragged Scatter count reuses a buffer instead of creating one per value. Trimming follows `TexturePool`: keep a free buffer for 300 frames and cap free memory, so a slider sweep cannot pin VRAM. Staging buffers for readback and upload are pooled the same way. Bind groups are cached by buffer identity, as `FullscreenPass` does.
 - **Particle capacity is a parameter** (`max_particles`, default 1M, up to the device limit). Buffers are allocated at capacity when the parameter changes, which is an edit and not a frame-critical path. A running simulation never grows. If emission would overflow, it stops at capacity and the node shows a status line (`GpuOp::status`, A25).
 - **Generators** (Point Shape, Scatter, primitives) allocate only when their count changes.
 - **CPU side.** MSH workers may allocate (they are not frame-critical). The render-thread side of a GEO cook must pass an allocation-counting test like `tests/plan_alloc.rs`.
@@ -111,7 +111,7 @@ Two levels, because attribute names often come from parameters (Attribute Create
 | Level | Where | Contents | Used by |
 |---|---|---|---|
 | Static | `OperatorSchema`: a new optional `attributes` list, serialised like the rest of the schema | For each entry: class, name (literal or `$param`), type, access (`read`, `write`, `read_write`, `create`), whether it is required, and the default when missing | Docs pages, the MCP `get_schema` tool, the Palette, connection hints |
-| Runtime | A new GEO operator trait in `atd-gpu`, beside `GpuOp`/`SigOp` | `attributes(params, input schema) → plan`: the resolved list. `cook(ctx)` then receives exactly those bindings | The engine (bindings, transfers, ownership hand-over), Kernel/WGSL codegen |
+| Runtime | A new GEO operator trait in `lsr-gpu`, beside `GpuOp`/`SigOp` | `attributes(params, input schema) → plan`: the resolved list. `cook(ctx)` then receives exactly those bindings | The engine (bindings, transfers, ownership hand-over), Kernel/WGSL codegen |
 
 The engine needs a third branch next to IMG and SIG in `Engine::cook`, chosen when the output wire is `Geo` (today such a node would be cooked as IMG). It also needs a `geo` results map. A missing required attribute is a node error that names it. A missing optional one gets its declared default, as a constant rather than an allocated buffer.
 
@@ -191,10 +191,10 @@ The numbers are on this RTX 5070 Ti (DX12). Its 896 GB/s is about 1.8× the 4070
 The framework guarantees these things. Neither a Kernel (A12) nor a raw WGSL node needs anything more:
 
 1. **A queryable schema before cooking:** the names, class and type of every input attribute are known when the node is planned. FR-K1 bindings and FR-K4 reload keys ("keyed by attribute names and types") come from that.
-2. **Fixed layout rules** (§2.1) and a **binding generator** in `atd-gpu` that writes the WGSL declarations for a resolved attribute plan. Group 0 belongs to the engine (a header with the count and capacity, a parameter uniform, detail). Group 1 holds the attributes in declaration order, each `read` or `read_write`. The pure-data part (types, layout, names) sits in `atd-core`, so `atd-kernel` can depend on it without depending on wgpu.
+2. **Fixed layout rules** (§2.1) and a **binding generator** in `lsr-gpu` that writes the WGSL declarations for a resolved attribute plan. Group 0 belongs to the engine (a header with the count and capacity, a parameter uniform, detail). Group 1 holds the attributes in declaration order, each `read` or `read_write`. The pure-data part (types, layout, names) sits in `lsr-core`, so `lsr-kernel` can depend on it without depending on wgpu.
 3. **Gather-only element writes:** invocation *i* writes only element *i*. That makes per-element kernels race-free and deterministic without atomics.
 4. **State on the wire** (§3.2): editing a kernel recompiles its pipeline on a worker thread, and the next frame continues from the carried `GEO`. That is FR-K4/AC3 at no extra cost, provided a parameter edit keeps the engine's cached results, which it does today (`after_change` drops results only for removed nodes).
-5. **Shared WGSL library:** the node-built ops (curl noise, attract) and the kernel helpers (FR-K2) call the same WGSL functions in the `atd-gpu` library. Without that, AC2's "identical output" cannot hold.
+5. **Shared WGSL library:** the node-built ops (curl noise, attract) and the kernel helpers (FR-K2) call the same WGSL functions in the `lsr-gpu` library. Without that, AC2's "identical output" cannot hold.
 
 **If A12 is rejected,** a `pnt.wgsl` compute node gives the same reach in M2 and completes FR-K5 for geometry:
 
@@ -213,15 +213,15 @@ The engine parses the `#bind` lines into the runtime attribute plan (§3.1), gen
 
 ## 6. Serialisation (rule 8)
 
-- **Project files hold no geometry.** Networks stay `networks/<id>.toml` (`crates/atd-format/src/network.rs`: nodes sorted by stable ID, inputs and params by name, only non-default params). Attribute names, types and groups are ordinary parameters (string, menu, vec), so the format needs no change. Kernel sources go in `kernels/*.atk` and WGSL in `shaders/*.wgsl` (§5.5).
-- **Bakes are caches** (A11: "binary only for caches"). `atidarla bake` writes `.cache/geo/<hash>.atdgeo`, keyed by a hash of the upstream network text, parameters, input files and `atidarla` version. A fresh clone rebuilds them. `.atdgeo` has a magic number and version, a sorted text header (attributes by class then name, types, counts, groups, semantics), then raw little-endian SoA blobs at 256-byte alignment and a checksum. Geometry meant to be kept leaves through Mesh File Out (glTF/OBJ/PLY) into `media/`.
+- **Project files hold no geometry.** Networks stay `networks/<id>.toml` (`crates/lsr-format/src/network.rs`: nodes sorted by stable ID, inputs and params by name, only non-default params). Attribute names, types and groups are ordinary parameters (string, menu, vec), so the format needs no change. Kernel sources go in `kernels/*.atk` and WGSL in `shaders/*.wgsl` (§5.5).
+- **Bakes are caches** (A11: "binary only for caches"). `lasair bake` writes `.cache/geo/<hash>.lsrgeo`, keyed by a hash of the upstream network text, parameters, input files and `lasair` version. A fresh clone rebuilds them. `.lsrgeo` has a magic number and version, a sorted text header (attributes by class then name, types, counts, groups, semantics), then raw little-endian SoA blobs at 256-byte alignment and a checksum. Geometry meant to be kept leaves through Mesh File Out (glTF/OBJ/PLY) into `media/`.
 - **Determinism:** wherever attributes are listed (files, headers, docs, the spreadsheet) they are sorted by (class, name). Binding order is declaration order, which is stable because it comes from the schema or the `#bind` text. Point numbering comes from deterministic ops (§4.3).
 - **Round-trip tests:**
-  1. Extend the existing random-network round trip (300 networks, byte-stable, in `crates/atd-format/src/tests.rs`) to every PNT, MSH and MAT operator.
-  2. `.atdgeo`: random geometries (every type and class, zero points, empty groups, NaN payloads, ±inf, −0.0) are written, read and compared bit for bit, then written again byte-identically.
+  1. Extend the existing random-network round trip (300 networks, byte-stable, in `crates/lsr-format/src/tests.rs`) to every PNT, MSH and MAT operator.
+  2. `.lsrgeo`: random geometries (every type and class, zero points, empty groups, NaN payloads, ±inf, −0.0) are written, read and compared bit for bit, then written again byte-identically.
   3. Bake the same project twice and get the same bytes.
   4. Mesh File Out → Mesh File In keeps `P`, `N`, `uv` and `Cd` within the format's precision. The glTF opens in Blender (AC in §9).
-  5. Damaged `.atdgeo` and mesh files never panic (fuzz, like the existing 100,000-damaged-files test).
+  5. Damaged `.lsrgeo` and mesh files never panic (fuzz, like the existing 100,000-damaged-files test).
 
 ## 7. Windows and macOS parity (rule 6)
 
@@ -241,7 +241,7 @@ Read from the pinned crates, `wgpu-types 30.0.1` (`src/limits.rs`, `src/features
 | `SUBGROUP` | feature | yes | when SIMD-scoped ops exist | optional fast path for integer scans only (same result) |
 | Point size | always 1 px in WGSL | — | — | quads |
 
-To raise the limits: in `atd-app/src/main.rs`, `atd-gpu/src/lib.rs` (`headless_async`) and `atd-cli/src/render.rs`, ask for `min(adapter, target)` instead of the defaults. Every core operator must still work at the defaults. The 16 and 1 GiB targets are inferences from the hardware tiers above, not measurements. The GTX 1660 / Apple M1 guard rail (A16, PT-6) can be checked with the same limits table at startup.
+To raise the limits: in `lsr-app/src/main.rs`, `lsr-gpu/src/lib.rs` (`headless_async`) and `lsr-cli/src/render.rs`, ask for `min(adapter, target)` instead of the defaults. Every core operator must still work at the defaults. The 16 and 1 GiB targets are inferences from the hardware tiers above, not measurements. The GTX 1660 / Apple M1 guard rail (A16, PT-6) can be checked with the same limits table at startup.
 
 ## 8. Risks, my decisions, and questions for Mark
 
@@ -257,7 +257,7 @@ To raise the limits: in `atd-app/src/main.rs`, `atd-gpu/src/lib.rs` (`headless_a
 | u32 ID wrap in long shows (PT-10, 24 h soak) | IDs repeat after about 71 min at 1M/s | Documented; unique among live particles |
 
 ### Decided by me as designer (Mark may overrule any of these)
-D2–D10 and D12 in the table at the top; u32 wrapping IDs; 32 groups per class; size classes as powers of two; the `.atdgeo` cache format; the determinism rule for atomics; requesting higher limits where the adapter offers them; ownership hand-over before fusion.
+D2–D10 and D12 in the table at the top; u32 wrapping IDs; 32 groups per class; size classes as powers of two; the `.lsrgeo` cache format; the determinism rule for atomics; requesting higher limits where the adapter offers them; ownership hand-over before fusion.
 
 ### Questions for Mark, in order
 1. **PT-2 definition.** The PRD does not say how particles are rendered. Accept "2-pixel additive sprites, colour from an attribute, no depth sorting" as the PT-2 bench case (`pt2.particles_2m`)?
@@ -279,13 +279,13 @@ What was built follows the design; this section lists only deviations, their rea
 
 | Where | Design | Built | Why |
 |---|---|---|---|
-| §3.1 static level | An `attributes` list in `OperatorSchema` | Not added; attributes are named in each operator's summary and help (and the table in `atd-ops-pnt`'s crate docs) | `OperatorSchema` is built with struct literals in about 40 places across crates other areas are editing now; one coordinated change later (a `Default` plus a builder) avoids breaking them. |
-| §3.1 runtime level | `attributes(params, input schema) → plan` on the GEO trait | `GeoOp::cook` looks attributes up itself (`Geometry::point_typed`); a missing required one is a node error naming it; missing optional ones are created (`pnt.noise` makes `v` at zero) | Nothing consumes a plan yet (no Kernel, no binding generator client); the WGSL declaration generator exists (`atd_core::geo::wgsl_binding`). |
+| §3.1 static level | An `attributes` list in `OperatorSchema` | Not added; attributes are named in each operator's summary and help (and the table in `lsr-ops-pnt`'s crate docs) | `OperatorSchema` is built with struct literals in about 40 places across crates other areas are editing now; one coordinated change later (a `Default` plus a builder) avoids breaking them. |
+| §3.1 runtime level | `attributes(params, input schema) → plan` on the GEO trait | `GeoOp::cook` looks attributes up itself (`Geometry::point_typed`); a missing required one is a node error naming it; missing optional ones are created (`pnt.noise` makes `v` at zero) | Nothing consumes a plan yet (no Kernel, no binding generator client); the WGSL declaration generator exists (`lsr_core::geo::wgsl_binding`). |
 | §2.2 versions | A version number per attribute | None: both copies of an attribute always hold the same values. A CPU or GPU copy is added once (`OnceLock`); writing in place needs sole ownership and drops the other copy | Same guarantee with less state. |
 | §3.2 hand-over | Scheduler reports why each node is planned (bitset) | `Scheduler::continuous(node)` (a reused set). The engine also hands over through **feedback** inputs (the source cooks again later in the same frame, and this is its only wire) and a node's **own** output on a self-feedback wire | Lets a simulation loop update its state in place instead of copying every frame. |
 | §3.2 Solver | A `pnt.solver` node (`init`, `prev`) | No Solver node: any GEO feedback input carries state; `pnt.particles` has a `prev` feedback input and otherwise uses its own last result | Smallest version that proves state on the wire; a Solver Block (FR-P4) can wrap it later. |
 | §4.2 particle passes | Update, scan, gather + emit, then curl and attract as separate deformers | Flag (`age + dt < life` on the previous state), compact (scan, index map, header), gather `P v age life id` (generic gather), emit, integrate (curl noise, attraction, gravity, drag) and `Cd` from age, **in one compute pass**; `pnt.noise` in velocity mode can be put in the loop | Fewer passes (wgpu allocates per pass, below) and less traffic: `Cd` is computed, not carried. |
-| §4.1 header | "A GPU-side count" | A fixed 48-byte header on every geometry with points: count, capacity, `mapped`, `draw_indirect` and `dispatch_workgroups_indirect` arguments (`atd_core::geo::header`); a CPU count is written once with `write_buffer` | Kernels read the count the same way whoever produced the geometry. |
+| §4.1 header | "A GPU-side count" | A fixed 48-byte header on every geometry with points: count, capacity, `mapped`, `draw_indirect` and `dispatch_workgroups_indirect` arguments (`lsr_core::geo::header`); a CPU count is written once with `write_buffer` | Kernels read the count the same way whoever produced the geometry. |
 | §2.1 kernels | Bind groups cached by buffer identity | Explicit bind-group layouts (`Kernel`, `Bind`) instead of shader-derived ones, so a binding a shader does not use is still bound; `BindGroupCache` shared by compute and render operators | Shader-derived layouts silently drop unused bindings. |
 | §2.3 readback | Copies arrive as CPU data | `Readback::receive` (copy on this thread) and `Readback::take_mapped` (hand the mapped buffers to a worker, which copies) | Copying 2 × 1.6 MB on the render thread cost about 0.4 ms (S3 round trip). |
 | §2.4 rule 2 | No allocation on the render thread after warm-up | No buffer, bind-group or texture creation after warm-up (asserted). Heap allocations are bounded per node-cook, as for IMG: 34 measured, bound 45 | wgpu allocates about 16-24 times per compute or render pass at submit and 4 per `write_buffer`; the GEO code adds about 10 per frame over six nodes (an `Arc` per new attribute generation, a `Vec` per copy-on-write clone). Recycling those is a follow-up. |
@@ -295,7 +295,7 @@ What was built follows the design; this section lists only deviations, their rea
 
 | Item | Result | Target |
 |---|---|---|
-| PT-2 `pt2.particles_2m` (release `atidarla bench`) | frame p50 1.86 ms, p95 2.02 ms; GPU: simulate 0.75 ms, draw ≈ 1.02 ms. Vulkan: p50 1.73 ms, p95 1.80 ms, simulate 0.64 ms, draw ≈ 1.03 ms | p95 ≤ 16.7 ms on RTX 4070 (not measured there) |
+| PT-2 `pt2.particles_2m` (release `lasair bench`) | frame p50 1.86 ms, p95 2.02 ms; GPU: simulate 0.75 ms, draw ≈ 1.02 ms. Vulkan: p50 1.73 ms, p95 1.80 ms, simulate 0.64 ms, draw ≈ 1.03 ms | p95 ≤ 16.7 ms on RTX 4070 (not measured there) |
 | S1: 2M static sprites at 1920×1080 | GPU p50 1.01 ms, p95 1.88 ms; render-thread cook p50 0.07 ms; 0 buffers, bind groups, textures created after frame 10 | ≤ 3.0 ms, ≤ 0.3 ms, 0 |
 | S2: 2M particles | simulate GPU p50 0.89 ms; simulate + draw 1.90 ms; two offline runs of 300 frames (one with 32 spinning threads): 300/300 frames identical, final `P v age life id` identical | ≤ 4.0 ms, ≤ 7.0 ms, identical |
 | S3: 30 `pnt.noise` deformers over 2M points (1 copy on write, 29 in place) | GPU p50 4.53 ms, p95 5.23 ms | fusion becomes an M2 task if > 3.0 ms: **it is over** |
@@ -313,9 +313,9 @@ Choices where §3.2 left room, each the simplest consistent with it:
   point's `P`, `v` (created at zero by the forces) and `N`. Wind and Turbulence are left
   unfused: they call the curl-noise library, and two Winds in one Metal kernel rounded `v`
   differently from two kernels (up to 4 ulps) because the compiler treats two inlined copies
-  of that large function differently. `pnt.noise` (a `Deformer` from `atd-gpu`) and every
+  of that large function differently. `pnt.noise` (a `Deformer` from `lsr-gpu`) and every
   operator that moves, adds or removes points end a run.
-- **The planner's rule** (`atd_gpu::engine`): a run is consecutive cooks in the frame's step
+- **The planner's rule** (`lsr_gpu::engine`): a run is consecutive cooks in the frame's step
   list where each node's only wired input is the previous node's GEO output and that output
   could be handed over (its only wire, cooking this frame and next, not viewed): exactly when
   the intermediate results can never be read. Runs are at most 64 stages, and stay within one
@@ -324,21 +324,21 @@ Choices where §3.2 left room, each the simplest consistent with it:
   `Engine::fused_last_frame` counts fused nodes.
 - **The fixed signature.** An operator offers `GeoOp::point_stage(params, dt)`: a kind (which
   stage function), its unfused uniforms (up to 128 bytes) and whether it writes `v`. Each kind's
-  WGSL is its unfused `fn point` body, rewritten as `fn stage_<kind>(atd_p, atd_v, atd_n,
+  WGSL is its unfused `fn point` body, rewritten as `fn stage_<kind>(lsr_p, lsr_v, lsr_n,
   params)` over the point's local `P`, `v`, `N`. **The unfused kernels call the same function**
   between a load and a store; the fused kernel loads once, calls the stages in order with
   uniforms from an array (one block per stage) and stores once. No Kernel DSL is needed (§3.2).
 - **Identical output: byte-identical, measured.** Every stage's inputs pass through an
-  exclusive-or with a uniform that is always 0 (`atd_opaque`), in the unfused kernels and
+  exclusive-or with a uniform that is always 0 (`lsr_opaque`), in the unfused kernels and
   between fused stages. Without it Metal's fast math folded one stage's arithmetic into the
   next (Twist then Taper: `(a + r) - a`), and fused `P` differed from the chain by an ulp in
   7% of words. With it the tests compare whole buffers byte for byte (Q4 answered for fusion:
   no tolerance needed). Transform became one kernel over `P`, `v`, `N` for this (it had three).
-- **Pipelines** are built on a worker thread when a run's stage kinds change (`atd-fuse`
+- **Pipelines** are built on a worker thread when a run's stage kinds change (`lsr-fuse`
   thread); live, the run cooks unfused until the pipeline arrives (`Engine::pending` is true
   meanwhile), and a run that could not be fused cooks entirely unfused that frame; offline the
   cook waits for it, so every frame of a render is fused alike.
-- **Implementation of the stages** lives with the operators (`atd-ops-pnt`: `fuse.rs`, the
+- **Implementation of the stages** lives with the operators (`lsr-ops-pnt`: `fuse.rs`, the
   `PointFuser` registered with `OpLibrary::set_point_fuser`); the engine knows only stages,
   runs and fusers, so another family can register its own.
 
@@ -349,7 +349,7 @@ the same machine, so timings are indicative): `tests/batch/fusion.rs` — the 14
 chain over six offline frames; 30 Transforms and three of each deformer (42 stages) the same;
 live fusion waits for its pipeline; runs stop at viewed nodes and non-stages.
 `tests/alloc_batch.rs` runs with a fused Bend + Wave run: no buffer, bind-group or texture
-creation after warm-up. `atidarla bench` case `pnt.fusion_30_transforms_2m` (30 animated
+creation after warm-up. `lasair bench` case `pnt.fusion_30_transforms_2m` (30 animated
 Transforms over 2M points, frame time including GPU completion; this adapter reports zero for
 GPU timestamps): fused p50 1.26-1.61 ms, unfused 8.48-9.18 ms over three runs (5.7-6.7×), `P`
 byte-identical.

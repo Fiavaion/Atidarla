@@ -26,9 +26,9 @@ All platforms.
 
 ## Examples
 
-- [Batch Wedge](../../../examples/batch-wedge.atidarla/) — `colour1`
-- [Beat switcher](../../../examples/beat-switcher.atidarla/) — `solid`
-- [DAT tables](../../../examples/dat-tables.atidarla/) — `swatch`
-- [Soak show](../../../examples/soak-show.atidarla/) — `strobe`
-- [Stage deck](../../../examples/stage-deck.atidarla/) — `strobe`
-- [Timeline show](../../../examples/timeline-show.atidarla/) — `tint`
+- [Batch Wedge](../../../examples/batch-wedge.lasair/) — `colour1`
+- [Beat switcher](../../../examples/beat-switcher.lasair/) — `solid`
+- [DAT tables](../../../examples/dat-tables.lasair/) — `swatch`
+- [Soak show](../../../examples/soak-show.lasair/) — `strobe`
+- [Stage deck](../../../examples/stage-deck.lasair/) — `strobe`
+- [Timeline show](../../../examples/timeline-show.lasair/) — `tint`

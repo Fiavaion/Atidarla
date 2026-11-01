@@ -47,17 +47,17 @@ range. A wedge may make at most 100 000 items. Where items run is the `scheduler
 `"lan:*"` (all ready LAN hosts), `"lan:studio"`, `"cloud:runpod"` (refused in Sovereign mode and
 once the spend cap is reached) or `"comfy:host:port"`.
 
-An example to copy from: [`batch-wedge`](../../examples/batch-wedge.atidarla/). It sweeps a
+An example to copy from: [`batch-wedge`](../../examples/batch-wedge.lasair/). It sweeps a
 noise seed against a scale through the built-in test model, and has a 10 prompts times 10 seeds
 wedge for two hosts.
 
 ## Running a wedge
 
 ```sh
-atidarla batch status myshow.atidarla                 # what would run, and where
-atidarla batch run myshow.atidarla prompts            # cook what is missing
-atidarla batch run myshow.atidarla prompts --force    # cook everything again
-atidarla batch run myshow.atidarla prompts --jobs 4   # more items in flight
+lasair batch status myshow.lasair                 # what would run, and where
+lasair batch run myshow.lasair prompts            # cook what is missing
+lasair batch run myshow.lasair prompts --force    # cook everything again
+lasair batch run myshow.lasair prompts --jobs 4   # more items in flight
 ```
 
 `run` prints a line for each item and a summary such as `100 items: 100 cooked, 0 already in the
@@ -66,7 +66,7 @@ bin, 0 failed`. An interrupted run keeps what it made; the next run does the res
 Changing one prompt of a 10 times 10 wedge cooks only its ten items. Changes the cache cannot
 see, such as an edited movie file or shader file, need `--force`.
 
-`atidarla check` verifies wedges, and `atidarla fmt` rewrites them in canonical form.
+`lasair check` verifies wedges, and `lasair fmt` rewrites them in canonical form.
 
 ## The media bin in the app
 

@@ -30,4 +30,4 @@ All platforms.
 
 ## Examples
 
-- [Keying](../../../examples/keying.atidarla/) — `bright`
+- [Keying](../../../examples/keying.lasair/) — `bright`

@@ -33,4 +33,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Capture](../../../examples/pnt-capture.atidarla/) — `relief`
+- [PNT Capture](../../../examples/pnt-capture.lasair/) — `relief`

@@ -29,4 +29,4 @@ All platforms.
 
 ## Examples
 
-- [Image processing](../../../examples/image-processing.atidarla/) — `coloured`
+- [Image processing](../../../examples/image-processing.lasair/) — `coloured`

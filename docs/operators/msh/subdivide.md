@@ -28,6 +28,6 @@ All platforms.
 
 ## Examples
 
-- [Mesh Files](../../../examples/mesh-files.atidarla/) — `soften`
-- [Mesh Modelling](../../../examples/mesh-modelling.atidarla/) — `smooth`
-- [Mesh Primitives](../../../examples/mesh-primitives.atidarla/) — `round_box`
+- [Mesh Files](../../../examples/mesh-files.lasair/) — `soften`
+- [Mesh Modelling](../../../examples/mesh-modelling.lasair/) — `smooth`
+- [Mesh Primitives](../../../examples/mesh-primitives.lasair/) — `round_box`

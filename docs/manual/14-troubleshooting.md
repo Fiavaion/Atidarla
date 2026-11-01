@@ -6,7 +6,7 @@ Where to look first:
 - **The menu bar** shows messages from the last action, and a red **GPU error** if the graphics
   card reported a problem. Click either to dismiss it. Hover for the full text.
 - **The Platform tab** shows your operating system, GPU and graphics backend.
-- **`atidarla check --gpu <project>`** loads a project and cooks every node outside the app.
+- **`lasair check --gpu <project>`** loads a project and cooks every node outside the app.
   It names what fails.
 
 ## Building and starting
@@ -16,7 +16,7 @@ own Python and ignores the one on your machine.) The app embeds Python and needs
 Python 3.13 and make sure it is on your `PATH`. On macOS also set
 `PYO3_PYTHON=$(brew --prefix python@3.13)/bin/python3.13` ([chapter 1](01-install.md)).
 
-**The build fails on macOS about Metal or Syphon.** Atidarla builds the Syphon library from
+**The build fails on macOS about Metal or Syphon.** Lasair builds the Syphon library from
 source and needs Xcode with its Metal toolchain installed. Open Xcode once and let it finish.
 
 **The first build is very slow.** That is normal. Later builds only rebuild what changed.
@@ -62,7 +62,7 @@ fallback under **Platforms**.
 **The picture is slow or stutters.** Try, in this order: lower the project resolution
 (`resolution` in `project.toml`) or a node's size; turn off heavy effects such as Fluid, Bloom
 and large Blurs; check the AI Hosts window for hosts that are restarting; build with
-`--release` (`cargo run --release -p atd-app`). `atidarla bench` measures the standard cases.
+`--release` (`cargo run --release -p lsr-app`). `lasair bench` measures the standard cases.
 
 **An AI node is slow or delayed.** Model results are asynchronous. The Governor fills the gaps
 (`hold`, `blend`, `flow` or `passthrough`). Real-time diffusion runs well on a Windows PC with
@@ -108,17 +108,17 @@ command line add `--allow-python-ops`.
 **An AI node reports no host or a missing model.** Open **View, AI Hosts** to see whether a host
 is ready and **View, Models** to see whether the model is downloaded. Install the host's extras
 ([chapter 8](08-ai.md)): `diffusion` and `vision` for pictures, `stt` for speech
-(`atidarla ai-host install <extra> --allow-internet` in an installed app).
-`atidarla ai-host check` starts the local host and prints the error if it cannot start;
-`atidarla ai-host status` shows which host command runs. An `ATD_AI_HOST_CMD` left set in your
+(`lasair ai-host install <extra> --allow-internet` in an installed app).
+`lasair ai-host check` starts the local host and prints the error if it cannot start;
+`lasair ai-host status` shows which host command runs. An `LSR_AI_HOST_CMD` left set in your
 environment replaces the bundled host: unset it.
 
 **`ai-host install` fails.** Sovereign mode refuses the download without `--allow-internet`. Behind
 a proxy or without internet, use `--wheelhouse <folder>` ([`docs/install.md`](../install.md#optional-ai-adapters)).
-A failed install leaves the extras you had. `atidarla ai-host remove` starts over.
+A failed install leaves the extras you had. `lasair ai-host remove` starts over.
 
 **A model will not download.** Sovereign mode blocks the internet. Use **Download once
-anyway** in the Models window, or `atidarla models download <id> --allow-internet`. You must
+anyway** in the Models window, or `lasair models download <id> --allow-internet`. You must
 also accept the model's licence first.
 
 **The Assistant or LLM Chat says it cannot reach a model.** The default is Ollama on your
@@ -135,7 +135,7 @@ loads and cooks without it. Check the `server` parameter (default `127.0.0.1:818
 **Do I need to know how to code?** No. Chapters 1 to 5 need no code. Kernels, WGSL and Python
 (chapter 6) are optional.
 
-**Is it free?** Yes. Atidarla is open source under the MIT or Apache-2.0 licence, at your option.
+**Is it free?** Yes. Lasair is open source under the MIT or Apache-2.0 licence, at your option.
 
 **Does it collect data about me?** No telemetry is added. AI features only connect to the
 internet if you turn Sovereign mode off or choose to download a model.
@@ -150,7 +150,7 @@ project or in an exported show.
 **Can I use my own shaders?** Yes: WGSL, Compute, the Kernel DSL and ISF shaders
 ([chapter 6](06-kernels-python-packs.md)).
 
-**Can I make a movie?** Yes: `atidarla render ... --out clip.mov` (needs a build with FFmpeg),
+**Can I make a movie?** Yes: `lasair render ... --out clip.mov` (needs a build with FFmpeg),
 or **Record** in the Viewer.
 
 **Will my project work in a later version?** Project files are text, with a version number in
@@ -160,7 +160,7 @@ them, and changes to the format are tested for round trips. Keep your projects i
 use node names. See [chapter 5](05-expressions-bindings.md).
 
 **Where do I get help?** Ask your lecturer first. When you report a problem, include the output of
-`atidarla check --gpu <project>` and the summary shown in the Platform tab.
+`lasair check --gpu <project>` and the summary shown in the Platform tab.
 
 **Is there a user manual in the app?** Learn mode (**View, Learn**) has step-by-step quests that
 check your progress ([`docs/learn.md`](../learn.md)).

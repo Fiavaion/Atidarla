@@ -31,7 +31,7 @@ All platforms.
 
 ## Examples
 
-- [Mesh Files](../../../examples/mesh-files.atidarla/) — `ring0`, `ring1`, `ring2`, `ring3`
-- [Mesh Primitives](../../../examples/mesh-primitives.atidarla/) — `outline`
-- [Scatter to Iso Surface](../../../examples/mesh-scatter-iso.atidarla/) — `path`, `square`
-- [PNT Outputs](../../../examples/pnt-outputs.atidarla/) — `ring`
+- [Mesh Files](../../../examples/mesh-files.lasair/) — `ring0`, `ring1`, `ring2`, `ring3`
+- [Mesh Primitives](../../../examples/mesh-primitives.lasair/) — `outline`
+- [Scatter to Iso Surface](../../../examples/mesh-scatter-iso.lasair/) — `path`, `square`
+- [PNT Outputs](../../../examples/pnt-outputs.lasair/) — `ring`

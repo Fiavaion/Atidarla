@@ -40,4 +40,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Capture](../../../examples/pnt-capture.atidarla/) — `tint`
+- [PNT Capture](../../../examples/pnt-capture.lasair/) — `tint`

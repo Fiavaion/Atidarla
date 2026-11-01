@@ -35,5 +35,5 @@ All platforms.
 
 ## Examples
 
-- [Audio-reactive feedback](../../../examples/audio-reactive-feedback.atidarla/) — `spectrum1`
-- [Signal scope](../../../examples/signal-scope.atidarla/) — `bands`
+- [Audio-reactive feedback](../../../examples/audio-reactive-feedback.lasair/) — `spectrum1`
+- [Signal scope](../../../examples/signal-scope.lasair/) — `bands`

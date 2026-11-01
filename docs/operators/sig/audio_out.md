@@ -32,4 +32,4 @@ All platforms.
 
 ## Examples
 
-- [Live control](../../../examples/live-control.atidarla/) — `speaker`
+- [Live control](../../../examples/live-control.lasair/) — `speaker`

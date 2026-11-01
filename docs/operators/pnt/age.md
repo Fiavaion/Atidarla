@@ -35,4 +35,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Solver](../../../examples/pnt-solver.atidarla/) — `lifetime`
+- [PNT Solver](../../../examples/pnt-solver.lasair/) — `lifetime`

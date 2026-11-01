@@ -34,4 +34,4 @@ All platforms.
 
 ## Examples
 
-- [Mesh Shaping](../../../examples/mesh-shaping.atidarla/) — `tidy`
+- [Mesh Shaping](../../../examples/mesh-shaping.lasair/) — `tidy`

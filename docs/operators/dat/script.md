@@ -32,4 +32,4 @@ All platforms.
 
 ## Examples
 
-- [DAT script](../../../examples/dat-script.atidarla/) — `shout`, `stats`
+- [DAT script](../../../examples/dat-script.lasair/) — `shout`, `stats`

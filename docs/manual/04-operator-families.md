@@ -60,7 +60,7 @@ One thing crosses between types without a wire:
 ## SIG: signals
 
 29 operators. Signals are numbers that change over time, grouped into named **channels**. They
-are how Atidarla listens to the world and how it animates.
+are how Lasair listens to the world and how it animates.
 
 - **Oscillators and clocks**: [LFO](../operators/sig/lfo.md), [Noise](../operators/sig/noise.md),
   [Beat](../operators/sig/beat.md), [Timer](../operators/sig/timer.md),
@@ -94,7 +94,7 @@ old ones; [Render Points](../operators/img/render_points.md) draws them. There i
 and [Sensor In](../operators/pnt/sensor_in.md) for depth and body tracking. Live depth capture
 needs a Windows-only SDK. On other systems Sensor In plays recordings and a built-in test scene.
 
-Example: [`pnt-fountain`](../../examples/pnt-fountain.atidarla/).
+Example: [`pnt-fountain`](../../examples/pnt-fountain.lasair/).
 
 ## MSH: meshes
 
@@ -114,8 +114,8 @@ after whether the data sits on the CPU or the GPU (PRD decision A10). Mesh bakin
 exception: it needs the mesh on the CPU, and a node from the point family has it only on the
 GPU ([chapter 13](13-command-line.md)).
 
-Examples: [`mesh-primitives`](../../examples/mesh-primitives.atidarla/),
-[`render-solids`](../../examples/render-solids.atidarla/).
+Examples: [`mesh-primitives`](../../examples/mesh-primitives.lasair/),
+[`render-solids`](../../examples/render-solids.lasair/).
 
 ## MAT: materials
 
@@ -141,8 +141,8 @@ network messages.
 - **Code**: [Script](../operators/dat/script.md) (Python, needs your permission; chapter 6).
 
 Slow work (files, the web, a serial port) runs on worker threads and never holds up the picture.
-Examples: [`dat-tables`](../../examples/dat-tables.atidarla/),
-[`dat-files`](../../examples/dat-files.atidarla/). The AI nodes
+Examples: [`dat-tables`](../../examples/dat-tables.lasair/),
+[`dat-files`](../../examples/dat-files.lasair/). The AI nodes
 [Speech to Text](../operators/ai/stt.md) and [LLM Chat](../operators/ai/llm_chat.md) also use
 DAT wires (chapter 8).
 
@@ -171,7 +171,7 @@ Some operators need a capability that only some computers have, for example real
 diffusion needs a Windows PC with an NVIDIA GPU. Each operator page has a **Platforms**
 section that says so. On other computers the node uses a stated fallback: it routes to another
 host, stands in with a simpler version, or is hidden with an explanation.
-`atidarla check --gpu` lists such nodes as "not available on this platform" instead of failing.
+`lasair check --gpu` lists such nodes as "not available on this platform" instead of failing.
 
 ## Where project and custom operators appear
 

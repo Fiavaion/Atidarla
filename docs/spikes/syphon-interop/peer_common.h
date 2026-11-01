@@ -1,6 +1,6 @@
-// Shared by the Syphon interop peers (Atidarla, MIT OR Apache-2.0).
-// Mirrors atd_interop::readback::test_pattern and
-// crates/atd-interop/examples/common/stamped.rs byte for byte.
+// Shared by the Syphon interop peers (Lasair, MIT OR Apache-2.0).
+// Mirrors lsr_interop::readback::test_pattern and
+// crates/lsr-interop/examples/common/stamped.rs byte for byte.
 #pragma once
 
 #import <Foundation/Foundation.h>

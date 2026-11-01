@@ -35,4 +35,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Outputs](../../../examples/pnt-outputs.atidarla/) — `lights`
+- [PNT Outputs](../../../examples/pnt-outputs.lasair/) — `lights`

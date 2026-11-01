@@ -1,7 +1,7 @@
 # Spike (d): AI Host Protocol prototype
 
 **Date:** 2026-10-15 · **Status:** shared-memory path done; GPU-handle path pending (needs Windows + NVIDIA)
-**Code:** `crates/atd-ai` (`protocol.rs`, `ring.rs`, `client.rs`, `tests/host_roundtrip.rs`, `examples/spike_d.rs`) and `ai-host/` (Python host).
+**Code:** `crates/lsr-ai` (`protocol.rs`, `ring.rs`, `client.rs`, `tests/host_roundtrip.rs`, `examples/spike_d.rs`) and `ai-host/` (Python host).
 **Requirement:** FR-A1 (M0 prototype, M4 final), PT-9 groundwork.
 
 ## Design
@@ -16,7 +16,7 @@
 ## Results (shared-memory path)
 
 Machine: cloud container, 4 vCPU Intel Xeon @ 2.10 GHz, Linux, Python 3.13.16, release build. The calls are serial, with one frame in flight.
-`cargo run -p atd-ai --release --example spike_d 300`
+`cargo run -p lsr-ai --release --example spike_d 300`
 
 | size | frames | spawn+open ms | p50 ms | p95 ms | max ms | host p50 ms | fps (serial) |
 |---|---|---|---|---|---|---|---|
@@ -30,4 +30,4 @@ Machine: cloud container, 4 vCPU Intel Xeon @ 2.10 GHz, Linux, Python 3.13.16, r
 
 1. **GPU-handle transport (Windows + NVIDIA):** export a wgpu texture as a D3D12 shared handle, import it in the host with CUDA external memory (`cudaImportExternalMemory`), and run a torch op on it with no readback. Advertise it as `transports: ["shm", "cuda-ipc"]`. Depends on spike (b). Measure the same table with `--transport cuda-ipc`.
 2. **Pipelining:** the numbers above are serial. M4 will keep 2–3 frames in flight across ring slots, which the slot design already allows.
-3. **Run on Windows and macOS:** the integration tests run in CI on both (`cargo test -p atd-ai`). Re-run `spike_d` on the RTX 4070 PC and an M-series Mac and add rows here.
+3. **Run on Windows and macOS:** the integration tests run in CI on both (`cargo test -p lsr-ai`). Re-run `spike_d` on the RTX 4070 PC and an M-series Mac and add rows here.

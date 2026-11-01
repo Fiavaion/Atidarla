@@ -30,4 +30,4 @@ All platforms.
 
 ## Examples
 
-- [Mesh Construction](../../../examples/mesh-construction.atidarla/) — `grow`
+- [Mesh Construction](../../../examples/mesh-construction.lasair/) — `grow`

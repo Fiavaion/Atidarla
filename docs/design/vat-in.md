@@ -4,7 +4,7 @@
 Textures 3.0 export describes them publicly: a mesh, a position texture, optional rotation,
 colour and lookup textures, and a JSON data file. This page states exactly what the operator
 reads, so an export can be checked against it. It was written from the public format
-description and tested only on synthetic files (`crates/atd-ops-msh/tests/vat.rs`); no
+description and tested only on synthetic files (`crates/lsr-ops-msh/tests/vat.rs`); no
 third-party sample files are used or shipped.
 
 ## Where it runs
@@ -27,7 +27,7 @@ mode, whose topology changes each frame.
 | Lookup | `.exr` or 16-bit `.png` | Fluid only; RG = position texel, A < 0.5 = unused |
 | Data | JSON | frame count, bounds (below) |
 
-FBX meshes are not read: export the VAT geometry as glTF (or OBJ/PLY) for Atidarla.
+FBX meshes are not read: export the VAT geometry as glTF (or OBJ/PLY) for Lasair.
 
 ### Data file
 
@@ -45,7 +45,7 @@ A PNG position texture needs the bounds; an EXR one does not.
 
 Each point finds its texel in frame 0:
 
-1. from the point attribute `uv2` (glTF `TEXCOORD_1`), in Atidarla's `uv` convention (v up):
+1. from the point attribute `uv2` (glTF `TEXCOORD_1`), in Lasair's `uv` convention (v up):
    column `⌊u·W⌋`, row `⌊(1 − v)·H⌋` with row 0 at the top of the image;
 2. else by order: soft and fluid by point number `i`, rigid and sprite by piece number `k`
    (the `piece` point attribute, else connected pieces numbered in primitive order), at column

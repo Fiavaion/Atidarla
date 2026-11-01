@@ -1,4 +1,4 @@
-# M5 AC1: the 20-prompt network-generation eval (`atidarla agent eval`).
+# M5 AC1: the 20-prompt network-generation eval (`lasair agent eval`).
 #
 # A run is valid when, after the assistant stops, the network has at least
 # `min_nodes` nodes, every node cooks without an error, and for each entry
@@ -128,6 +128,6 @@ min_nodes = 2
 
 [[prompt]]
 id = "text-overlay"
-text = "Put the text 'ATIDARLA' over animated noise."
+text = "Put the text 'LASAIR' over animated noise."
 require = ["img.text", "img.noise"]  # Text composites over its `in` image
 min_nodes = 2

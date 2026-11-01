@@ -29,6 +29,6 @@ All platforms.
 
 ## Examples
 
-- [Image processing](../../../examples/image-processing.atidarla/) — `edges`
-- [Soak show](../../../examples/soak-show.atidarla/) — `grid`
-- [Stage deck](../../../examples/stage-deck.atidarla/) — `grid`
+- [Image processing](../../../examples/image-processing.lasair/) — `edges`
+- [Soak show](../../../examples/soak-show.lasair/) — `grid`
+- [Stage deck](../../../examples/stage-deck.lasair/) — `grid`

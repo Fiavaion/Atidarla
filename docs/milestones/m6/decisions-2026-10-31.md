@@ -1,4 +1,4 @@
-# Atidarla v1.0 decisions
+# Lasair v1.0 decisions
 
 Exported 2026-10-31 19:15
 
@@ -55,7 +55,7 @@ Exported 2026-10-31 19:15
 
 ### IDS: Permanent app identity
 - Decision: Keep the current values
-- macOS bundle ID: org.atidarla.Atidarla
+- macOS bundle ID: org.lasair.Lasair
 - MSI UpgradeCode: 6B0E3C52-6D4A-4C55-9C1F-2A9B7A3C1D10
 
 ### SIGN: Code signing

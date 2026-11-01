@@ -31,6 +31,6 @@ All platforms.
 
 ## Examples
 
-- [Audio-reactive feedback](../../../examples/audio-reactive-feedback.atidarla/) — `audio1`
-- [Live control](../../../examples/live-control.atidarla/) — `drums`
-- [Pack: Audio Pulse](../../../examples/pack-audio-pulse.atidarla/) — `drums`
+- [Audio-reactive feedback](../../../examples/audio-reactive-feedback.lasair/) — `audio1`
+- [Live control](../../../examples/live-control.lasair/) — `drums`
+- [Pack: Audio Pulse](../../../examples/pack-audio-pulse.lasair/) — `drums`

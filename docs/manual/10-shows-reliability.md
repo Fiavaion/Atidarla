@@ -5,7 +5,7 @@ and keeping it running.
 
 ## Saving and project folders
 
-Atidarla saves a **project folder** that ends in `.atidarla`. Everything in it is plain text
+Lasair saves a **project folder** that ends in `.lasair`. Everything in it is plain text
 with stable IDs, written in a fixed order. That makes projects easy to keep in Git and to
 compare ([chapter 11](11-collaboration.md)).
 
@@ -25,9 +25,9 @@ and **New Project** (Cmd/Ctrl+N). The app asks first before it replaces a projec
 Two checks you can run on a project from a terminal:
 
 ```sh
-atidarla check examples/stage-deck.atidarla          # loads, validates, is in canonical form
-atidarla check --gpu examples/stage-deck.atidarla    # also cooks every node for a second
-atidarla fmt myshow.atidarla                         # rewrite in canonical form after editing by hand
+lasair check examples/stage-deck.lasair          # loads, validates, is in canonical form
+lasair check --gpu examples/stage-deck.lasair    # also cooks every node for a second
+lasair fmt myshow.lasair                         # rewrite in canonical form after editing by hand
 ```
 
 ## Exporting a show
@@ -37,11 +37,11 @@ computer. **Show export** fixes that. It makes one portable folder with every fi
 needs copied inside, and every path rewritten to be relative.
 
 ```sh
-atidarla export-show shows/opening.atidarla dist/ --zip
-# dist/opening.atidarla/       the bundle (a project folder)
-# dist/opening.atidarla.zip    the same, zipped
+lasair export-show shows/opening.lasair dist/ --zip
+# dist/opening.lasair/       the bundle (a project folder)
+# dist/opening.lasair.zip    the same, zipped
 
-atidarla verify-show dist/opening.atidarla --gpu     # run this on the receiving computer
+lasair verify-show dist/opening.lasair --gpu     # run this on the receiving computer
 ```
 
 What it does:
@@ -69,13 +69,13 @@ For an installation or a performance, you want the app full screen, with no menu
 restarted automatically if anything goes wrong.
 
 ```sh
-atidarla run examples/audio-reactive-feedback.atidarla --kiosk
+lasair run examples/audio-reactive-feedback.lasair --kiosk
 ```
 
 **Kiosk mode** opens the app full screen, with no window frame and no cursor. It shows only the
 Viewer, with no menu and no editor panels. Output windows from Window nodes open as usual.
 
-`atidarla run` is the **supervisor**. It starts the app and watches it. It restarts the app if:
+`lasair run` is the **supervisor**. It starts the app and watches it. It restarts the app if:
 
 - the app **crashes** (exits with an error or is killed), or
 - the app **freezes**: it stops giving a heartbeat for 15 seconds (the first heartbeat is allowed
@@ -91,7 +91,7 @@ Options: `--max-restarts`, `--restart-delay`, `--heartbeat-timeout` and `--start
 inside a background worker (the picture keeps drawing and the heartbeat continues), or a window
 the system has stopped drawing.
 
-You can also start the app yourself: `atidarla-app project.atidarla --kiosk`.
+You can also start the app yourself: `lasair-app project.lasair --kiosk`.
 
 ## Crash isolation and the Output Governor
 
@@ -111,10 +111,10 @@ Python expression results arrive one frame late for the same reason.
 
 A **soak test** runs a show for hours to find memory leaks and slow-downs. The target is a 24
 hour run with no leak over 100 MB and no frame spike over 50 ms. The command that will run it
-(`atidarla soak`) is planned for the last milestone and is **not built yet**. Today you can run
-your own show under `atidarla run` and watch it.
+(`lasair soak`) is planned for the last milestone and is **not built yet**. Today you can run
+your own show under `lasair run` and watch it.
 
-Atidarla also keeps its own checks on frame-time memory use: the work done on every frame is
+Lasair also keeps its own checks on frame-time memory use: the work done on every frame is
 tested to allocate nothing after warm-up.
 
 ## Before a show: a checklist
@@ -125,5 +125,5 @@ tested to allocate nothing after warm-up.
 4. Make a Show Lock allow-list ([chapter 9](09-assistant-agents.md#show-lock)) if people other
    than you may touch the controls.
 5. Map your controllers ([chapter 7](07-live-io.md#midi-and-osc)) and save.
-6. Start with `atidarla run ... --kiosk`.
+6. Start with `lasair run ... --kiosk`.
 7. Keep a copy of the working project.

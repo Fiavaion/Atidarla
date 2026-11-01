@@ -29,4 +29,4 @@ All platforms.
 
 ## Examples
 
-- [Render Textures](../../../examples/render-textures.atidarla/) — `screen`
+- [Render Textures](../../../examples/render-textures.lasair/) — `screen`

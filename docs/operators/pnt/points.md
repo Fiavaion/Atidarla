@@ -32,7 +32,7 @@ All platforms.
 
 ## Examples
 
-- [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `grid`
-- [PNT Fields](../../../examples/pnt-fields.atidarla/) — `grid`
-- [Points](../../../examples/points.atidarla/) — `cloud`, `grid`
-- [Render Wire and Toon](../../../examples/render-wire-toon.atidarla/) — `cloud`
+- [PNT Deformers](../../../examples/pnt-deformers.lasair/) — `grid`
+- [PNT Fields](../../../examples/pnt-fields.lasair/) — `grid`
+- [Points](../../../examples/points.lasair/) — `cloud`, `grid`
+- [Render Wire and Toon](../../../examples/render-wire-toon.lasair/) — `cloud`

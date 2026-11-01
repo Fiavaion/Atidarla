@@ -30,4 +30,4 @@ All platforms.
 
 ## Examples
 
-- [Signal scope](../../../examples/signal-scope.atidarla/) — `clamped`
+- [Signal scope](../../../examples/signal-scope.lasair/) — `clamped`

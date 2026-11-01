@@ -41,4 +41,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Fields](../../../examples/pnt-fields.atidarla/) — `grain`
+- [PNT Fields](../../../examples/pnt-fields.lasair/) — `grain`

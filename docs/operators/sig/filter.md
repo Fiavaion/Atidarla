@@ -31,4 +31,4 @@ All platforms.
 
 ## Examples
 
-- [Signal scope](../../../examples/signal-scope.atidarla/) — `smooth`
+- [Signal scope](../../../examples/signal-scope.lasair/) — `smooth`

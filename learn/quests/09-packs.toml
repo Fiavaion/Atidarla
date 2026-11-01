@@ -3,7 +3,7 @@ title = "Use a Pack"
 summary = "Open a project built from a shipped Pack, look inside it, change its tempo and wire your own reaction to its flash."
 minutes = 12
 prerequisites = ["first-patch", "audio-reactive"]
-start = "examples/pack-beat-flash.atidarla"
+start = "examples/pack-beat-flash.lasair"
 
 [[step]]
 title = "Open a project that uses a Pack"
@@ -12,7 +12,7 @@ A **Pack** is a network saved as a reusable unit with a name, a version, promote
 
 Press **Open the example project** above. It opens `pack-beat-flash`, which uses the **Beat Flash** Pack (a tempo clock that flashes an image on every beat). This step ticks when the project is open.
 '''
-hint = "If the button cannot find the example, use File, Open Project and choose examples/pack-beat-flash.atidarla in your Atidarla folder."
+hint = "If the button cannot find the example, use File, Open Project and choose examples/pack-beat-flash.lasair in your Lasair folder."
 check = { kind = "pack_instance", name = "beat_flash" }
 
 [[step]]

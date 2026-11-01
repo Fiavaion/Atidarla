@@ -37,4 +37,4 @@ All platforms.
 
 ## Examples
 
-- [Live AI](../../../examples/ai-live.atidarla/) — `flow1`
+- [Live AI](../../../examples/ai-live.lasair/) — `flow1`

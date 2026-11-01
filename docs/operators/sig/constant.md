@@ -33,5 +33,5 @@ All platforms.
 
 ## Examples
 
-- [Beat switcher](../../../examples/beat-switcher.atidarla/) — `step`
-- [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `rate`
+- [Beat switcher](../../../examples/beat-switcher.lasair/) — `step`
+- [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.lasair/) — `rate`

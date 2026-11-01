@@ -30,10 +30,10 @@ All platforms.
 
 ## Examples
 
-- [Beat clock](../../../examples/beat-clock.atidarla/) — `colour`
-- [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `colour`
-- [Pack: Audio Pulse](../../../examples/pack-audio-pulse.atidarla/) — `colour`
-- [Pack: LFO Bank](../../../examples/pack-lfo-bank.atidarla/) — `hue`
-- [Soak show](../../../examples/soak-show.atidarla/) — `glow`
-- [Stage deck](../../../examples/stage-deck.atidarla/) — `glow`
-- [Texture sharing](../../../examples/texture-sharing.atidarla/) — `tint`
+- [Beat clock](../../../examples/beat-clock.lasair/) — `colour`
+- [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.lasair/) — `colour`
+- [Pack: Audio Pulse](../../../examples/pack-audio-pulse.lasair/) — `colour`
+- [Pack: LFO Bank](../../../examples/pack-lfo-bank.lasair/) — `hue`
+- [Soak show](../../../examples/soak-show.lasair/) — `glow`
+- [Stage deck](../../../examples/stage-deck.lasair/) — `glow`
+- [Texture sharing](../../../examples/texture-sharing.lasair/) — `tint`

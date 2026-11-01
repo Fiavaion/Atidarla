@@ -31,4 +31,4 @@ All platforms.
 
 ## Examples
 
-- [Kernel Particles](../../../examples/kernel-particles.atidarla/) — `ripple`
+- [Kernel Particles](../../../examples/kernel-particles.lasair/) — `ripple`

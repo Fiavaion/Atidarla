@@ -1,6 +1,6 @@
 # 9. The assistant and agents
 
-Atidarla can build and change a patch from a written request. It does this through a fixed set of
+Lasair can build and change a patch from a written request. It does this through a fixed set of
 **typed tools**: the same tools for the in-app assistant, for outside programs, and for the
 command line. There is no way for an agent to run arbitrary code unless you grant it
 explicitly.
@@ -12,7 +12,7 @@ Full reference: [`docs/agent.md`](../agent.md).
 Open **View, Assistant**. Type what you want, for example *a kaleidoscope of moving noise*, and
 press **Build**.
 
-1. A model reads Atidarla's operator catalogue and uses the tools to build the patch.
+1. A model reads Lasair's operator catalogue and uses the tools to build the patch.
 2. It works on a **copy** of your patch. Nothing reaches your show yet.
 3. When it finishes, the panel lists the **staged changes**.
 4. Press **Accept** to apply them as **one undo step**, or **Reject** to drop them.
@@ -33,7 +33,7 @@ The model never waits on the picture and the picture never waits on the model. T
 from a terminal:
 
 ```sh
-atidarla agent ask show.atidarla "a kaleidoscope of moving noise"
+lasair agent ask show.lasair "a kaleidoscope of moving noise"
 ```
 
 ## In-show cues
@@ -80,29 +80,29 @@ While the lock is engaged:
 
 Each allowed move is one undo step.
 
-## Connecting other programs: `atidarla serve`
+## Connecting other programs: `lasair serve`
 
-`atidarla serve` runs your project **without a window**, at 60 frames a second, and offers it to
+`lasair serve` runs your project **without a window**, at 60 frames a second, and offers it to
 other programs:
 
 ```sh
-atidarla serve show.atidarla --mcp-stdio                 # MCP on stdin and stdout
-atidarla serve show.atidarla --http 127.0.0.1:7421       # HTTP, on this computer only
-atidarla serve show.atidarla --osc 9000                  # /atd/<node>/<param> <value>
+lasair serve show.lasair --mcp-stdio                 # MCP on stdin and stdout
+lasair serve show.lasair --http 127.0.0.1:7421       # HTTP, on this computer only
+lasair serve show.lasair --osc 9000                  # /lsr/<node>/<param> <value>
 ```
 
 **MCP** (Model Context Protocol) is the standard way for AI programs, such as editors and coding
-assistants, to use tools. Atidarla's tools include `list_ops`, `get_schema`, `get_network`,
+assistants, to use tools. Lasair's tools include `list_ops`, `get_schema`, `get_network`,
 `create_node`, `connect`, `set_param`, `review_changes`, `accept_changes`, `screenshot_viewer`,
 `write_kernel`, `stage_launch`, `stage_crossfader` and `cue`. Each tool needs a **scope**
 (`edit`, `accept`, `files`, `stage`, or `python.exec`). The agent's changes are staged and
 reviewed first, and the agent accepts its own changes only if you start the server with
 `--auto-accept`. `python_exec` exists only if you grant `--scope python.exec`.
 
-To add Atidarla to Claude Code:
+To add Lasair to Claude Code:
 
 ```sh
-claude mcp add atidarla -- atidarla serve /path/to/show.atidarla --mcp-stdio --auto-accept
+claude mcp add lasair -- lasair serve /path/to/show.lasair --mcp-stdio --auto-accept
 ```
 
 The HTTP server listens on the loopback address only. Use `--no-save` to keep an agent's

@@ -33,18 +33,18 @@ All platforms.
 
 ## Examples
 
-- [Beat clock](../../../examples/beat-clock.atidarla/) — `star`
-- [Beat switcher](../../../examples/beat-switcher.atidarla/) — `star`
-- [Compute Shaders](../../../examples/compute-shaders.atidarla/) — `dot`
-- [Live control](../../../examples/live-control.atidarla/) — `shape1`
-- [Neural Growth](../../../examples/neural-growth.atidarla/) — `dot`
-- [Pack: Colour Grade](../../../examples/pack-colour-grade.atidarla/) — `left_half`
-- [Pack: Feedback Trails](../../../examples/pack-feedback-trails.atidarla/) — `triangle`
-- [Pack: Film Grain](../../../examples/pack-film-grain.atidarla/) — `sun`
-- [Pack: LFO Bank](../../../examples/pack-lfo-bank.atidarla/) — `pentagon`
-- [Pack: Neon Edges](../../../examples/pack-neon-edges.atidarla/) — `pentagon`
-- [Pack: RGB Delay](../../../examples/pack-rgb-delay.atidarla/) — `bar`, `triangle`
-- [Simulations](../../../examples/simulations.atidarla/) — `dot`, `seed`
-- [Soak show](../../../examples/soak-show.atidarla/) — `circle`, `star`, `bar`, `dots`, `burst`, `frame`
-- [Stage deck](../../../examples/stage-deck.atidarla/) — `circle`, `star`, `bar`, `dots`, `burst`, `frame`
-- [Two outputs](../../../examples/two-outputs.atidarla/) — `sun`
+- [Beat clock](../../../examples/beat-clock.lasair/) — `star`
+- [Beat switcher](../../../examples/beat-switcher.lasair/) — `star`
+- [Compute Shaders](../../../examples/compute-shaders.lasair/) — `dot`
+- [Live control](../../../examples/live-control.lasair/) — `shape1`
+- [Neural Growth](../../../examples/neural-growth.lasair/) — `dot`
+- [Pack: Colour Grade](../../../examples/pack-colour-grade.lasair/) — `left_half`
+- [Pack: Feedback Trails](../../../examples/pack-feedback-trails.lasair/) — `triangle`
+- [Pack: Film Grain](../../../examples/pack-film-grain.lasair/) — `sun`
+- [Pack: LFO Bank](../../../examples/pack-lfo-bank.lasair/) — `pentagon`
+- [Pack: Neon Edges](../../../examples/pack-neon-edges.lasair/) — `pentagon`
+- [Pack: RGB Delay](../../../examples/pack-rgb-delay.lasair/) — `bar`, `triangle`
+- [Simulations](../../../examples/simulations.lasair/) — `dot`, `seed`
+- [Soak show](../../../examples/soak-show.lasair/) — `circle`, `star`, `bar`, `dots`, `burst`, `frame`
+- [Stage deck](../../../examples/stage-deck.lasair/) — `circle`, `star`, `bar`, `dots`, `burst`, `frame`
+- [Two outputs](../../../examples/two-outputs.lasair/) — `sun`

@@ -1,5 +1,5 @@
 // A plain Syphon app's client, using only Syphon.framework and Metal
-// (Atidarla, MIT OR Apache-2.0): finds a server by name in the directory,
+// (Lasair, MIT OR Apache-2.0): finds a server by name in the directory,
 // copies every new frame to a CPU-visible texture and checks it against
 // the stamped test pattern.
 //

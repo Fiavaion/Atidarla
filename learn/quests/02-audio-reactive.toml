@@ -14,13 +14,13 @@ check = { kind = "node_exists", type = "sig.audio_file_in" }
 [[step]]
 title = "Choose a sound"
 text = '''
-Select the node and set **File** to a WAV file. A new project has no folder yet, so use the full path of the drum loop that ships with Atidarla:
+Select the node and set **File** to a WAV file. A new project has no folder yet, so use the full path of the drum loop that ships with Lasair:
 
-`examples/audio-reactive-feedback.atidarla/media/beat.wav`
+`examples/audio-reactive-feedback.lasair/media/beat.wav`
 
-inside your Atidarla folder.
+inside your Lasair folder.
 '''
-hint = "Type or paste the complete path, for example /Users/you/Atidarla/examples/audio-reactive-feedback.atidarla/media/beat.wav on macOS."
+hint = "Type or paste the complete path, for example /Users/you/Lasair/examples/audio-reactive-feedback.lasair/media/beat.wav on macOS."
 check = { kind = "param", type = "sig.audio_file_in", name = "file", op = "changed" }
 
 [[step]]

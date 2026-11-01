@@ -33,22 +33,22 @@ All platforms.
 
 ## Examples
 
-- [Live AI](../../../examples/ai-live.atidarla/) — `noise1`
-- [Audio-reactive feedback](../../../examples/audio-reactive-feedback.atidarla/) — `noise1`
-- [Batch Wedge](../../../examples/batch-wedge.atidarla/) — `noise1`
-- [Compute Shaders](../../../examples/compute-shaders.atidarla/) — `texture`
-- [Image processing](../../../examples/image-processing.atidarla/) — `source`
-- [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `clouds`
-- [Pack: Audio Pulse](../../../examples/pack-audio-pulse.atidarla/) — `clouds`
-- [Pack: Colour Grade](../../../examples/pack-colour-grade.atidarla/) — `source`
-- [Pack: Duotone](../../../examples/pack-duotone.atidarla/) — `clouds`
-- [Pack: Spinning Solid](../../../examples/pack-spinning-solid.atidarla/) — `skin`
-- [Pack: Vignette](../../../examples/pack-vignette.atidarla/) — `clouds`
-- [Pixel map](../../../examples/pixel-map.atidarla/) — `noise1`
-- [PNT Capture](../../../examples/pnt-capture.atidarla/) — `picture`
-- [Render Textures](../../../examples/render-textures.atidarla/) — `noise`
-- [Soak show](../../../examples/soak-show.atidarla/) — `tunnel_noise`, `grid_noise`, `seed`
-- [Stage deck](../../../examples/stage-deck.atidarla/) — `tunnel_noise`, `grid_noise`
-- [Texture sharing](../../../examples/texture-sharing.atidarla/) — `pattern`
-- [Timeline show](../../../examples/timeline-show.atidarla/) — `clouds`
-- [Two outputs](../../../examples/two-outputs.atidarla/) — `clouds`
+- [Live AI](../../../examples/ai-live.lasair/) — `noise1`
+- [Audio-reactive feedback](../../../examples/audio-reactive-feedback.lasair/) — `noise1`
+- [Batch Wedge](../../../examples/batch-wedge.lasair/) — `noise1`
+- [Compute Shaders](../../../examples/compute-shaders.lasair/) — `texture`
+- [Image processing](../../../examples/image-processing.lasair/) — `source`
+- [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.lasair/) — `clouds`
+- [Pack: Audio Pulse](../../../examples/pack-audio-pulse.lasair/) — `clouds`
+- [Pack: Colour Grade](../../../examples/pack-colour-grade.lasair/) — `source`
+- [Pack: Duotone](../../../examples/pack-duotone.lasair/) — `clouds`
+- [Pack: Spinning Solid](../../../examples/pack-spinning-solid.lasair/) — `skin`
+- [Pack: Vignette](../../../examples/pack-vignette.lasair/) — `clouds`
+- [Pixel map](../../../examples/pixel-map.lasair/) — `noise1`
+- [PNT Capture](../../../examples/pnt-capture.lasair/) — `picture`
+- [Render Textures](../../../examples/render-textures.lasair/) — `noise`
+- [Soak show](../../../examples/soak-show.lasair/) — `tunnel_noise`, `grid_noise`, `seed`
+- [Stage deck](../../../examples/stage-deck.lasair/) — `tunnel_noise`, `grid_noise`
+- [Texture sharing](../../../examples/texture-sharing.lasair/) — `pattern`
+- [Timeline show](../../../examples/timeline-show.lasair/) — `clouds`
+- [Two outputs](../../../examples/two-outputs.lasair/) — `clouds`

@@ -1,6 +1,6 @@
 # 7. Live input and output
 
-This chapter is about connecting Atidarla to the world: sound, controllers, other software,
+This chapter is about connecting Lasair to the world: sound, controllers, other software,
 lights, and projectors.
 
 All of the input and output nodes do slow work on their own threads, so a busy device never
@@ -22,8 +22,8 @@ To make a picture follow sound: add Audio File In (or Audio In), wire it into Sp
 **bind** a parameter to one of Spectrum's bands (chapter 5). The Learn quest
 [Make a picture follow sound](../../learn/quests/02-audio-reactive.toml) does exactly this and
 builds a feedback loop on top. Finished examples:
-[`audio-reactive-feedback`](../../examples/audio-reactive-feedback.atidarla/),
-[`beat-clock`](../../examples/beat-clock.atidarla/).
+[`audio-reactive-feedback`](../../examples/audio-reactive-feedback.lasair/),
+[`beat-clock`](../../examples/beat-clock.lasair/).
 
 ## MIDI and OSC
 
@@ -65,7 +65,7 @@ or LTC).
 
 **OSCQuery.** Turn it on in the Mappings window (or start the app with `--oscquery`). Other
 software on your network can then discover every parameter, read it and set it by OSC at
-`/<node name>/<param>` on the project's OSC port (default 9000). Atidarla announces itself over
+`/<node name>/<param>` on the project's OSC port (default 9000). Lasair announces itself over
 mDNS.
 
 Notes: the OSC socket listens on every network interface, so your firewall may ask about it. On
@@ -73,7 +73,7 @@ Windows a MIDI input can be open in only one place at a time.
 
 ## DMX and lights
 
-Atidarla sends DMX512 over Ethernet, as Art-Net or sACN. Two nodes do it:
+Lasair sends DMX512 over Ethernet, as Art-Net or sACN. Two nodes do it:
 
 - [DMX Out](../operators/sig/dmx_out.md) sends channels (0 to 1) to the slots of one universe.
 - [Pixel Map](../operators/img/pixel_map.md) samples regions of a picture for fixtures and LED
@@ -84,7 +84,7 @@ universe and address it uses, and what type of fixture it is. Built-in fixture t
 `rgb`, `rgbw`, `pixel-grb` (WS2812), `pixel-rgbw` and `moving-head`. You can add your own
 in the project's `fixtures/` folder. Full guide: [`docs/dmx.md`](../dmx.md). The Learn quest
 [Drive lights over DMX](../../learn/quests/08-dmx.toml) takes about 20 minutes. Example:
-[`pixel-map`](../../examples/pixel-map.atidarla/).
+[`pixel-map`](../../examples/pixel-map.lasair/).
 
 DMX trails the picture by one or two frames. Values are 8-bit. You can test without lights: any
 Art-Net or sACN monitor on the network, or on your own computer with Host `127.0.0.1`, shows
@@ -102,11 +102,11 @@ computer. [**Share In**](../operators/img/share_in.md) receives one.
 
 Elsewhere the nodes report an error. Receivers get an 8-bit picture at the input's size. Name
 a Share Out something unique so the right sender is picked. Example:
-[`texture-sharing`](../../examples/texture-sharing.atidarla/).
+[`texture-sharing`](../../examples/texture-sharing.lasair/).
 
-**NDI** (pictures over a network) is **not built yet**. The crate `atd-plugin-ndi` is a
+**NDI** (pictures over a network) is **not built yet**. The crate `lsr-plugin-ndi` is a
 placeholder. NDI is planned as an optional plugin that loads the NDI library at run time. The
-same is true of tempo sharing between programs over a network (`atd-plugin-link`).
+same is true of tempo sharing between programs over a network (`lsr-plugin-link`).
 
 ## Movies, stills and recording
 
@@ -124,7 +124,7 @@ same is true of tempo sharing between programs over a network (`atd-plugin-link`
 An output is a [**Window**](../operators/cmp/window.md) node. Wire your finished picture into
 its `in`. It shows that picture in a window on the display you choose. Add as many Window
 nodes as you have projectors or screens. Guide: [`docs/outputs.md`](../outputs.md). There is
-no Learn quest for projectors yet. Example: [`two-outputs`](../../examples/two-outputs.atidarla/).
+no Learn quest for projectors yet. Example: [`two-outputs`](../../examples/two-outputs.lasair/).
 
 Main Window parameters:
 

@@ -1,4 +1,4 @@
-// Spout SDK receiver peer (Atidarla interop check, MIT OR Apache-2.0).
+// Spout SDK receiver peer (Lasair interop check, MIT OR Apache-2.0).
 // Built against the official Spout2 SDK (SpoutDX, BSD-2, Lynn Jarvis).
 //
 // usage: peer_receive <sender name | -> <seconds> [--checksum]

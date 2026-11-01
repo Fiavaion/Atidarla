@@ -45,4 +45,4 @@ All platforms.
 
 ## Examples
 
-- [Compute Shaders](../../../examples/compute-shaders.atidarla/) — `blur`, `heat`, `trails`
+- [Compute Shaders](../../../examples/compute-shaders.lasair/) — `blur`, `heat`, `trails`

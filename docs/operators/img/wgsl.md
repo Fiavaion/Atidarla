@@ -36,4 +36,4 @@ All platforms.
 
 ## Examples
 
-- [Shaders](../../../examples/shaders.atidarla/) — `warp`
+- [Shaders](../../../examples/shaders.lasair/) — `warp`

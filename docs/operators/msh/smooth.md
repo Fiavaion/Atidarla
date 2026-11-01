@@ -33,4 +33,4 @@ All platforms.
 
 ## Examples
 
-- [Mesh Shaping](../../../examples/mesh-shaping.atidarla/) — `calm`
+- [Mesh Shaping](../../../examples/mesh-shaping.lasair/) — `calm`

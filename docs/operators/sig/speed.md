@@ -30,4 +30,4 @@ All platforms.
 
 ## Examples
 
-- [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `drift`
+- [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.lasair/) — `drift`

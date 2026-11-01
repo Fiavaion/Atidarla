@@ -61,7 +61,7 @@ check = { kind = "stage_layer_playing" }
 [[step]]
 title = "No SD-Turbo? Try the built-in test model"
 text = '''
-Atidarla ships a tiny reference model that needs no downloads, so you can test the whole AI pipeline anywhere. Add **AI Model** (AI), wire the Mixer's `out` into its `image` input and select it. Its default model, `builtin.invert`, inverts the picture on an AI Host.
+Lasair ships a tiny reference model that needs no downloads, so you can test the whole AI pipeline anywhere. Add **AI Model** (AI), wire the Mixer's `out` into its `image` input and select it. Its default model, `builtin.invert`, inverts the picture on an AI Host.
 
 This step ticks when AI Model has cooked without an error. If the node reports a problem with the AI Host, open **View, AI Hosts** to see where AI nodes run.
 '''

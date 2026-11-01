@@ -30,4 +30,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Fields](../../../examples/pnt-fields.atidarla/) — `crowding`
+- [PNT Fields](../../../examples/pnt-fields.lasair/) — `crowding`

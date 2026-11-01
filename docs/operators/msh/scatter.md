@@ -31,5 +31,5 @@ All platforms.
 
 ## Examples
 
-- [Mesh Construction](../../../examples/mesh-construction.atidarla/) — `seeds`
-- [Scatter to Iso Surface](../../../examples/mesh-scatter-iso.atidarla/) — `seeds`
+- [Mesh Construction](../../../examples/mesh-construction.lasair/) — `seeds`
+- [Scatter to Iso Surface](../../../examples/mesh-scatter-iso.lasair/) — `seeds`

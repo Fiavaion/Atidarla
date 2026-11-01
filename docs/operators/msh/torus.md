@@ -30,8 +30,8 @@ All platforms.
 
 ## Examples
 
-- [Mesh Construction](../../../examples/mesh-construction.atidarla/) — `ring`
-- [Mesh Modelling](../../../examples/mesh-modelling.atidarla/) — `donut`
-- [Mesh Primitives](../../../examples/mesh-primitives.atidarla/) — `ring`
-- [Mesh Shaping](../../../examples/mesh-shaping.atidarla/) — `ring`
-- [Gaussian Splats](../../../examples/splats.atidarla/) — `ring`
+- [Mesh Construction](../../../examples/mesh-construction.lasair/) — `ring`
+- [Mesh Modelling](../../../examples/mesh-modelling.lasair/) — `donut`
+- [Mesh Primitives](../../../examples/mesh-primitives.lasair/) — `ring`
+- [Mesh Shaping](../../../examples/mesh-shaping.lasair/) — `ring`
+- [Gaussian Splats](../../../examples/splats.lasair/) — `ring`

@@ -29,7 +29,7 @@ All platforms.
 
 ## Examples
 
-- [Mesh Files](../../../examples/mesh-files.atidarla/) — `rings`, `both`
-- [Mesh Modelling](../../../examples/mesh-modelling.atidarla/) — `all`
-- [Mesh Primitives](../../../examples/mesh-primitives.atidarla/) — `shapes`, `scene`
-- [Mesh Shaping](../../../examples/mesh-shaping.atidarla/) — `all`
+- [Mesh Files](../../../examples/mesh-files.lasair/) — `rings`, `both`
+- [Mesh Modelling](../../../examples/mesh-modelling.lasair/) — `all`
+- [Mesh Primitives](../../../examples/mesh-primitives.lasair/) — `shapes`, `scene`
+- [Mesh Shaping](../../../examples/mesh-shaping.lasair/) — `all`

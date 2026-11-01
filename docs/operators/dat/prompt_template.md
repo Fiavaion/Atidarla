@@ -34,4 +34,4 @@ All platforms.
 
 ## Examples
 
-- [DAT tables](../../../examples/dat-tables.atidarla/) — `prompt`
+- [DAT tables](../../../examples/dat-tables.lasair/) — `prompt`

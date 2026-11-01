@@ -1,30 +1,30 @@
 # Cloud AI hosts
 
-Atidarla's first cloud targets (PRD A59) are a **self-hosted Runpod pod**
+Lasair's first cloud targets (PRD A59) are a **self-hosted Runpod pod**
 running our own AI Host container and **Decart**'s hosted real-time
 video-to-video model. Both appear to the compute router as `cloud:<name>`
 hosts, so in a node's route (`local → lan:studio → cloud:runpod`):
 
 - **Sovereign mode** (on by default for new projects) skips them, and every
-  connection to them is refused before a packet is sent (`atd_ai::egress`).
+  connection to them is refused before a packet is sent (`lsr_ai::egress`).
 - Every frame they answer is charged to the project's **spend meter**, and
   the router stops using them once the project's cap is reached.
 
 Keys are your own. They come from the environment or from a per-user
-secrets file in the app's settings folder, whatever `ATD_MODELS_DIR` says (never from a project, never committed):
+secrets file in the app's settings folder, whatever `LSR_MODELS_DIR` says (never from a project, never committed):
 
 | OS | Secrets file |
 |---|---|
-| macOS | `~/Library/Caches/Atidarla/secrets.toml` |
-| Windows | `%LOCALAPPDATA%\Atidarla\secrets.toml` |
-| Linux | `$XDG_CACHE_HOME/atidarla/secrets.toml` (or `~/.cache/atidarla/`) |
+| macOS | `~/Library/Caches/Lasair/secrets.toml` |
+| Windows | `%LOCALAPPDATA%\Lasair\secrets.toml` |
+| Linux | `$XDG_CACHE_HOME/lasair/secrets.toml` (or `~/.cache/lasair/`) |
 
 ```toml
 [runpod]
 api_key = "rpa_…"          # or RUNPOD_API_KEY in the environment (wins)
 
-[runpod.tokens]            # written by `atidarla cloud runpod up`
-studio = "…"               # the AI Host token of pod atd-studio
+[runpod.tokens]            # written by `lasair cloud runpod up`
+studio = "…"               # the AI Host token of pod lsr-studio
 ```
 
 The file is created readable by you only (mode 600 on macOS/Linux).
@@ -39,24 +39,24 @@ host (A60).
 1. **Build and push the image** to a registry Runpod can pull from:
 
    ```sh
-   docker build --platform linux/amd64 -t ghcr.io/<you>/atd-ai-host:1 ai-host
-   docker push ghcr.io/<you>/atd-ai-host:1
+   docker build --platform linux/amd64 -t ghcr.io/<you>/lsr-ai-host:1 ai-host
+   docker push ghcr.io/<you>/lsr-ai-host:1
    ```
 
-2. **Bring the pod up** (creates `atd-<name>`, or resumes it if stopped):
+2. **Bring the pod up** (creates `lsr-<name>`, or resumes it if stopped):
 
    ```sh
    export RUNPOD_API_KEY=rpa_…
-   atidarla cloud runpod up --name studio --image ghcr.io/<you>/atd-ai-host:1 \
+   lasair cloud runpod up --name studio --image ghcr.io/<you>/lsr-ai-host:1 \
        [--gpu "NVIDIA GeForce RTX 4090"] [--cloud-type SECURE] [--disk-gb 50]
    ```
 
    It creates the pod with port `7420/tcp` exposed and a fresh random
-   `ATD_AI_HOST_TOKEN` (saved under `[runpod.tokens]`), then polls the pod
+   `LSR_AI_HOST_TOKEN` (saved under `[runpod.tokens]`), then polls the pod
    until it has a public IP and a public port mapped to 7420 (Runpod picks a
    random port, which changes when the pod restarts), and prints
    `cloud:studio ready at <ip>:<port>` with the hourly price. In the app the
-   same steps run on a worker thread (`atd_ai::cloud::runpod::spawn_up`) and
+   same steps run on a worker thread (`lsr_ai::cloud::runpod::spawn_up`) and
    register `cloud:studio` with the supervisor, with the spend meter's rate
    set from the pod's `costPerHr`.
 
@@ -67,13 +67,13 @@ host (A60).
 4. **Stop it.** A running pod bills by the hour whether or not frames flow.
 
    ```sh
-   atidarla cloud runpod status --name studio   # id, state, address, price
-   atidarla cloud runpod down --name studio     # stop: GPU billing ends, disk kept
-   atidarla cloud runpod down --name studio --terminate   # delete pod and disk
+   lasair cloud runpod status --name studio   # id, state, address, price
+   lasair cloud runpod down --name studio     # stop: GPU billing ends, disk kept
+   lasair cloud runpod down --name studio --terminate   # delete pod and disk
    ```
 
    The app stops every pod it brought up when it exits
-   (`atd_ai::cloud::runpod::stop_all`). The CLI's `up` leaves the pod running
+   (`lsr_ai::cloud::runpod::stop_all`). The CLI's `up` leaves the pod running
    on purpose (that is its job) and says so with the price and the `down`
    command. A stopped pod still bills a little for its disk; terminate it when
    you are done. If a stop fails, the error says to stop it in the Runpod
@@ -95,7 +95,7 @@ text prompt and return a restyled stream. Their media path is WebRTC only, so
 the engine does not talk to Decart itself: a local AI Host process runs the
 `video.v2v` adapter with Decart's backend, and the engine reaches that host
 over our protocol like any other. The host is registered as `cloud:decart`
-(`atd_ai::cloud::register_decart`), so it counts as a cloud target:
+(`lsr_ai::cloud::register_decart`), so it counts as a cloud target:
 
 - In Sovereign mode the router skips it and the supervisor refuses to start
   the process at all (it would talk to the internet beyond the egress gate);
@@ -131,9 +131,9 @@ passed through untouched.
 
 ## Verifying with real keys (hand checks)
 
-- Runpod: `atidarla cloud runpod up --name check --image …`, add route
+- Runpod: `lasair cloud runpod up --name check --image …`, add route
   `cloud:check` to a Diffusion node in the app with Sovereign off, see frames
-  and the spend meter rise, then `atidarla cloud runpod down --name check
+  and the spend meter rise, then `lasair cloud runpod down --name check
   --terminate` and confirm in the Runpod console that nothing is running.
 - Decart: with `DECART_API_KEY` set and the `cloud` extra installed, a Video
   Model node on `cloud:decart` shows restyled frames; the spend meter rises

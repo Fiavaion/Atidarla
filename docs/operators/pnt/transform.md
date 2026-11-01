@@ -32,7 +32,7 @@ All platforms.
 
 ## Examples
 
-- [PNT Capture](../../../examples/pnt-capture.atidarla/) — `dome_place`, `relief_place`, `spiral_place`, `sensor_place`, `lattice_place`, `pulse_place`, `joints_place`
-- [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `left`, `turn`
-- [PNT Motion](../../../examples/pnt-motion.atidarla/) — `flock_place`
-- [Gaussian Splats](../../../examples/splats.atidarla/) — `place_ply`, `place_sog`
+- [PNT Capture](../../../examples/pnt-capture.lasair/) — `dome_place`, `relief_place`, `spiral_place`, `sensor_place`, `lattice_place`, `pulse_place`, `joints_place`
+- [PNT Deformers](../../../examples/pnt-deformers.lasair/) — `left`, `turn`
+- [PNT Motion](../../../examples/pnt-motion.lasair/) — `flock_place`
+- [Gaussian Splats](../../../examples/splats.lasair/) — `place_ply`, `place_sog`

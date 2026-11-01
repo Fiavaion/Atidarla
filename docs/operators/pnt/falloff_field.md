@@ -38,4 +38,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Fields](../../../examples/pnt-fields.atidarla/) — `spot`, `band`
+- [PNT Fields](../../../examples/pnt-fields.lasair/) — `spot`, `band`

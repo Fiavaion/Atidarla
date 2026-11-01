@@ -31,4 +31,4 @@ All platforms.
 
 ## Examples
 
-- [Render Wire and Toon](../../../examples/render-wire-toon.atidarla/) — `beads`
+- [Render Wire and Toon](../../../examples/render-wire-toon.lasair/) — `beads`

@@ -11,7 +11,7 @@ smallest correct versions, and what is left for a decision.
   and the engine hands that value over in place when nothing else reads it (A26, was GEO-1). Particles
   uses this: Particles → forces → `prev`.
 - **Nested networks** (FR-P4): a Pack is a network with sockets and promoted parameters,
-  flattened into its nodes when a network loads or changes (`atd_core::pack`), so the engine
+  flattened into its nodes when a network loads or changes (`lsr_core::pack`), so the engine
   never sees a container. A wire inside a Pack may be a feedback wire like any other.
 - **Per-step operators** (this batch): forces, Collide, Integrate and Age read the frame's
   step `dt`, so a loop of them is a simulation.
@@ -27,7 +27,7 @@ into `prev`. This is design §3.2's data contract; the body is ordinary operator
 **A Solver Block as a nested network** is then a Pack whose network is `pnt.solver` plus a
 body wired back into the solver's `prev`, with the Pack input on `init` and the Pack output on
 the body's end. Nothing new is needed for this: flattening keeps the inner feedback wire, and a
-test cooks such a Pack (`crates/atd-ops-pnt/tests/batch/solver.rs`). Offline it is Stateful
+test cooks such a Pack (`crates/lsr-ops-pnt/tests/batch/solver.rs`). Offline it is Stateful
 (`docs/render.md`).
 
 **Built (2026-10-30): sub-steps.** Mark ratified sub-steps for M2 on 2026-10-30. The flatten-time
@@ -37,7 +37,7 @@ format change and works with or without a Pack:
 
 1. `pnt.solver` has a **Sub-steps** parameter (1 by default, at most 64), saved like any other
    parameter (no `pack.toml` field; a Solver Block Pack promotes it like any parameter).
-2. **Loops in the engine** (`atd_gpu::engine`, `GeoOp::repeat`). A loop is headed by a GEO node
+2. **Loops in the engine** (`lsr_gpu::engine`, `GeoOp::repeat`). A loop is headed by a GEO node
    with a feedback GEO input; the input's source is the loop's end; the body is every planned
    node on a path from the head to the end. When the head's `repeat` asks for N passes, the
    engine unrolls the frame's plan: nodes of that stretch that do not depend on the head cook
@@ -118,7 +118,7 @@ the pass, `iteration` and `id` in pass order, the same every frame; pieces: pass
 k, GPU-counted; pieces beyond Iterations left out; a two-component piece attribute is a node
 error; End outside a block passes through), `tests/alloc_batch.rs` (a four-piece and an
 eight-pass block: no buffer, bind-group or texture creation after warm-up), the example
-`examples/pnt-foreach.atidarla`.
+`examples/pnt-foreach.lasair`.
 
 ## Questions for Mark
 
@@ -127,5 +127,5 @@ eight-pass block: no buffer, bind-group or texture creation after warm-up), the 
 2. ~~For-Each~~: ratified 2026-10-30 and built (above) as blocks evaluated per pass; the
    `piece` attribute with keyed operators remains for one-dispatch work.
 3. **Per-pass parameters by expression**: add an `iteration` variable to parameter
-   expressions (a change to the expression language in `atd-core`), or leave per-pass
+   expressions (a change to the expression language in `lsr-core`), or leave per-pass
    variation to attribute-keyed operators and the Kernel DSL?

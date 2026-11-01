@@ -3,7 +3,7 @@
 The Timeline animates parameters over time and fires cues: keyframe tracks, markers, a cue list,
 a transport, and chasing external timecode (PRD FR-T1–T3, decision A54). It is a view over the
 same graph as the Patch: it owns no media and no second model. Try it with
-[`examples/timeline-show.atidarla`](../examples/timeline-show.atidarla/).
+[`examples/timeline-show.lasair`](../examples/timeline-show.lasair/).
 
 ## How it drives the patch
 
@@ -13,7 +13,7 @@ same graph as the Patch: it owns no media and no second model. Try it with
 - **Cue actions:** `set` changes a stored value (an edit: one undo step per cue, saved with the
   project). `live` holds a live value until Stop. `launch` plays a slot on layers: it sets their
   `target` parameter, as an edit.
-- **Offline** (`atidarla render`), every action is held as a live value, so a frame depends only on
+- **Offline** (`lasair render`), every action is held as a live value, so a frame depends only on
   the cues before its time ([`render.md`](render.md)).
 
 ## The panel
@@ -33,7 +33,7 @@ same graph as the Patch: it owns no media and no second model. Try it with
 | Markers | Name, time, Go to, delete |
 
 Timeline edits mark the project as unsaved; **Save** writes `timeline.toml`, including the Stage
-mode and the chased clock with its offset. Offline renders (`atidarla render`) always drive the
+mode and the chased clock with its offset. Offline renders (`lasair render`) always drive the
 Stage from cues.
 
 ## Curves
@@ -79,12 +79,12 @@ from an audio input, on its own thread). While the code runs:
 
 | Behaviour | Value |
 |---|---|
-| Lock | After 2 consistent readings: MTC locks within 3.75 frames of the first quarter frame (24, 25 and 30 fps), LTC within 2.1–2.5 frames (48 kHz and 44.1 kHz audio in 60 Hz blocks); then tracks within one frame (tests in `crates/atd-timeline/src/chase.rs`) |
+| Lock | After 2 consistent readings: MTC locks within 3.75 frames of the first quarter frame (24, 25 and 30 fps), LTC within 2.1–2.5 frames (48 kHz and 44.1 kHz audio in 60 Hz blocks); then tracks within one frame (tests in `crates/lsr-timeline/src/chase.rs`) |
 | Dropout | A gap of more than 3 frames switches to freewheel: the playhead runs on the local clock for 12 more frames, then waits |
 | Re-lock | Code that resumes where the freewheel expects it re-locks on its first reading; code that jumped (the source seeked) re-locks at the new place after 2 readings, and the playhead jumps there without firing the cues in between |
 | Offset | Seconds added to the timecode (for example −3600 to start an `01:00:00:00` show at 0) |
 
-`atd_timeline::MtcInput` and `LtcInput` feed the same chase from raw quarter-frame bytes or audio
+`lsr_timeline::MtcInput` and `LtcInput` feed the same chase from raw quarter-frame bytes or audio
 blocks, for hosts that read the devices themselves.
 
 ## `timeline.toml`
@@ -92,10 +92,10 @@ blocks, for hosts that read the devices themselves.
 A project without the file has no timeline and loads unchanged. Saving writes it in canonical
 form: tracks sorted by (node, parameter, component), keys by time, markers by time, cues by time
 with manual cues last. Each key and each cue action is one line, so a change is a one-line diff.
-`atidarla check` verifies the form and that every track and cue binds to the network.
+`lasair check` verifies the form and that every track and cue binds to the network.
 
 ```toml
-# Atidarla timeline. Times are in seconds; tracks and cues refer to node IDs.
+# Lasair timeline. Times are in seconds; tracks and cues refer to node IDs.
 format = 1
 length = 32.0          # seconds
 fps = 60.0             # display, snapping and timecode

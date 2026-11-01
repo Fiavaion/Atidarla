@@ -31,5 +31,5 @@ All platforms.
 
 ## Examples
 
-- [Keying](../../../examples/keying.atidarla/) — `half`
-- [Python operators](../../../examples/python-ops.atidarla/) — `resolution1`
+- [Keying](../../../examples/keying.lasair/) — `half`
+- [Python operators](../../../examples/python-ops.lasair/) — `resolution1`

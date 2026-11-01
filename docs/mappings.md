@@ -33,7 +33,7 @@ Deleting or retargeting a mapping releases its parameter: the live value goes, u
 
 ## OSCQuery
 
-Turn on **OSCQuery** in the Mappings window (saved with the project), or start the app with `--oscquery`. Atidarla then:
+Turn on **OSCQuery** in the Mappings window (saved with the project), or start the app with `--oscquery`. Lasair then:
 
 - answers HTTP on the OSCQuery port (default 9001) with the [OSCQuery](https://github.com/Vidvox/OSCQueryProposal) namespace: `GET /` gives one container per node and one entry per parameter with `FULL_PATH`, `TYPE`, `VALUE`, `RANGE`, `ACCESS` and `DESCRIPTION`; `GET /node/param` one entry; `?VALUE` (or another attribute) just that attribute; `GET /?HOST_INFO` the project name and OSC port;
 - announces `_oscjson._tcp` (the HTTP server) and `_osc._udp` (the OSC port) over mDNS, so controller apps find it on the network;
@@ -48,7 +48,7 @@ A value set over OSCQuery is a live value too: it holds until another writer cha
 A project without mappings has no file, and opens as before. The file is text with stable IDs, written in one order, so it diffs line by line:
 
 ```toml
-# Atidarla mappings: MIDI and OSC controls to parameters (docs/mappings.md).
+# Lasair mappings: MIDI and OSC controls to parameters (docs/mappings.md).
 # Targets refer to node IDs in networks/main.toml.
 format = 1
 next_id = 2

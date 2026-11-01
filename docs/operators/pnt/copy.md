@@ -32,4 +32,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `rings`
+- [PNT Deformers](../../../examples/pnt-deformers.lasair/) — `rings`

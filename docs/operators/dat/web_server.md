@@ -35,4 +35,4 @@ All platforms.
 
 ## Examples
 
-- [DAT network](../../../examples/dat-network.atidarla/) — `server`
+- [DAT network](../../../examples/dat-network.lasair/) — `server`

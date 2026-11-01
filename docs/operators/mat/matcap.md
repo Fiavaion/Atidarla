@@ -29,4 +29,4 @@ All platforms.
 
 ## Examples
 
-- [Render Textures](../../../examples/render-textures.atidarla/) — `clay`
+- [Render Textures](../../../examples/render-textures.lasair/) — `clay`

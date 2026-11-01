@@ -32,4 +32,4 @@ All platforms.
 
 ## Examples
 
-- [Beat switcher](../../../examples/beat-switcher.atidarla/) — `switch1`
+- [Beat switcher](../../../examples/beat-switcher.lasair/) — `switch1`

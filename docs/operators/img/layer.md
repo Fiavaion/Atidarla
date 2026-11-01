@@ -52,5 +52,5 @@ All platforms.
 
 ## Examples
 
-- [Soak show](../../../examples/soak-show.atidarla/) — `backs`, `shapes`, `accents`
-- [Stage deck](../../../examples/stage-deck.atidarla/) — `backs`, `shapes`, `accents`
+- [Soak show](../../../examples/soak-show.lasair/) — `backs`, `shapes`, `accents`
+- [Stage deck](../../../examples/stage-deck.lasair/) — `backs`, `shapes`, `accents`

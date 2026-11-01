@@ -41,4 +41,4 @@ All platforms.
 
 ## Examples
 
-- [Live AI](../../../examples/ai-live.atidarla/) — `onnx1`
+- [Live AI](../../../examples/ai-live.lasair/) — `onnx1`

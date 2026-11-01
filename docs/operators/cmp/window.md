@@ -38,4 +38,4 @@ All platforms.
 
 ## Examples
 
-- [Two outputs](../../../examples/two-outputs.atidarla/) — `left`, `right`
+- [Two outputs](../../../examples/two-outputs.lasair/) — `left`, `right`

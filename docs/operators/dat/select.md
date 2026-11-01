@@ -32,6 +32,6 @@ All platforms.
 
 ## Examples
 
-- [DAT files](../../../examples/dat-files.atidarla/) — `verses`
-- [DAT serial](../../../examples/dat-serial.atidarla/) — `readings`
-- [DAT tables](../../../examples/dat-tables.atidarla/) — `lights`
+- [DAT files](../../../examples/dat-files.lasair/) — `verses`
+- [DAT serial](../../../examples/dat-serial.lasair/) — `readings`
+- [DAT tables](../../../examples/dat-tables.lasair/) — `lights`

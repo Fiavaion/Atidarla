@@ -30,4 +30,4 @@ All platforms.
 
 ## Examples
 
-- [Live control](../../../examples/live-control.atidarla/) — `mouse`
+- [Live control](../../../examples/live-control.lasair/) — `mouse`

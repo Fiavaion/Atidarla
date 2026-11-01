@@ -22,7 +22,7 @@ estimates 12 minutes. To use it, choose **View, Learn**, pick **Your first patch
 
 ## Before you start
 
-1. Start Atidarla ([chapter 1](01-install.md)).
+1. Start Lasair ([chapter 1](01-install.md)).
 2. Choose **File, New Project** (Cmd/Ctrl+N) for an empty patch. If you used the Learn button,
    this is done for you.
 
@@ -90,8 +90,8 @@ bindings and expressions in full.
 
 ### 9. Save your work
 
-Choose **File, Save As...** (Cmd/Ctrl+Shift+S) and pick a name. Atidarla saves a **project
-folder** ending in `.atidarla`. Inside, the files are plain text. You can open it again with
+Choose **File, Save As...** (Cmd/Ctrl+Shift+S) and pick a name. Lasair saves a **project
+folder** ending in `.lasair`. Inside, the files are plain text. You can open it again with
 **File, Open Project...** (Cmd/Ctrl+O).
 
 ## Handy controls

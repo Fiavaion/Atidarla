@@ -2,7 +2,7 @@
 
 PNT · version 1 · cook budget 100 µs
 
-Reads a point cloud from a file: Atidarla's point cache (.atdpc), PLY (ASCII or binary; the vertex element), CSV with a header row, or XYZ/PTS text. `x y z` become `P`, `nx ny nz` `N`, colour channels `Cd` (0-1; 8- and 16-bit PLY colours are scaled), `u v` `uv`, `id` stays the point identity and every other column becomes a float attribute (at most 16). A `$F` in the file name (`$F4`: four digits, zero-padded) plays a numbered sequence by Frame. Files are read and uploaded on a worker thread; live, the last file stays until the next arrives. Convert other caches with `atidarla points convert` (docs/point-caches.md).
+Reads a point cloud from a file: Lasair's point cache (.lsrpc), PLY (ASCII or binary; the vertex element), CSV with a header row, or XYZ/PTS text. `x y z` become `P`, `nx ny nz` `N`, colour channels `Cd` (0-1; 8- and 16-bit PLY colours are scaled), `u v` `uv`, `id` stays the point identity and every other column becomes a float attribute (at most 16). A `$F` in the file name (`$F4`: four digits, zero-padded) plays a numbered sequence by Frame. Files are read and uploaded on a worker thread; live, the last file stays until the next arrives. Convert other caches with `lasair points convert` (docs/point-caches.md).
 
 ## Inputs
 
@@ -27,4 +27,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Capture](../../../examples/pnt-capture.atidarla/) — `spiral`, `lattice`, `pulse`
+- [PNT Capture](../../../examples/pnt-capture.lasair/) — `spiral`, `lattice`, `pulse`

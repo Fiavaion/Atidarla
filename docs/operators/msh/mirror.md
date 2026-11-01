@@ -32,4 +32,4 @@ All platforms.
 
 ## Examples
 
-- [Mesh Shaping](../../../examples/mesh-shaping.atidarla/) — `whole`
+- [Mesh Shaping](../../../examples/mesh-shaping.lasair/) — `whole`

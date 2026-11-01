@@ -1,17 +1,17 @@
 # 13. Command line reference
 
-Atidarla has two programs:
+Lasair has two programs:
 
-- `atidarla-app` is the window you have been using. `cargo run -p atd-app` starts it.
-- `atidarla` is the command-line tool for work that needs no window: offline renders,
-  checks, show export, servers and more. `cargo run -p atd-cli -- <command>` runs it when you
-  build from source. The examples below write `atidarla <command>`; use the `cargo` form
+- `lasair-app` is the window you have been using. `cargo run -p lsr-app` starts it.
+- `lasair` is the command-line tool for work that needs no window: offline renders,
+  checks, show export, servers and more. `cargo run -p lsr-cli -- <command>` runs it when you
+  build from source. The examples below write `lasair <command>`; use the `cargo` form
   if you have not installed it.
 
-This chapter was written from the program's own help text (`atidarla --help` and
-`atidarla <command> --help`, version 0.0.1). Run those yourself for the latest.
+This chapter was written from the program's own help text (`lasair --help` and
+`lasair <command> --help`, version 0.0.1). Run those yourself for the latest.
 
-A **project** is a folder ending in `.atidarla`. A `git:<rev>` can stand in for a project in
+A **project** is a folder ending in `.lasair`. A `git:<rev>` can stand in for a project in
 `diff` and `merge` (chapter 11).
 
 ## At a glance
@@ -47,8 +47,8 @@ on the same computer are identical. Live inputs (audio devices, MIDI, OSC) open 
 [`docs/render.md`](../render.md).
 
 ```sh
-atidarla render <PROJECT> --out <OUT> [options]
-atidarla render examples/audio-reactive-feedback.atidarla --out renders/arf --range 0-300
+lasair render <PROJECT> --out <OUT> [options]
+lasair render examples/audio-reactive-feedback.lasair --out renders/arf --range 0-300
 ```
 
 | Option | Meaning |
@@ -67,11 +67,11 @@ at each frame's time. Stage autopilot, one-shot returns and flash releases do no
 
 ## run
 
-The supervisor for shows (chapter 10). Starts `atidarla-app`, restarts it after a crash or a
+The supervisor for shows (chapter 10). Starts `lasair-app`, restarts it after a crash or a
 freeze, and stops it on Ctrl-C.
 
 ```sh
-atidarla run <PROJECT> [--kiosk] [options]
+lasair run <PROJECT> [--kiosk] [options]
 ```
 
 | Option | Meaning |
@@ -82,8 +82,8 @@ atidarla run <PROJECT> [--kiosk] [options]
 | `--heartbeat-timeout <S>` | Seconds without a heartbeat before a restart. Default 15 (0 turns it off) |
 | `--startup-grace <S>` | Seconds allowed to the first heartbeat. Default 90 |
 
-The app is looked up as `atidarla-app` beside `atidarla`, or at the path in the environment
-variable `ATD_APP`. See [`docs/run.md`](../run.md).
+The app is looked up as `lasair-app` beside `lasair`, or at the path in the environment
+variable `LSR_APP`. See [`docs/run.md`](../run.md).
 
 ## serve
 
@@ -91,14 +91,14 @@ Runs a project without a window at 60 frames a second and offers it to other pro
 (chapter 9). The project folder is created empty if it does not exist.
 
 ```sh
-atidarla serve <PROJECT> [--mcp-stdio] [--http 127.0.0.1:7421] [--osc 9000] [options]
+lasair serve <PROJECT> [--mcp-stdio] [--http 127.0.0.1:7421] [--osc 9000] [options]
 ```
 
 | Option | Meaning |
 |---|---|
 | `--mcp-stdio` | Speak MCP on stdin and stdout (log messages go to stderr) |
 | `--http <ADDR>` | MCP and a REST interface over HTTP, on a loopback address such as `127.0.0.1:7421` |
-| `--osc <PORT>` | Receive OSC on a UDP port, `/atd/<node>/<param> <value>` |
+| `--osc <PORT>` | Receive OSC on a UDP port, `/lsr/<node>/<param> <value>` |
 | `--auto-accept` | Let the agent accept its own staged changes |
 | `--scope <SCOPE>` | Extra scopes, for example `python.exec` |
 | `--no-save` | Do not write accepted changes to the project folder |
@@ -109,7 +109,7 @@ atidarla serve <PROJECT> [--mcp-stdio] [--http 127.0.0.1:7421] [--osc 9000] [opt
 Runs the performance suite and writes JSON.
 
 ```sh
-atidarla bench [--out <FILE>] [--no-gpu]
+lasair bench [--out <FILE>] [--no-gpu]
 ```
 
 `--out` writes the results to a file instead of the screen. `--no-gpu` skips cases that need a
@@ -121,13 +121,13 @@ Loads each project, validates it against the operator registry, and checks it is
 form. With `--gpu` it also cooks every node.
 
 ```sh
-atidarla check <PROJECTS>... [--gpu] [--frames <N>] [--allow-python-ops]
-atidarla check examples/*.atidarla
-atidarla check --gpu --frames 120 myshow.atidarla
+lasair check <PROJECTS>... [--gpu] [--frames <N>] [--allow-python-ops]
+lasair check examples/*.lasair
+lasair check --gpu --frames 120 myshow.lasair
 ```
 
 `--frames` is how many frames `--gpu` cooks (default 60). Python operators are listed as "not
-run" unless `--allow-python-ops` is given. It also checks Pack folders (`atidarla check
+run" unless `--allow-python-ops` is given. It also checks Pack folders (`lasair check
 packs/*/`) and batch wedges, and lists nodes that this platform cannot run.
 
 ## bake
@@ -136,7 +136,7 @@ Saves one node's output to disk with the offline engine. An IMG node gives PNG f
 (MSH) node gives mesh files.
 
 ```sh
-atidarla bake <PROJECT> [--node <NAME>] [--out <DIR>] [--range A-B] [--fps <N>] [--format <F>] [--sequence] [--allow-python-ops]
+lasair bake <PROJECT> [--node <NAME>] [--out <DIR>] [--range A-B] [--fps <N>] [--format <F>] [--sequence] [--allow-python-ops]
 ```
 
 | Option | Meaning |
@@ -153,8 +153,8 @@ meshes from the MSH family can be baked; point (PNT) nodes live on the GPU and g
 ## batch
 
 ```sh
-atidarla batch run <PROJECT> <WEDGE> [--jobs <N>] [--force] [--allow-python-ops]
-atidarla batch status <PROJECT> [WEDGE]
+lasair batch run <PROJECT> <WEDGE> [--jobs <N>] [--force] [--allow-python-ops]
+lasair batch status <PROJECT> [WEDGE]
 ```
 
 `run` cooks every work item not already in the media bin. `status` shows each wedge's items, how
@@ -163,8 +163,8 @@ many are already in the bin, and where they would run. See chapter 12.
 ## agent
 
 ```sh
-atidarla agent ask <PROJECT> "<REQUEST>" [--provider ollama|anthropic] [--model <M>] [--max-steps <N>] [--allow-internet]
-atidarla agent eval [--prompts <FILE>] [--out <FILE>] [--only <TEXT>] [--provider ...] [--model ...]
+lasair agent ask <PROJECT> "<REQUEST>" [--provider ollama|anthropic] [--model <M>] [--max-steps <N>] [--allow-internet]
+lasair agent eval [--prompts <FILE>] [--out <FILE>] [--only <TEXT>] [--provider ...] [--model ...]
 ```
 
 `ask` builds your request into the project and **accepts and saves** the changes. The default
@@ -176,11 +176,11 @@ prompts and writes a report.
 ## points
 
 ```sh
-atidarla points convert <INPUT> <OUTPUT> [--range A-B] [--scale <X>]
-atidarla points info <FILE>
+lasair points convert <INPUT> <OUTPUT> [--range A-B] [--scale <X>]
+lasair points info <FILE>
 ```
 
-`convert` reads `.atdpc`, `.ply`, `.csv`, `.xyz`, `.pts` or `.txt` and writes `.atdpc`, `.ply`
+`convert` reads `.lsrpc`, `.ply`, `.csv`, `.xyz`, `.pts` or `.txt` and writes `.lsrpc`, `.ply`
 or `.csv`, chosen by the output name. For a numbered sequence put `$F` or `$F4` in both names
 and give `--range` (inclusive). `--scale` multiplies every position (use 0.01 to convert
 centimetres to metres). `info` prints a file's point count and attributes. Reference:
@@ -191,7 +191,7 @@ centimetres to metres). `info` prints a file's point count and attributes. Refer
 Generates the operator reference pages in `docs/operators` from the registry.
 
 ```sh
-atidarla docs [--out <DIR>] [--examples <DIR>] [--check]
+lasair docs [--out <DIR>] [--examples <DIR>] [--check]
 ```
 
 `--check` makes it fail if the saved pages differ from what the program would generate. Use it
@@ -200,8 +200,8 @@ to find out whether the pages are up to date. It does not look at this manual.
 ## export-show and verify-show
 
 ```sh
-atidarla export-show <PROJECT> <OUT> [--zip] [--no-gpu]
-atidarla verify-show <BUNDLE> [--gpu]
+lasair export-show <PROJECT> <OUT> [--zip] [--no-gpu]
+lasair verify-show <BUNDLE> [--gpu]
 ```
 
 See chapter 10 and [`docs/show-export.md`](../show-export.md).
@@ -209,9 +209,9 @@ See chapter 10 and [`docs/show-export.md`](../show-export.md).
 ## diff, merge and merge-file
 
 ```sh
-atidarla diff <A> <B> [--project <PROJECT>]
-atidarla merge <BASE> <OURS> <THEIRS> [--out <DIR>] [--project <PROJECT>]
-atidarla merge-file <BASE> <OURS> <THEIRS> [PATH]
+lasair diff <A> <B> [--project <PROJECT>]
+lasair merge <BASE> <OURS> <THEIRS> [--out <DIR>] [--project <PROJECT>]
+lasair merge-file <BASE> <OURS> <THEIRS> [PATH]
 ```
 
 `merge` exits with 0 for a clean merge, 1 for conflicts and 2 for an error. `merge-file` is for
@@ -220,7 +220,7 @@ Git's merge driver. See chapter 11.
 ## fmt
 
 ```sh
-atidarla fmt <PROJECTS>...
+lasair fmt <PROJECTS>...
 ```
 
 Rewrites project folders in canonical form. Use it after editing project files by hand.
@@ -228,11 +228,11 @@ Rewrites project folders in canonical form. Use it after editing project files b
 ## models
 
 ```sh
-atidarla models list
-atidarla models accept <ID> [--yes]
-atidarla models download <ID> [--allow-internet]
-atidarla models verify <ID>
-atidarla models path [ID]
+lasair models list
+lasair models accept <ID> [--yes]
+lasair models download <ID> [--allow-internet]
+lasair models verify <ID>
+lasair models path [ID]
 ```
 
 See chapter 8. `accept` shows the licence and asks you to type `accept`. `--yes` skips the
@@ -241,13 +241,13 @@ question for scripts.
 ## ai-host
 
 ```sh
-atidarla ai-host status
-atidarla ai-host check [--timeout <SECONDS>]
-atidarla ai-host install <EXTRA>... | --recommended [--cpu] [--allow-internet | --wheelhouse <FOLDER>]
-atidarla ai-host remove
+lasair ai-host status
+lasair ai-host check [--timeout <SECONDS>]
+lasair ai-host install <EXTRA>... | --recommended [--cpu] [--allow-internet | --wheelhouse <FOLDER>]
+lasair ai-host remove
 ```
 
-`status` shows which local host runs (`ATD_AI_HOST_CMD`, the one bundled with the app, or a
+`status` shows which local host runs (`LSR_AI_HOST_CMD`, the one bundled with the app, or a
 development checkout), the extras offered, those installed and those recommended for this machine,
 with the reason. `check` starts the local host and lists its adapters and built-in models.
 `install` adds optional adapters' packages (`vision`, `stt`, `diffusion`, `diffusion-cuda`,
@@ -262,7 +262,7 @@ diffusion build that suits the machine.
 ## comfy
 
 ```sh
-atidarla comfy import <WORKFLOW.json> --project <PROJECT> [--server host:port] [--name <NAME>]
+lasair comfy import <WORKFLOW.json> --project <PROJECT> [--server host:port] [--name <NAME>]
 ```
 
 Imports a ComfyUI workflow saved in API format as an operator `comfy.<name>`. Default server
@@ -271,9 +271,9 @@ Imports a ComfyUI workflow saved in API format as an operator `comfy.<name>`. De
 ## cloud
 
 ```sh
-atidarla cloud runpod up --name <NAME> --image <IMAGE> [--gpu <TYPE>] [--cloud-type SECURE|COMMUNITY] [--disk-gb <N>] [--secrets <FILE>]
-atidarla cloud runpod status --name <NAME>
-atidarla cloud runpod down --name <NAME> [--terminate]
+lasair cloud runpod up --name <NAME> --image <IMAGE> [--gpu <TYPE>] [--cloud-type SECURE|COMMUNITY] [--disk-gb <N>] [--secrets <FILE>]
+lasair cloud runpod status --name <NAME>
+lasair cloud runpod down --name <NAME> [--terminate]
 ```
 
 `up` creates (or resumes) a pod that runs the AI Host container and waits until it is
@@ -284,7 +284,7 @@ deletes the pod and its disk. Default GPU `NVIDIA GeForce RTX 4090`, default dis
 ## kernel
 
 ```sh
-atidarla kernel <FILE.atk> [--target points|pixels] [--emit-wgsl]
+lasair kernel <FILE.atk> [--target points|pixels] [--emit-wgsl]
 ```
 
 Compiles a Kernel DSL file and prints its errors, bindings and parameters, or the generated
@@ -294,7 +294,7 @@ other files.
 ## isf-import
 
 ```sh
-atidarla isf-import <DIR> [--report] [--gpu] [--json <FILE>] [--out <DIR>] [--min-pass <PERCENT>] [--compile-timeout <S>] [--thumbs <PNG>]
+lasair isf-import <DIR> [--report] [--gpu] [--json <FILE>] [--out <DIR>] [--min-pass <PERCENT>] [--compile-timeout <S>] [--thumbs <PNG>]
 ```
 
 Translates ISF shaders (`.fs` files, searched recursively) to WGSL. `--report` lists every
@@ -303,7 +303,7 @@ failure by kind. `--gpu` also builds each shader and cooks it for two frames.
 ## registry
 
 ```sh
-atidarla registry
+lasair registry
 ```
 
 Prints every operator's schema and capability flags as JSON.

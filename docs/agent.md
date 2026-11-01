@@ -1,6 +1,6 @@
 # Agents: MCP, the assistant and Show Lock
 
-Atidarla offers its patch to agents through **typed tools** (FR-G1). Any MCP client (Claude Code,
+Lasair offers its patch to agents through **typed tools** (FR-G1). Any MCP client (Claude Code,
 other editors and agents), the in-app assistant and the command line all use the same tools and
 the same rules. There is no arbitrary code execution: `python_exec` exists only in a session the
 user granted `python.exec` (CLAUDE.md rule 9). The same scope is needed to write any other Python:
@@ -31,7 +31,7 @@ session allows it as it is written (there is no dialog).
 
 **Staging (FR-G2).** Graph changes are made on a preview of the network. `review_changes` lists
 them; nothing reaches the show until they are accepted, by a person in the app, or by the agent
-itself only when the session has `accept` (`atidarla serve --auto-accept`, `atidarla agent`).
+itself only when the session has `accept` (`lasair serve --auto-accept`, `lasair agent`).
 A staged `create_pack` also carries the new Pack: a host accepting by hand takes both with
 `Agent::take_staged_with_packs` and applies them with `Workspace::apply_with_packs`, one undo step.
 
@@ -56,12 +56,12 @@ pack = "colour-grade"  # any promoted parameter of its instances
 
 While engaged, every graph edit is refused, expressions and bindings cannot be set, and only
 whitelisted parameters move, within their ranges, at once (each move one undo step). The red-team
-test is `crates/atd-agent/tests/show_lock.rs`.
+test is `crates/lsr-agent/tests/show_lock.rs`.
 
 ## Cues (FR-G5)
 
 `cue` turns a performer's words into parameter moves: `darker, slower on the next drop`, `a bit
-bigger now`, `set brightness to 0.4`, `level1.opacity at 50%`. Code: `crates/atd-agent/src/cues.rs`.
+bigger now`, `set brightness to 0.4`, `level1.opacity at 50%`. Code: `crates/lsr-agent/src/cues.rs`.
 
 - **Only the whitelist moves.** A cue moves numeric parameters on the Show Lock allow-list
   (`[[show_lock.allow]]`), whether the lock is engaged or not, clamped to the narrower of the
@@ -79,25 +79,25 @@ bigger now`, `set brightness to 0.4`, `level1.opacity at 50%`. Code: `crates/atd
   the rest are dropped with a note. The `cue` tool itself uses the lexicon only, so it never waits
   on a model. A host that wants a model captures a `CueContext` (owned data), plans on a worker
   thread and pushes the moves onto `Agent::cues`.
-- **On the clock.** In `atd_stage::beat_position` beats, a cue fires on the next boundary strictly
+- **On the clock.** In `lsr_stage::beat_position` beats, a cue fires on the next boundary strictly
   after now: `now` the next beat, by default the next bar (4), `next drop` 16, `next phrase` 32
   (beat 5.3 → 8.0 for a bar). `quantum` overrides the words. A host calls
   `Agent::fire_cues(ws, beat)` as the clock advances; each due move is checked again against the
   show and the lock as they are then, and applied as one undo step (`Cue: level1.brightness =
-  0.6`). A newer cue for the same parameter replaces a pending one. `atidarla serve` fires cues
+  0.6`). A newer cue for the same parameter replaces a pending one. `lasair serve` fires cues
   every frame from the first deck's clock (seconds at 120 BPM without one).
 
 **Why the `stage` scope.** Cues are performance moves, like launching a clip. Their own scope
 would add a permission with nothing new to protect, because the allow-list already bounds them.
 They are not refused by `stage = false` in `agent.toml`, which is about launches and the
-crossfader. The red-team test is `crates/atd-agent/tests/cues.rs`.
+crossfader. The red-team test is `crates/lsr-agent/tests/cues.rs`.
 
-## `atidarla serve` (FR-H3)
+## `lasair serve` (FR-H3)
 
 ```sh
-atidarla serve show.atidarla --mcp-stdio                 # MCP on stdin/stdout
-atidarla serve show.atidarla --http 127.0.0.1:7421       # POST /mcp, REST POST /api/tools/<tool>
-atidarla serve show.atidarla --osc 9000                  # /atd/<node>/<param> <value>
+lasair serve show.lasair --mcp-stdio                 # MCP on stdin/stdout
+lasair serve show.lasair --http 127.0.0.1:7421       # POST /mcp, REST POST /api/tools/<tool>
+lasair serve show.lasair --osc 9000                  # /lsr/<node>/<param> <value>
 ```
 
 The project is cooked headless at 60 fps (outputs, sharing and DMX run as in the app). HTTP
@@ -111,11 +111,11 @@ message at once; under Show Lock whitelisted moves apply at once anyway): it nev
 ### Claude Code
 
 ```json
-{"mcpServers": {"atidarla": {"type": "stdio", "command": "atidarla",
-  "args": ["serve", "/path/to/show.atidarla", "--mcp-stdio", "--auto-accept"]}}}
+{"mcpServers": {"lasair": {"type": "stdio", "command": "lasair",
+  "args": ["serve", "/path/to/show.lasair", "--mcp-stdio", "--auto-accept"]}}}
 ```
 
-`claude mcp add atidarla -- atidarla serve /path/to/show.atidarla --mcp-stdio --auto-accept` does
+`claude mcp add lasair -- lasair serve /path/to/show.lasair --mcp-stdio --auto-accept` does
 the same. Evidence that it works: `docs/milestones/m5/claude-code-mcp.md`.
 
 ## The assistant (FR-G4)
@@ -127,7 +127,7 @@ egress gate, so Sovereign mode refuses it.
 
 ```sh
 ollama pull qwen2.5-coder:7b
-atidarla agent ask show.atidarla "a kaleidoscope of moving noise"
-atidarla agent eval --out docs/milestones/m5/eval.md      # M5 AC1
-atidarla agent eval --provider anthropic --model claude-sonnet-5-5 --allow-internet
+lasair agent ask show.lasair "a kaleidoscope of moving noise"
+lasair agent eval --out docs/milestones/m5/eval.md      # M5 AC1
+lasair agent eval --provider anthropic --model claude-sonnet-5-5 --allow-internet
 ```

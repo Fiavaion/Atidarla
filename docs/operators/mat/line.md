@@ -30,4 +30,4 @@ All platforms.
 
 ## Examples
 
-- [Render Wire and Toon](../../../examples/render-wire-toon.atidarla/) — `ink`
+- [Render Wire and Toon](../../../examples/render-wire-toon.lasair/) — `ink`

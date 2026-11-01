@@ -35,4 +35,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Motion](../../../examples/pnt-motion.atidarla/) — `boids`
+- [PNT Motion](../../../examples/pnt-motion.lasair/) — `boids`

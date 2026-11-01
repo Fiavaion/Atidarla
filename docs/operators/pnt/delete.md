@@ -44,6 +44,6 @@ All platforms.
 
 ## Examples
 
-- [PNT Capture](../../../examples/pnt-capture.atidarla/) — `bright_only`
-- [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `hole`, `pick`
-- [PNT Fields](../../../examples/pnt-fields.atidarla/) — `holes`
+- [PNT Capture](../../../examples/pnt-capture.lasair/) — `bright_only`
+- [PNT Deformers](../../../examples/pnt-deformers.lasair/) — `hole`, `pick`
+- [PNT Fields](../../../examples/pnt-fields.lasair/) — `holes`

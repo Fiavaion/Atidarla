@@ -31,4 +31,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Outputs](../../../examples/pnt-outputs.atidarla/) — `even`
+- [PNT Outputs](../../../examples/pnt-outputs.lasair/) — `even`

@@ -30,4 +30,4 @@ All platforms.
 
 ## Examples
 
-- [Keying](../../../examples/keying.atidarla/) — `strip`
+- [Keying](../../../examples/keying.lasair/) — `strip`

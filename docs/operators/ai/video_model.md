@@ -47,4 +47,4 @@ Cooks every frame (time-dependent).
 
 ## Examples
 
-- [Live AI](../../../examples/ai-live.atidarla/) — `video1`
+- [Live AI](../../../examples/ai-live.lasair/) — `video1`

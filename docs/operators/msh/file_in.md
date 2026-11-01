@@ -28,4 +28,4 @@ All platforms.
 
 ## Examples
 
-- [Mesh Files](../../../examples/mesh-files.atidarla/) — `vase`
+- [Mesh Files](../../../examples/mesh-files.lasair/) — `vase`

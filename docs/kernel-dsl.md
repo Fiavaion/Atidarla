@@ -1,11 +1,11 @@
 # Kernel DSL reference
 
-> **Status:** decision A12 ratified 2026-10-30. The compiler lives in `crates/atd-kernel`.
+> **Status:** decision A12 ratified 2026-10-30. The compiler lives in `crates/lsr-kernel`.
 > In the engine (see "In the engine" below): the operators **Kernel** (`pnt.kernel`, Points)
 > and **Kernel** (`img.kernel`, Pixels) run inline code or a `.atk` file that reloads when
 > saved; and every file in a project's `kernels/` folder is an operator of its own,
 > `kernel.<name>`, whose controls are its `ch()` parameters. Examples:
-> `examples/kernel-particles.atidarla`, `examples/kernel-pixels.atidarla`.
+> `examples/kernel-particles.lasair`, `examples/kernel-pixels.lasair`.
 
 A kernel is a short program that runs once per element: once per point (target **Points**)
 or once per pixel (target **Pixels**). It reads and writes the element's attributes with
@@ -20,9 +20,9 @@ must provide, the parameters it found, and a source map. Errors carry a line, a 
 length, a message and often a hint, so an editor can underline them.
 
 ```sh
-atidarla kernel particles.atk                  # check it, print bindings and parameters
-atidarla kernel particles.atk --emit-wgsl      # print the generated WGSL
-atidarla kernel grade.atk --target pixels
+lasair kernel particles.atk                  # check it, print bindings and parameters
+lasair kernel particles.atk --emit-wgsl      # print the generated WGSL
+lasair kernel grade.atk --target pixels
 ```
 
 ## The ten-line curl-noise particle kernel
@@ -209,7 +209,7 @@ engine supplies one; the standard names below; otherwise `float` (as in VEX).
 | `age`, `life`, `pscale`, `mass` | `float` | `f32` |
 | `id` | `int` | `u32` (converted on read and write) |
 
-Note: VEX's `Cd` and `uv` are 3-vectors. Atidarla's attribute model uses `vec4` colour and
+Note: VEX's `Cd` and `uv` are 3-vectors. Lasair's attribute model uses `vec4` colour and
 `vec2` UVs (`docs/design/geometry-attributes.md`). A sigil wins over this table, so with no
 schema `v@Cd` makes a 3-component `Cd`. When the engine supplies the input's schema, a sigil
 that disagrees with the input's type is an error where the kernel only reads the attribute
@@ -291,7 +291,7 @@ compares them on a grid):
 | `perlin(p)` | `vec2` or `vec3` | `float` | about −1..1 (gradient noise, quintic fade) |
 | `simplex(p)` | `vec2` or `vec3` | `float` | about −1..1 (Gustavson, kernel radius 0.5, so continuous across simplex edges) |
 | `worley(p)` | `vec2` or `vec3` | `float` | distance to the nearest feature point (F1), 0..~1.5 |
-| `curlnoise(p)` | `vec3` | `vec3` | curl noise (divergence-free): the engine's `atd_curl` with seed 0, the same function the Noise operator runs |
+| `curlnoise(p)` | `vec3` | `vec3` | curl noise (divergence-free): the engine's `lsr_curl` with seed 0, the same function the Noise operator runs |
 | `rand(x)` | `int`, `float`, `vec2`, `vec3` | `float` | 0 ≤ r < 1, a hash of the bits of `x` |
 
 The hash is PCG3D (Jarzynski and Olano, 2020) on integer cell coordinates, so lattice
@@ -391,7 +391,7 @@ black), `@Cd` starts as `in0` and `@res` is the output size.
   attribute names and types, and again when they change.
 - **Same arithmetic as the nodes.** `curlnoise`, attraction as `(target - P) * (k * dt)` and
   integration as `P += v * dt` compute exactly what Noise (velocity), Attract (spring) and
-  Integrate do, bit for bit, line by line (`crates/atd-ops-pnt/tests/kernel.rs`). The
+  Integrate do, bit for bit, line by line (`crates/lsr-ops-pnt/tests/kernel.rs`). The
   ten-line kernel above and the four-node chain agree bit for bit on DX12 and Vulkan; on
   Metal, whose compiler optimises one shader with fast math, they agree to about 1e-5 after
   120 frames.
@@ -414,7 +414,7 @@ with one name (`curl.atk` and `curl.pixels.atk`) are an error on the second.
   never recompiles. The cook writes them into the uniform buffer by slot without allocating.
 - **Opening a project** reads and compiles the files, so the network validates against their
   operators; an unknown `kernel.<name>` is explained (no such file, or the file's error).
-  `atidarla check` and `render` fail on a file that does not compile.
+  `lasair check` and `render` fail on a file that does not compile.
 - **Saving a file** (the app watches `kernels/`) compiles it on the watcher thread and, when
   its `ch()` declarations changed, updates the operator: a node keeps the value of every
   parameter whose name and kind still fit and drops the others (with a note naming them, one

@@ -1,6 +1,6 @@
 # 6. Kernels, WGSL, Python operators and Packs
 
-Atidarla's built-in operators cover a lot. When you need something they do not do, you can
+Lasair's built-in operators cover a lot. When you need something they do not do, you can
 write your own, or reuse a patch someone else made. This chapter is for when you are
 comfortable with chapters 1 to 5. You do not need any of it to make your first shows.
 
@@ -41,13 +41,13 @@ current points when you save a new kernel.
 Check a kernel from the command line without opening the app:
 
 ```sh
-atidarla kernel particles.atk                  # errors, bindings and parameters
-atidarla kernel particles.atk --emit-wgsl      # print the generated shader
-atidarla kernel grade.atk --target pixels
+lasair kernel particles.atk                  # errors, bindings and parameters
+lasair kernel particles.atk --emit-wgsl      # print the generated shader
+lasair kernel grade.atk --target pixels
 ```
 
-Examples: [`kernel-particles`](../../examples/kernel-particles.atidarla/),
-[`kernel-pixels`](../../examples/kernel-pixels.atidarla/).
+Examples: [`kernel-particles`](../../examples/kernel-particles.lasair/),
+[`kernel-pixels`](../../examples/kernel-pixels.lasair/).
 
 ## WGSL and Compute nodes
 
@@ -59,26 +59,26 @@ Examples: [`kernel-particles`](../../examples/kernel-particles.atidarla/),
   it when the shader needs to iterate, keep images from frame to frame, or use a scratch buffer.
   `#bind` lines declare inputs, state images, parameters and buffers. Reference:
   [`docs/compute.md`](../compute.md). Example:
-  [`compute-shaders`](../../examples/compute-shaders.atidarla/).
-- **ISF shaders.** If you have a folder of ISF `.fs` shaders, set `ATIDARLA_ISF_PATH` and each
+  [`compute-shaders`](../../examples/compute-shaders.lasair/).
+- **ISF shaders.** If you have a folder of ISF `.fs` shaders, set `LASAIR_ISF_PATH` and each
   one that translates appears as an operator `img.isf_*`. The command
-  `atidarla isf-import <dir> --report` translates a folder and tells you how many worked.
+  `lasair isf-import <dir> --report` translates a folder and tells you how many worked.
 
 Shader code is shared with others as files in the project folder, so it travels with the project.
 
 ## Python operators
 
 A project can define its own SIG and IMG operators in Python: one `.py` file in the project's
-`ops/` folder. You declare the parameters, inputs and state; Atidarla builds the operator, its
+`ops/` folder. You declare the parameters, inputs and state; Lasair builds the operator, its
 parameter panel and its place in the Operators panel (under **Project**, as `py.<name>`). Edits
 hot-reload and keep state. Reference with a worked example:
 [`docs/python-ops.md`](../python-ops.md). Example project:
-[`python-ops`](../../examples/python-ops.atidarla/).
+[`python-ops`](../../examples/python-ops.lasair/).
 
 ### Trust: Python operators are programs
 
 **A Python operator can do anything your user account can do**: read and write files, use the
-network, start programs. Atidarla does not sandbox it. So:
+network, start programs. Lasair does not sandbox it. So:
 
 - Opening a project **never runs** its `ops/` code. Its nodes load and show "Python operators in
   this project are not allowed to run".
@@ -111,7 +111,7 @@ it like on any other node.
 A starter library is in [`packs/`](../../packs/README.md): Audio Pulse, Beat Flash, Chromatic
 Aberration, Colour Grade, Curl Swarm, Duotone, Feedback Trails, Film Grain, Kaleidoscope Tunnel,
 LFO Bank, Neon Edges, RGB Delay, Spark Fountain, Spinning Solid and Vignette. Each has an
-example project, for example [`pack-colour-grade`](../../examples/pack-colour-grade.atidarla/).
+example project, for example [`pack-colour-grade`](../../examples/pack-colour-grade.lasair/).
 The Learn quest [Use a Pack](../../learn/quests/09-packs.toml) takes about 12 minutes.
 
 What works today, from [`docs/packs.md`](../packs.md) and [`docs/learn.md`](../learn.md):
@@ -123,7 +123,7 @@ What works today, from [`docs/packs.md`](../packs.md) and [`docs/learn.md`](../l
   Packs and update indicators in the app are not built yet.
 - The assistant can stage a new Pack from selected nodes (`create_pack`, chapter 9).
 - A Pack is locked in a library. A project can unlock a copy and edit that.
-- You can check Packs from the command line: `atidarla check packs/*/` and `atidarla fmt`.
+- You can check Packs from the command line: `lasair check packs/*/` and `lasair fmt`.
 
 Each project carries its own copy of every Pack it uses, so a shared project needs nothing
 installed. Updating a Pack to a newer version is an explicit step that reports what changed.
@@ -133,4 +133,4 @@ installed. Updating a Pack to a newer version is an explicit step that reports w
 The [Neural CA](../operators/img/nca.md) node grows patterns from a tiny neural network on every
 pixel. The built-in rules are hand-built, not trained. A weights file in the project supplies
 another network. Reference: [`docs/nca.md`](../nca.md). Example:
-[`neural-growth`](../../examples/neural-growth.atidarla/).
+[`neural-growth`](../../examples/neural-growth.lasair/).

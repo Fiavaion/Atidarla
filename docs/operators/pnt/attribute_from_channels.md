@@ -37,4 +37,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Fields](../../../examples/pnt-fields.atidarla/) — `pulse`
+- [PNT Fields](../../../examples/pnt-fields.lasair/) — `pulse`

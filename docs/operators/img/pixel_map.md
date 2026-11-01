@@ -34,4 +34,4 @@ All platforms.
 
 ## Examples
 
-- [Pixel map](../../../examples/pixel-map.atidarla/) — `pixel_map1`
+- [Pixel map](../../../examples/pixel-map.lasair/) — `pixel_map1`

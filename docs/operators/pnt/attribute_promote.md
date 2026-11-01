@@ -30,4 +30,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Motion](../../../examples/pnt-motion.atidarla/) — `flock_centre`
+- [PNT Motion](../../../examples/pnt-motion.lasair/) — `flock_centre`

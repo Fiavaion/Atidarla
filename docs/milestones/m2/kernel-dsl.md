@@ -1,4 +1,4 @@
-# M2 pre-work: Kernel DSL compiler (`atd-kernel`)
+# M2 pre-work: Kernel DSL compiler (`lsr-kernel`)
 
 > **A12 ratified 2026-10-30.** The compiler is wired into the engine as `pnt.kernel`
 > (2026-10-30, see the M2 pre-work log and decision A53), and then as `img.kernel` and
@@ -15,11 +15,11 @@ image inputs in Points kernels, prims and voxels, a spatial grid for `nearpoint(
 
 | Requirement | Built | Tests (all passing) |
 |---|---|---|
-| FR-K1 `ch()` hooks as controls | `crates/atd-ops-pnt/src/project.rs` `ProjectKernels`: each `kernels/<name>.atk` / `<name>.pixels.atk` registers `kernel.<name>` (`KERNEL_CUSTOM` provenance; `Registry::replace_custom` accepts `kernel.<name>`); parameters from `Compiled::params` (`ch`/`chf` float, `chi` int, `chu`/`chv`/`chp` vectors; defaults, min, max; help from a `//` comment on the line); compiled at project open and on the watcher thread on save; `stale_edits` (now `atd_core::graph::stale_edits`, by provenance) keeps values whose name and kind fit | `tests/project_kernels.rs`: `kernel_files_register_operators` (schema shape, kinds, defaults, help, bad names, duplicates, line of a compile error, `explain`), `saving_the_file_updates_the_schema_and_keeps_matching_values`, `kernel_nodes_round_trip_in_project_files`; unit tests in `project.rs` |
-| Values reach the GPU | One runner per target (`PointsRunner` in `atd-ops-pnt/src/kernel.rs`, `PixelsRunner` in `atd-ops-img/src/kernel.rs`) taking a source and a value provider (`ChValues::Defaults` for the inline operators, `ChValues::Params` for project operators: `Params` with bindings, expressions, live values); `write_uniforms` by `ParamDecl::slot` into buffers allocated at compile | `editing_a_ch_value_changes_the_gpu_result` (constants, an expression, Points and Pixels); `tests/alloc_kernel.rs` (no buffers, bind groups or textures after warm-up; 57.5 allocations per node-cook on Metal, bound 90) |
+| FR-K1 `ch()` hooks as controls | `crates/lsr-ops-pnt/src/project.rs` `ProjectKernels`: each `kernels/<name>.atk` / `<name>.pixels.atk` registers `kernel.<name>` (`KERNEL_CUSTOM` provenance; `Registry::replace_custom` accepts `kernel.<name>`); parameters from `Compiled::params` (`ch`/`chf` float, `chi` int, `chu`/`chv`/`chp` vectors; defaults, min, max; help from a `//` comment on the line); compiled at project open and on the watcher thread on save; `stale_edits` (now `lsr_core::graph::stale_edits`, by provenance) keeps values whose name and kind fit | `tests/project_kernels.rs`: `kernel_files_register_operators` (schema shape, kinds, defaults, help, bad names, duplicates, line of a compile error, `explain`), `saving_the_file_updates_the_schema_and_keeps_matching_values`, `kernel_nodes_round_trip_in_project_files`; unit tests in `project.rs` |
+| Values reach the GPU | One runner per target (`PointsRunner` in `lsr-ops-pnt/src/kernel.rs`, `PixelsRunner` in `lsr-ops-img/src/kernel.rs`) taking a source and a value provider (`ChValues::Defaults` for the inline operators, `ChValues::Params` for project operators: `Params` with bindings, expressions, live values); `write_uniforms` by `ParamDecl::slot` into buffers allocated at compile | `editing_a_ch_value_changes_the_gpu_result` (constants, an expression, Points and Pixels); `tests/alloc_kernel.rs` (no buffers, bind groups or textures after warm-up; 57.5 allocations per node-cook on Metal, bound 90) |
 | FR-K4 for project operators | A node reads its file's latest text through a `SharedSource` and compiles on its own worker; the last kernel that compiled keeps running | `saving_a_running_kernel_keeps_its_state` (Solver loop; y kept, x continues at the kept `speed`) |
-| `img.kernel` (Pixels) | Full-screen draw from the compiled module through the new `FullscreenPass::try_from_module` (`atd-gpu`: group 0 uniforms + sampler, group 1 inputs) and `draw_bytes`; inputs `in0`…`in3`, unconnected ones black; `res` = output size | `atd-ops-img/tests/kernel.rs`: pixels against the CPU (uv, indices, resolution, time, an input and an unconnected one), a bad edit names `kernel:2:` and the last kernel keeps drawing |
-| Examples | `kernel-particles` uses `kernel.curl` (its `ch()`s as controls) and an inline `pnt.kernel`; new `kernel-pixels` (inline `img.kernel` generator → `kernel.grade` from `kernels/grade.pixels.atk`) | `atd-cli` `kernel_operators_render_deterministically`; `atidarla render … --range 0-60` twice: 60/60 identical for both |
+| `img.kernel` (Pixels) | Full-screen draw from the compiled module through the new `FullscreenPass::try_from_module` (`lsr-gpu`: group 0 uniforms + sampler, group 1 inputs) and `draw_bytes`; inputs `in0`…`in3`, unconnected ones black; `res` = output size | `lsr-ops-img/tests/kernel.rs`: pixels against the CPU (uv, indices, resolution, time, an input and an unconnected one), a bad edit names `kernel:2:` and the last kernel keeps drawing |
+| Examples | `kernel-particles` uses `kernel.curl` (its `ch()`s as controls) and an inline `pnt.kernel`; new `kernel-pixels` (inline `img.kernel` generator → `kernel.grade` from `kernels/grade.pixels.atk`) | `lsr-cli` `kernel_operators_render_deterministically`; `lasair render … --range 0-60` twice: 60/60 identical for both |
 
 Not decided here: `ch()` has no colour or toggle form (the docs say to use `chp` and
 `chi(name, 0, 0, 1)`); adding `chc`/`cht` would be a language change for A12/A53.
@@ -34,12 +34,12 @@ Not decided here: `ch()` has no colour or toggle form (the docs say to use `chp`
 | FR-K3 inline errors, Generated WGSL | `Diagnostic { line, col, len, message, hint, span, origin }`, `Diagnostic::render`; naga validation of every shader with errors mapped back through a `SourceMap`; `Compiled::wgsl` is the "Generated WGSL" text | 51 positioned error cases; cascade suppression; deterministic fuzz (never panics, never emits WGSL naga rejects); 1 MiB-stack test |
 | Determinism | Pure lowering, fixed helper order, no hidden time or randomness, parameters as uniforms | Same source (LF or CRLF, any parameter values) → byte-identical WGSL; curl kernel byte-identical over two 120-step GPU runs |
 | AC2 groundwork | The ten-line curl-noise kernel, written out in `docs/kernel-dsl.md` | Extracted from the docs, compiled, validated, run on GPU and CPU |
-| CLI | `atidarla kernel <file> [--target points\|pixels] [--emit-wgsl]` | `atd-cli` unit test; run by hand on the goldens and a bad file |
+| CLI | `lasair kernel <file> [--target points\|pixels] [--emit-wgsl]` | `lsr-cli` unit test; run by hand on the goldens and a bad file |
 
 Evidence, run on 2026-10-18, Windows 11, RTX 5070 Ti, DX12, Rust 1.97, debug build unless noted:
 
-- `cargo test -p atd-kernel`: 39 tests, 0 failed (18 unit, 2 docs, 4 edges, 6 errors, 3 fuzz,
-  2 golden, 3 GPU, 1 doc-test); `cargo test -p atd-cli kernel`: 1 test.
+- `cargo test -p lsr-kernel`: 39 tests, 0 failed (18 unit, 2 docs, 4 edges, 6 errors, 3 fuzz,
+  2 golden, 3 GPU, 1 doc-test); `cargo test -p lsr-cli kernel`: 1 test.
 - The AC2 kernel in `docs/kernel-dsl.md` is asserted identical to the golden
   `curl_particles.points.atk` that the GPU tests run.
 - GPU noise vs Rust: largest |gpu − cpu| perlin3 1.7e-6, perlin2 4.8e-7, simplex3 2.5e-6,
@@ -58,7 +58,7 @@ Evidence, run on 2026-10-18, Windows 11, RTX 5070 Ti, DX12, Rust 1.97, debug bui
 ## Public API (what other areas call)
 
 ```rust
-use atd_kernel::{compile, CompileOptions, Target, AttrSchema, AttrType, Scalar};
+use lsr_kernel::{compile, CompileOptions, Target, AttrSchema, AttrType, Scalar};
 
 let mut opts = CompileOptions::new(Target::Points);  // validate: true, max_storage_buffers: 8
 opts.input_schema = Some(vec![AttrSchema { name: "P".into(), ty: AttrType::VEC3 }]);
@@ -160,14 +160,14 @@ route is a `FullscreenPass` constructor that takes a complete module and a layou
 3. Requesting more than 8 storage buffers where the adapter offers them (design §7), passed
    as `CompileOptions::max_storage_buffers`.
 4. A home for the shared WGSL library: for AC2 the node-built Curl Noise must call the same
-   `atd_curlnoise` as the kernel (`noise_library()`); design §5.5 puts the library in
-   `atd-gpu` (question 14).
+   `lsr_curlnoise` as the kernel (`noise_library()`); design §5.5 puts the library in
+   `lsr-gpu` (question 14).
 5. Later: a spatial grid for `nearpoint(s)`, which are O(N) per point today.
 
 ## A12-specific design choices: questions for Mark
 
 1. **Surface syntax.** VEX-flavoured C-like syntax: `@attr` with VEX sigils, `ch()` family,
-   `let` for inferred locals, Atidarla type names (`vec3`, `mat4`) with VEX aliases (`vector`,
+   `let` for inferred locals, Lasair type names (`vec3`, `mat4`) with VEX aliases (`vector`,
    `matrix`). Accept?
 2. **`bool` exists** and comparisons return it (VEX returns `int`); conditions still accept
    `int` and `float`, and `bool` converts to `int` implicitly.
@@ -197,8 +197,8 @@ route is a `FullscreenPass` constructor that takes a complete module and a layou
     `*.pixels.atk`. A project would store the target on the node instead.
 13. **Experimental flag**: should the operators, once built, be hidden behind a setting
     until A12 is ratified?
-14. **Where the shared WGSL library lives**: `atd-kernel` now (so the crate stays removable);
-    design §5.5 says `atd-gpu`. Move it when A12 is ratified?
+14. **Where the shared WGSL library lives**: `lsr-kernel` now (so the crate stays removable);
+    design §5.5 says `lsr-gpu`. Move it when A12 is ratified?
 15. **AC2 "identical"**: the kernel and a node chain are different shaders, so FMA
     contraction can differ by an ulp even with the same library; this repeats the geometry
     design's Q4. Accept a tolerance (for example ≤ 1 ulp, or identical PNG frames)?

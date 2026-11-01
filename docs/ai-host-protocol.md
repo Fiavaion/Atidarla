@@ -1,6 +1,6 @@
 # AI Host Protocol v1
 
-The contract between the Atidarla engine and an AI Host: the local Python host
+The contract between the Lasair engine and an AI Host: the local Python host
 (`ai-host/`), the same host listening on a LAN machine, or a Runpod pod running
 the host's container (FR-A1, PRD §5.1). It replaces the M0 prototype (`0.1`,
 `docs/spikes/d-ai-host-protocol.md`); version strings must match exactly.
@@ -12,10 +12,10 @@ the host's container (FR-A1, PRD §5.1). It replaces the M0 prototype (`0.1`,
 - **Local:** the engine's supervisor listens on `127.0.0.1:0` and spawns the
   host with `--connect 127.0.0.1:<port>`. Frames go through a shared-memory
   ring (`transport.kind = "shm"`).
-- **LAN / cloud:** the host runs `atd-ai-host --listen <addr>:<port> --token <t>`
+- **LAN / cloud:** the host runs `lsr-ai-host --listen <addr>:<port> --token <t>`
   and the engine connects to it. Frames travel on the socket
   (`transport.kind = "inline"`). A host listening on anything but loopback
-  refuses to start without `--token` (or `ATD_AI_HOST_TOKEN`).
+  refuses to start without `--token` (or `LSR_AI_HOST_TOKEN`).
 - One TCP stream per session. `TCP_NODELAY` on both ends.
 
 ## Framing

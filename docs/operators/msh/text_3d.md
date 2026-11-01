@@ -18,7 +18,7 @@ None.
 
 | Name | Label | Type | Default | Range / options | Description |
 |---|---|---|---|---|---|
-| `text` | Text | string | `"Atidarla"` |  | The text; several lines are allowed. |
+| `text` | Text | string | `"Lasair"` |  | The text; several lines are allowed. |
 | `font` | Font | menu | `"sans"` | `sans`, `mono` | Built-in font: `sans` (Ubuntu Light) or `mono` (Hack). |
 | `font_file` | Font File | path | `""` |  | Path to a .ttf or .otf file; overrides Font when set. |
 | `size` | Size | float | `0.5` | ≥ 0 | The font size (its em height) in world units. |
@@ -34,4 +34,4 @@ All platforms.
 
 ## Examples
 
-- [Mesh Construction](../../../examples/mesh-construction.atidarla/) — `title`
+- [Mesh Construction](../../../examples/mesh-construction.lasair/) — `title`

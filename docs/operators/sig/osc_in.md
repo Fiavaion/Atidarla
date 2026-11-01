@@ -30,4 +30,4 @@ All platforms.
 
 ## Examples
 
-- [Live control](../../../examples/live-control.atidarla/) — `osc1`
+- [Live control](../../../examples/live-control.lasair/) — `osc1`

@@ -42,4 +42,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Fountain](../../../examples/pnt-fountain.atidarla/) — `nozzle`
+- [PNT Fountain](../../../examples/pnt-fountain.lasair/) — `nozzle`

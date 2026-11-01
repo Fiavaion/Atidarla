@@ -40,4 +40,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Capture](../../../examples/pnt-capture.atidarla/) — `dome`
+- [PNT Capture](../../../examples/pnt-capture.lasair/) — `dome`

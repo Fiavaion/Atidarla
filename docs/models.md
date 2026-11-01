@@ -1,7 +1,7 @@
 # Model manager
 
 AI models are never part of the repository or of a project (CLAUDE.md rule 4, PRD A61).
-The model manager (FR-A12, `atd_ai::models`) knows which models exist, what their
+The model manager (FR-A12, `lsr_ai::models`) knows which models exist, what their
 licences allow, where their files are, and downloads them only after the user has
 accepted the licence.
 
@@ -9,9 +9,9 @@ accepted the licence.
 
 | What | Where |
 |---|---|
-| Catalogue | `crates/atd-ai/src/models/catalogue.toml`, embedded in the build |
-| Model files | per-user cache, one folder per model ID: macOS `~/Library/Caches/Atidarla/models`, Windows `%LOCALAPPDATA%\Atidarla\models`, Linux `$XDG_CACHE_HOME/atidarla/models` (else `~/.cache/atidarla/models`). `ATD_MODELS_DIR` overrides all three. |
-| Licence acceptances | `accepted.toml` beside the default cache folder (e.g. `~/Library/Caches/Atidarla/accepted.toml`), also when `ATD_MODELS_DIR` is set: model ID, licence ID, licence URL, date. Per user, never in a project. |
+| Catalogue | `crates/lsr-ai/src/models/catalogue.toml`, embedded in the build |
+| Model files | per-user cache, one folder per model ID: macOS `~/Library/Caches/Lasair/models`, Windows `%LOCALAPPDATA%\Lasair\models`, Linux `$XDG_CACHE_HOME/lasair/models` (else `~/.cache/lasair/models`). `LSR_MODELS_DIR` overrides all three. |
+| Licence acceptances | `accepted.toml` beside the default cache folder (e.g. `~/Library/Caches/Lasair/accepted.toml`), also when `LSR_MODELS_DIR` is set: model ID, licence ID, licence URL, date. Per user, never in a project. |
 | What a project needs | `project.toml`: `[[models]]` (id, licence class, SHA-256 of the main file) and `[ai] commercial_safe_only` |
 
 ```toml
@@ -43,7 +43,7 @@ An acceptance counts only while the catalogue names the same licence ID and URL,
 model whose licence (or pinned revision) changes must be accepted again.
 
 A project with **commercial-safe only** set hides restricted and non-commercial models in
-the Models window, and `atd_ai::models::blocked` / `licence_class` let AI nodes refuse them.
+the Models window, and `lsr_ai::models::blocked` / `licence_class` let AI nodes refuse them.
 The catalogue's class wins over the class a project file records.
 
 ## Status and checks
@@ -59,7 +59,7 @@ The catalogue's class wins over the class a project file records.
   `https://huggingface.co/<repo>/resolve/<revision>/<path>`.
 - HTTP(S) with `ureq`, rustls (ring) and the operating system's trust store; proxies from
   the environment are ignored so nothing bypasses the egress gate.
-- Every connection, redirects to CDNs included, resolves through `atd_ai::egress`.
+- Every connection, redirects to CDNs included, resolves through `lsr_ai::egress`.
   **Sovereign mode** (default on) refuses internet hosts before any packet is sent. The
   app then offers **Download once anyway**, and the CLI takes `--allow-internet`. Either
   lifts the gate for that one download only.
@@ -77,11 +77,11 @@ project setting (saved with the project).
 CLI:
 
 ```sh
-atidarla models list                         # class, licence, size, status, accepted
-atidarla models accept sd-turbo              # prints the licence and asks you to type `accept`
-atidarla models download sd-turbo --allow-internet
-atidarla models verify sd-turbo              # full SHA-256 check
-atidarla models path [id]
+lasair models list                         # class, licence, size, status, accepted
+lasair models accept sd-turbo              # prints the licence and asks you to type `accept`
+lasair models download sd-turbo --allow-internet
+lasair models verify sd-turbo              # full SHA-256 check
+lasair models path [id]
 ```
 
 Code: `models_root()`, `model_dir(id)`, `licence_class(id)`, `catalogue()`, `status`,
@@ -96,7 +96,7 @@ for `cardData.license` and the head commit; `…/tree/<rev>?recursive=1` for siz
 SHA-256) and the model cards. Small non-LFS files were fetched at the pinned revision and
 hashed; each one's git blob SHA-1 matched the tree. The SD-Turbo and TAESD files already in
 the cache on Mark's Mac were hashed locally and match the catalogue
-(`atidarla models verify sd-turbo`: 12/12 files).
+(`lasair models verify sd-turbo`: 12/12 files).
 
 | ID | Task | Licence | Class | Size | Source (pinned) | Evidence |
 |---|---|---|---|---|---|---|
@@ -121,5 +121,5 @@ No non-commercial model is in the catalogue: every vision task has a commercial-
 2. List files: `https://huggingface.co/api/models/<repo>/tree/<sha>?recursive=1`. For weights,
    `lfs.oid` is the SHA-256. For small files, fetch them at `<sha>` and hash them.
 3. Add a `[[model]]` entry with the class and the licence URL pinned to `<sha>`, add a
-   row above, and run `cargo test -p atd-ai`. The catalogue test refuses unpinned
+   row above, and run `cargo test -p lsr-ai`. The catalogue test refuses unpinned
    revisions, unknown classes, unsafe paths and missing hashes.

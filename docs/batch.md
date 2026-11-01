@@ -1,10 +1,10 @@
 # Batch Graph: wedges and the media bin
 
-> FR-B1–B3, D8, M5 AC4. Code: `crates/atd-format/src/{batch,media_bin}.rs` (files),
-> `crates/atd-ai/src/batch/` (cache keys, host placement, runner),
-> `crates/atd-cli/src/batch.rs` (offline engines, `atidarla batch`),
-> `crates/atd-app/src/media_bin.rs` (Media Bin in the Stage tab). Example:
-> [`examples/batch-wedge.atidarla`](../examples/batch-wedge.atidarla/).
+> FR-B1–B3, D8, M5 AC4. Code: `crates/lsr-format/src/{batch,media_bin}.rs` (files),
+> `crates/lsr-ai/src/batch/` (cache keys, host placement, runner),
+> `crates/lsr-cli/src/batch.rs` (offline engines, `lasair batch`),
+> `crates/lsr-app/src/media_bin.rs` (Media Bin in the Stage tab). Example:
+> [`examples/batch-wedge.lasair`](../examples/batch-wedge.lasair/).
 
 A **wedge** sweeps parameters of a project: ten prompts × ten seeds through Diffusion, a
 noise seed against a scale, LoRA or ControlNet weights, any parameter of any node. Each
@@ -49,14 +49,14 @@ range = { from = 0.2, to = 0.8, steps = 4 }   # both ends included
   The value is set as a constant, replacing an expression or a binding on that parameter.
 - `product` varies the last axis fastest; `zip` needs every axis the same length. A wedge
   makes at most 100 000 items.
-- Nodes are referred to by ID, so renaming a node changes nothing. `atidarla check` verifies
-  wedges (canonical form, nodes and parameters exist); `atidarla fmt` rewrites them.
+- Nodes are referred to by ID, so renaming a node changes nothing. `lasair check` verifies
+  wedges (canonical form, nodes and parameters exist); `lasair fmt` rewrites them.
 
 ## Running
 
 ```sh
-atidarla batch run <project> <wedge> [--jobs N] [--force] [--allow-python-ops]
-atidarla batch status <project> [wedge]
+lasair batch run <project> <wedge> [--jobs N] [--force] [--allow-python-ops]
+lasair batch status <project> [wedge]
 ```
 
 `run` prints a line per item (`item 37 cooked on lan:b in 212 ms`) and a summary
@@ -67,7 +67,7 @@ adapters its target needs, without cooking anything.
 
 ### What an item cooks
 
-Each worker is an offline engine (the same as `atidarla render`) on the machine's GPU; all
+Each worker is an offline engine (the same as `lasair render`) on the machine's GPU; all
 workers share one GPU device. For each item the worker loads the network with the item's
 values, cooks frame F, then frame F + 1, and keeps frame F + 1: AI nodes answer one frame
 behind offline (`docs/render.md`), so that is the AI result for frame F's input. Each item
@@ -153,12 +153,12 @@ that slot (the first free slot of the top layer for the button), as one undo ste
 ## Hand check: AC4 with two reference hosts
 
 ```sh
-cargo run -p atd-ai --bin atd-ai-refhost -- --listen 127.0.0.1:7421 &
-cargo run -p atd-ai --bin atd-ai-refhost -- --listen 127.0.0.1:7422 &
-cargo run -p atd-cli -- batch run examples/batch-wedge.atidarla prompts
-cargo run -p atd-cli -- batch run examples/batch-wedge.atidarla prompts   # 0 cooked
+cargo run -p lsr-ai --bin lsr-ai-refhost -- --listen 127.0.0.1:7421 &
+cargo run -p lsr-ai --bin lsr-ai-refhost -- --listen 127.0.0.1:7422 &
+cargo run -p lsr-cli -- batch run examples/batch-wedge.lasair prompts
+cargo run -p lsr-cli -- batch run examples/batch-wedge.lasair prompts   # 0 cooked
 ```
 
 The automated version is `a_100_item_wedge_runs_across_two_lan_hosts_into_the_media_bin`
-in `crates/atd-cli/src/batch.rs`. The example's results are not committed (`media/bin/` is
+in `crates/lsr-cli/src/batch.rs`. The example's results are not committed (`media/bin/` is
 in the example's `.gitignore`).

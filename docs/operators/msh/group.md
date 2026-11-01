@@ -38,4 +38,4 @@ All platforms.
 
 ## Examples
 
-- [Mesh Modelling](../../../examples/mesh-modelling.atidarla/) — `top`, `upper`
+- [Mesh Modelling](../../../examples/mesh-modelling.lasair/) — `top`, `upper`

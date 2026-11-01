@@ -33,5 +33,5 @@ All platforms.
 
 ## Examples
 
-- [Render Solids](../../../examples/render-solids.atidarla/) — `glossy`, `glow`
-- [Gaussian Splats](../../../examples/splats.atidarla/) — `ring_mat`
+- [Render Solids](../../../examples/render-solids.lasair/) — `glossy`, `glow`
+- [Gaussian Splats](../../../examples/splats.lasair/) — `ring_mat`

@@ -39,5 +39,5 @@ All platforms.
 
 ## Examples
 
-- [Live AI](../../../examples/ai-live.atidarla/) — `invert1`
-- [Batch Wedge](../../../examples/batch-wedge.atidarla/) — `invert1`
+- [Live AI](../../../examples/ai-live.lasair/) — `invert1`
+- [Batch Wedge](../../../examples/batch-wedge.lasair/) — `invert1`

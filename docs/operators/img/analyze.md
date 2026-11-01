@@ -26,4 +26,4 @@ All platforms.
 
 ## Examples
 
-- [Signal scope](../../../examples/signal-scope.atidarla/) — `probe`
+- [Signal scope](../../../examples/signal-scope.lasair/) — `probe`

@@ -1,8 +1,8 @@
 # Learn mode
 
-> FR-L1. Code: `crates/atd-app/src/learn/`. Quests: [`learn/quests/`](../learn/quests/).
+> FR-L1. Code: `crates/lsr-app/src/learn/`. Quests: [`learn/quests/`](../learn/quests/).
 
-Learn mode teaches Atidarla with **quests**: short, ordered lists of steps. A student follows the
+Learn mode teaches Lasair with **quests**: short, ordered lists of steps. A student follows the
 steps in the app, and each step **checks itself** against the live project, so the quest always
 knows what has been done and never needs a "next" button.
 
@@ -30,8 +30,8 @@ an example project shows **Open the example project** instead.
 ## Progress
 
 Progress is per user, not per project, in `learn.toml` in the app's config folder
-(`~/Library/Application Support/Atidarla` on macOS, `%APPDATA%\Atidarla` on Windows,
-`$XDG_CONFIG_HOME/atidarla` or `~/.config/atidarla` elsewhere):
+(`~/Library/Application Support/Lasair` on macOS, `%APPDATA%\Lasair` on Windows,
+`$XDG_CONFIG_HOME/lasair` or `~/.config/lasair` elsewhere):
 
 ```toml
 format = 1
@@ -50,7 +50,7 @@ file starts progress afresh.
 ## Writing a quest
 
 A quest is one TOML file in `learn/quests/`, named `<nn>-<slug>.toml`. The number orders the
-list. Add the file to `SHIPPED` in `crates/atd-app/src/learn/quest.rs` (it is embedded in the
+list. Add the file to `SHIPPED` in `crates/lsr-app/src/learn/quest.rs` (it is embedded in the
 program with `include_str!`; a test fails if the folder and the list disagree).
 
 ```toml
@@ -58,7 +58,7 @@ title = "Your first patch"          # required
 summary = "One or two sentences."   # required
 minutes = 12                        # 1 to 240
 prerequisites = ["first-patch"]     # slugs of earlier quests (advice, not a lock)
-start = "examples/pack-beat-flash.atidarla"   # optional example project to open
+start = "examples/pack-beat-flash.lasair"   # optional example project to open
 
 [[step]]
 title = "Add a Noise node"

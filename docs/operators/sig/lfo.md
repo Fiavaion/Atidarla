@@ -35,19 +35,19 @@ All platforms.
 
 ## Examples
 
-- [Beat clock](../../../examples/beat-clock.atidarla/) — `sweep`, `flash`
-- [Compute Shaders](../../../examples/compute-shaders.atidarla/) — `drift`
-- [DAT tables](../../../examples/dat-tables.atidarla/) — `lfo`
-- [Image processing](../../../examples/image-processing.atidarla/) — `move`
-- [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `hue_swing`
-- [Neural Growth](../../../examples/neural-growth.atidarla/) — `sweep`
-- [Pack: Chromatic Aberration](../../../examples/pack-chromatic-aberration.atidarla/) — `wobble`
-- [Pack: Feedback Trails](../../../examples/pack-feedback-trails.atidarla/) — `swing`
-- [Pack: Neon Edges](../../../examples/pack-neon-edges.atidarla/) — `colours`
-- [Pack: Spark Fountain](../../../examples/pack-spark-fountain.atidarla/) — `breath`
-- [Simulations](../../../examples/simulations.atidarla/) — `orbit`
-- [Soak show](../../../examples/soak-show.atidarla/) — `drift`, `pick`
-- [Stage deck](../../../examples/stage-deck.atidarla/) — `drift`, `pick`
-- [Texture sharing](../../../examples/texture-sharing.atidarla/) — `drift`
-- [Timeline show](../../../examples/timeline-show.atidarla/) — `pulse`
-- [Two outputs](../../../examples/two-outputs.atidarla/) — `drift`
+- [Beat clock](../../../examples/beat-clock.lasair/) — `sweep`, `flash`
+- [Compute Shaders](../../../examples/compute-shaders.lasair/) — `drift`
+- [DAT tables](../../../examples/dat-tables.lasair/) — `lfo`
+- [Image processing](../../../examples/image-processing.lasair/) — `move`
+- [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.lasair/) — `hue_swing`
+- [Neural Growth](../../../examples/neural-growth.lasair/) — `sweep`
+- [Pack: Chromatic Aberration](../../../examples/pack-chromatic-aberration.lasair/) — `wobble`
+- [Pack: Feedback Trails](../../../examples/pack-feedback-trails.lasair/) — `swing`
+- [Pack: Neon Edges](../../../examples/pack-neon-edges.lasair/) — `colours`
+- [Pack: Spark Fountain](../../../examples/pack-spark-fountain.lasair/) — `breath`
+- [Simulations](../../../examples/simulations.lasair/) — `orbit`
+- [Soak show](../../../examples/soak-show.lasair/) — `drift`, `pick`
+- [Stage deck](../../../examples/stage-deck.lasair/) — `drift`, `pick`
+- [Texture sharing](../../../examples/texture-sharing.lasair/) — `drift`
+- [Timeline show](../../../examples/timeline-show.lasair/) — `pulse`
+- [Two outputs](../../../examples/two-outputs.lasair/) — `drift`

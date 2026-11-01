@@ -37,4 +37,4 @@ All platforms.
 
 ## Examples
 
-- [Live AI](../../../examples/ai-live.atidarla/) — `pose1`
+- [Live AI](../../../examples/ai-live.lasair/) — `pose1`

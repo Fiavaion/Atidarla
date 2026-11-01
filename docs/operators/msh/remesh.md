@@ -31,4 +31,4 @@ All platforms.
 
 ## Examples
 
-- [Mesh Shaping](../../../examples/mesh-shaping.atidarla/) — `even`
+- [Mesh Shaping](../../../examples/mesh-shaping.lasair/) — `even`

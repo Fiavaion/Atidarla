@@ -32,4 +32,4 @@ All platforms.
 
 ## Examples
 
-- [Live control](../../../examples/live-control.atidarla/) — `timecode1`
+- [Live control](../../../examples/live-control.lasair/) — `timecode1`

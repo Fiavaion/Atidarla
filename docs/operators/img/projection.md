@@ -31,4 +31,4 @@ All platforms.
 
 ## Examples
 
-- [Shaders](../../../examples/shaders.atidarla/) — `fisheye`
+- [Shaders](../../../examples/shaders.lasair/) — `fisheye`

@@ -32,12 +32,12 @@ All platforms.
 
 ## Examples
 
-- [Audio-reactive feedback](../../../examples/audio-reactive-feedback.atidarla/) — `level1`
-- [Beat clock](../../../examples/beat-clock.atidarla/) — `beat_flash`
-- [Beat switcher](../../../examples/beat-switcher.atidarla/) — `level1`
-- [Live control](../../../examples/live-control.atidarla/) — `level1`
-- [Neural Growth](../../../examples/neural-growth.atidarla/) — `dim`
-- [Python operators](../../../examples/python-ops.atidarla/) — `level1`
-- [Signal scope](../../../examples/signal-scope.atidarla/) — `meter`
-- [Soak show](../../../examples/soak-show.atidarla/) — `trail`
-- [Timeline show](../../../examples/timeline-show.atidarla/) — `level1`
+- [Audio-reactive feedback](../../../examples/audio-reactive-feedback.lasair/) — `level1`
+- [Beat clock](../../../examples/beat-clock.lasair/) — `beat_flash`
+- [Beat switcher](../../../examples/beat-switcher.lasair/) — `level1`
+- [Live control](../../../examples/live-control.lasair/) — `level1`
+- [Neural Growth](../../../examples/neural-growth.lasair/) — `dim`
+- [Python operators](../../../examples/python-ops.lasair/) — `level1`
+- [Signal scope](../../../examples/signal-scope.lasair/) — `meter`
+- [Soak show](../../../examples/soak-show.lasair/) — `trail`
+- [Timeline show](../../../examples/timeline-show.lasair/) — `level1`

@@ -31,4 +31,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Constellation](../../../examples/pnt-constellation.atidarla/) — `links`
+- [PNT Constellation](../../../examples/pnt-constellation.lasair/) — `links`

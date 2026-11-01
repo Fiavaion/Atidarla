@@ -28,4 +28,4 @@ All platforms.
 
 ## Examples
 
-- [Image processing](../../../examples/image-processing.atidarla/) — `normals`
+- [Image processing](../../../examples/image-processing.lasair/) — `normals`

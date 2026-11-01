@@ -32,4 +32,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Constellation](../../../examples/pnt-constellation.atidarla/) — `normals`
+- [PNT Constellation](../../../examples/pnt-constellation.lasair/) — `normals`

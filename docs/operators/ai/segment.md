@@ -37,4 +37,4 @@ All platforms.
 
 ## Examples
 
-- [Live AI](../../../examples/ai-live.atidarla/) — `segment1`
+- [Live AI](../../../examples/ai-live.lasair/) — `segment1`

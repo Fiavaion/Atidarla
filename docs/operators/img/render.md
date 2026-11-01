@@ -57,10 +57,10 @@ All platforms.
 
 ## Examples
 
-- [Mesh Construction](../../../examples/mesh-construction.atidarla/) — `render`
-- [Mesh Shaping](../../../examples/mesh-shaping.atidarla/) — `look`
-- [VAT Playback](../../../examples/mesh-vat.atidarla/) — `render`
-- [Render Solids](../../../examples/render-solids.atidarla/) — `render`
-- [Render Textures](../../../examples/render-textures.atidarla/) — `render`
-- [Render Wire and Toon](../../../examples/render-wire-toon.atidarla/) — `render`
-- [Gaussian Splats](../../../examples/splats.atidarla/) — `render`
+- [Mesh Construction](../../../examples/mesh-construction.lasair/) — `render`
+- [Mesh Shaping](../../../examples/mesh-shaping.lasair/) — `look`
+- [VAT Playback](../../../examples/mesh-vat.lasair/) — `render`
+- [Render Solids](../../../examples/render-solids.lasair/) — `render`
+- [Render Textures](../../../examples/render-textures.lasair/) — `render`
+- [Render Wire and Toon](../../../examples/render-wire-toon.lasair/) — `render`
+- [Gaussian Splats](../../../examples/splats.lasair/) — `render`

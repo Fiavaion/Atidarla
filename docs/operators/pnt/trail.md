@@ -32,4 +32,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Motion](../../../examples/pnt-motion.atidarla/) — `streaks`
+- [PNT Motion](../../../examples/pnt-motion.lasair/) — `streaks`

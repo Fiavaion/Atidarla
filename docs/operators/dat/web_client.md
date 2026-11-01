@@ -37,4 +37,4 @@ All platforms.
 
 ## Examples
 
-- [DAT network](../../../examples/dat-network.atidarla/) — `client`
+- [DAT network](../../../examples/dat-network.lasair/) — `client`

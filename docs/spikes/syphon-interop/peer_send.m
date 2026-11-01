@@ -1,5 +1,5 @@
 // A plain Syphon app's server, using only Syphon.framework and Metal
-// (Atidarla, MIT OR Apache-2.0): publishes the stamped test pattern at 60
+// (Lasair, MIT OR Apache-2.0): publishes the stamped test pattern at 60
 // fps, a new seed every frame, from a Metal texture filled on the CPU.
 //
 // peer_send <name> <seconds> <width> <height> [--resize]

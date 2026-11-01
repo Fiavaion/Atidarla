@@ -37,4 +37,4 @@ All platforms.
 
 ## Examples
 
-- [VAT Playback](../../../examples/mesh-vat.atidarla/) — `ripple`, `tumble`
+- [VAT Playback](../../../examples/mesh-vat.lasair/) — `ripple`, `tumble`

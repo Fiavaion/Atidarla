@@ -1,6 +1,6 @@
-# Atidarla user manual
+# Lasair user manual
 
-Atidarla is a free, open-source real-time visual instrument for Windows and macOS (Linux on a
+Lasair is a free, open-source real-time visual instrument for Windows and macOS (Linux on a
 best-effort basis). You build pictures, sound-driven animation, 3D and AI effects by joining
 **nodes** with **wires**. You can then play them like a deck of clips, or sequence them on a
 timeline. All three ways of working change the same project.
@@ -27,7 +27,7 @@ built yourself.
 | [10. Shows and reliability](10-shows-reliability.md) | Saving, exporting a show, kiosk mode, the supervisor, the Output Governor |
 | [11. Collaboration](11-collaboration.md) | Diff, merge and Git |
 | [12. Batch Graph and the media bin](12-batch-media-bin.md) | Making many variations at once |
-| [13. Command line reference](13-command-line.md) | Every `atidarla` command |
+| [13. Command line reference](13-command-line.md) | Every `lasair` command |
 | [14. Troubleshooting and FAQ](14-troubleshooting.md) | When something does not work |
 
 ## How this manual is kept honest
@@ -37,14 +37,14 @@ built yourself.
 - The per-operator reference (every parameter, input and output) is generated from the program
   itself and lives in [`docs/operators`](../operators/README.md). The manual links to it and
   does not repeat it.
-- Atidarla is still being built. The status of each part is in
+- Lasair is still being built. The status of each part is in
   [`docs/milestones`](../milestones/) and in the repository
   [README](../../README.md). Pages of this manual that depend on an unfinished part say "not built yet".
 - Keyboard shortcuts use **Cmd** on macOS and **Ctrl** on Windows.
 
 ## Other documents worth knowing
 
-- [Learn mode](../learn.md): the in-app quests that teach Atidarla step by step.
+- [Learn mode](../learn.md): the in-app quests that teach Lasair step by step.
 - [Example projects](../../examples/README.md): open any of them to see a finished patch.
 - [Shipped Packs](../../packs/README.md): ready-made reusable effects.
-- [`PRD.md`](../../PRD.md): what Atidarla is meant to become.
+- [`PRD.md`](../../PRD.md): what Lasair is meant to become.

@@ -36,4 +36,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Motion](../../../examples/pnt-motion.atidarla/) — `squash`, `cage`
+- [PNT Motion](../../../examples/pnt-motion.lasair/) — `squash`, `cage`

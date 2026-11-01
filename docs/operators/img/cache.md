@@ -30,4 +30,4 @@ All platforms.
 
 ## Examples
 
-- [Time effects](../../../examples/time-effects.atidarla/) — `delayed`
+- [Time effects](../../../examples/time-effects.lasair/) — `delayed`

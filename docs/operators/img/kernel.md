@@ -34,4 +34,4 @@ All platforms.
 
 ## Examples
 
-- [Kernel Pixels](../../../examples/kernel-pixels.atidarla/) — `pattern`
+- [Kernel Pixels](../../../examples/kernel-pixels.lasair/) — `pattern`

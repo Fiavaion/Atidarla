@@ -29,4 +29,4 @@ All platforms.
 
 ## Examples
 
-- [Gaussian Splats](../../../examples/splats.atidarla/) — `splats_ply`, `splats_spz`, `splats_sog`
+- [Gaussian Splats](../../../examples/splats.lasair/) — `splats_ply`, `splats_spz`, `splats_sog`

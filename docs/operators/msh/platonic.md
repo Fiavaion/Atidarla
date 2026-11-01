@@ -30,6 +30,6 @@ All platforms.
 
 ## Examples
 
-- [Render Solids](../../../examples/render-solids.atidarla/) — `dodeca`, `ico`
-- [Render Textures](../../../examples/render-textures.atidarla/) — `square`, `dodeca`
-- [Render Wire and Toon](../../../examples/render-wire-toon.atidarla/) — `ico`, `dodeca`
+- [Render Solids](../../../examples/render-solids.lasair/) — `dodeca`, `ico`
+- [Render Textures](../../../examples/render-textures.lasair/) — `square`, `dodeca`
+- [Render Wire and Toon](../../../examples/render-wire-toon.lasair/) — `ico`, `dodeca`

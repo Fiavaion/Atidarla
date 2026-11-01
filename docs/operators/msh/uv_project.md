@@ -32,5 +32,5 @@ All platforms.
 
 ## Examples
 
-- [Mesh Boolean to glTF](../../../examples/mesh-boolean-gltf.atidarla/) — `wrap`
-- [Mesh Files](../../../examples/mesh-files.atidarla/) — `wrap`
+- [Mesh Boolean to glTF](../../../examples/mesh-boolean-gltf.lasair/) — `wrap`
+- [Mesh Files](../../../examples/mesh-files.lasair/) — `wrap`

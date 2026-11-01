@@ -29,4 +29,4 @@ All platforms.
 
 ## Examples
 
-- [Beat switcher](../../../examples/beat-switcher.atidarla/) — `beats`
+- [Beat switcher](../../../examples/beat-switcher.lasair/) — `beats`

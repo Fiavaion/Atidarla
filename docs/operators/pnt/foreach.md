@@ -31,4 +31,4 @@ All platforms.
 
 ## Examples
 
-- [PNT For-Each](../../../examples/pnt-foreach.atidarla/) — `copies`, `per_band`
+- [PNT For-Each](../../../examples/pnt-foreach.lasair/) — `copies`, `per_band`

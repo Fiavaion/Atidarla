@@ -32,9 +32,9 @@ All platforms.
 
 ## Examples
 
-- [Mesh Boolean to glTF](../../../examples/mesh-boolean-gltf.atidarla/) — `tilt`
-- [Mesh Construction](../../../examples/mesh-construction.atidarla/) — `raise`, `left`, `middle`, `right`
-- [Mesh Files](../../../examples/mesh-files.atidarla/) — `place_vase`, `place_loft`
-- [Mesh Modelling](../../../examples/mesh-modelling.atidarla/) — `tilt`
-- [Mesh Primitives](../../../examples/mesh-primitives.atidarla/) — `pulse`
-- [VAT Playback](../../../examples/mesh-vat.atidarla/) — `lower`, `raise`
+- [Mesh Boolean to glTF](../../../examples/mesh-boolean-gltf.lasair/) — `tilt`
+- [Mesh Construction](../../../examples/mesh-construction.lasair/) — `raise`, `left`, `middle`, `right`
+- [Mesh Files](../../../examples/mesh-files.lasair/) — `place_vase`, `place_loft`
+- [Mesh Modelling](../../../examples/mesh-modelling.lasair/) — `tilt`
+- [Mesh Primitives](../../../examples/mesh-primitives.lasair/) — `pulse`
+- [VAT Playback](../../../examples/mesh-vat.lasair/) — `lower`, `raise`

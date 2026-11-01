@@ -33,4 +33,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Fountain](../../../examples/pnt-fountain.atidarla/) — `floor`
+- [PNT Fountain](../../../examples/pnt-fountain.lasair/) — `floor`

@@ -31,4 +31,4 @@ All platforms.
 
 ## Examples
 
-- [Mesh Shaping](../../../examples/mesh-shaping.atidarla/) — `cut`, `half`
+- [Mesh Shaping](../../../examples/mesh-shaping.lasair/) — `cut`, `half`

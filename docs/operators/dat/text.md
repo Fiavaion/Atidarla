@@ -26,7 +26,7 @@ All platforms.
 
 ## Examples
 
-- [DAT network](../../../examples/dat-network.atidarla/) — `state`
-- [DAT script](../../../examples/dat-script.atidarla/) — `lyrics`
-- [DAT serial](../../../examples/dat-serial.atidarla/) — `command`
-- [DAT tables](../../../examples/dat-tables.atidarla/) — `csv`, `note`
+- [DAT network](../../../examples/dat-network.lasair/) — `state`
+- [DAT script](../../../examples/dat-script.lasair/) — `lyrics`
+- [DAT serial](../../../examples/dat-serial.lasair/) — `command`
+- [DAT tables](../../../examples/dat-tables.lasair/) — `csv`, `note`

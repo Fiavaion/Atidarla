@@ -30,4 +30,4 @@ All platforms.
 
 ## Examples
 
-- [Mesh Primitives](../../../examples/mesh-primitives.atidarla/) — `ground`
+- [Mesh Primitives](../../../examples/mesh-primitives.lasair/) — `ground`

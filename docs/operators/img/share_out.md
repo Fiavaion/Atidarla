@@ -22,7 +22,7 @@ Sink: requested every frame even when nothing downstream is viewed, because it h
 
 | Name | Label | Type | Default | Range / options | Description |
 |---|---|---|---|---|---|
-| `name` | Name | string | `"Atidarla"` |  | Sender name other applications see: up to 255 bytes; on Windows at least 1 byte and no backslash. |
+| `name` | Name | string | `"Lasair"` |  | Sender name other applications see: up to 255 bytes; on Windows at least 1 byte and no backslash. |
 | `enabled` | Enabled | toggle | `true` |  | Publish the input; off removes the sender. |
 
 ## Platforms
@@ -31,4 +31,4 @@ Sink: requested every frame even when nothing downstream is viewed, because it h
 
 ## Examples
 
-- [Texture sharing](../../../examples/texture-sharing.atidarla/) — `share_out1`
+- [Texture sharing](../../../examples/texture-sharing.lasair/) — `share_out1`

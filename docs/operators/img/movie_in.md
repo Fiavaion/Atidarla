@@ -33,5 +33,5 @@ All platforms.
 
 ## Examples
 
-- [Keying](../../../examples/keying.atidarla/) — `footage`
-- [Time effects](../../../examples/time-effects.atidarla/) — `clip`
+- [Keying](../../../examples/keying.lasair/) — `footage`
+- [Time effects](../../../examples/time-effects.lasair/) — `clip`

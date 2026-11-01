@@ -31,4 +31,4 @@ All platforms.
 
 ## Examples
 
-- [Mesh Modelling](../../../examples/mesh-modelling.atidarla/) — `halve`
+- [Mesh Modelling](../../../examples/mesh-modelling.lasair/) — `halve`

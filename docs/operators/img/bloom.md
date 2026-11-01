@@ -30,11 +30,11 @@ All platforms.
 
 ## Examples
 
-- [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `glow`
-- [Particles](../../../examples/particles.atidarla/) — `glow`
-- [PNT Constellation](../../../examples/pnt-constellation.atidarla/) — `glow`
-- [PNT For-Each](../../../examples/pnt-foreach.atidarla/) — `glow`
-- [PNT Fountain](../../../examples/pnt-fountain.atidarla/) — `glow`
-- [PNT Solver](../../../examples/pnt-solver.atidarla/) — `glow`
-- [Render Solids](../../../examples/render-solids.atidarla/) — `bloom`
-- [Soak show](../../../examples/soak-show.atidarla/) — `bloom`
+- [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.lasair/) — `glow`
+- [Particles](../../../examples/particles.lasair/) — `glow`
+- [PNT Constellation](../../../examples/pnt-constellation.lasair/) — `glow`
+- [PNT For-Each](../../../examples/pnt-foreach.lasair/) — `glow`
+- [PNT Fountain](../../../examples/pnt-fountain.lasair/) — `glow`
+- [PNT Solver](../../../examples/pnt-solver.lasair/) — `glow`
+- [Render Solids](../../../examples/render-solids.lasair/) — `bloom`
+- [Soak show](../../../examples/soak-show.lasair/) — `bloom`

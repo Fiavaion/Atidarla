@@ -29,6 +29,6 @@ All platforms.
 
 ## Examples
 
-- [Mesh Boolean to glTF](../../../examples/mesh-boolean-gltf.atidarla/) — `save`
-- [Mesh Files](../../../examples/mesh-files.atidarla/) — `save`
-- [Mesh Primitives](../../../examples/mesh-primitives.atidarla/) — `export`
+- [Mesh Boolean to glTF](../../../examples/mesh-boolean-gltf.lasair/) — `save`
+- [Mesh Files](../../../examples/mesh-files.lasair/) — `save`
+- [Mesh Primitives](../../../examples/mesh-primitives.lasair/) — `export`

@@ -31,4 +31,4 @@ All platforms.
 
 ## Examples
 
-- [DAT files](../../../examples/dat-files.atidarla/) — `cues`, `show`
+- [DAT files](../../../examples/dat-files.lasair/) — `cues`, `show`

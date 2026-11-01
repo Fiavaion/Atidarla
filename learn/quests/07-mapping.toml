@@ -16,7 +16,7 @@ title = "Learn a control"
 text = '''
 In the Parameters panel, **right-click the name Brightness** and choose **Learn MIDI/OSC**. The Mappings window opens and waits. Now move a knob, fader or pad on your MIDI controller, or send an OSC message. The first control that arrives becomes the mapping.
 
-**No controller?** Send an OSC message from a terminal while Atidarla is waiting (it listens on UDP port 9000):
+**No controller?** Send an OSC message from a terminal while Lasair is waiting (it listens on UDP port 9000):
 
 ```
 python3 -c "import socket,struct;s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.sendto(b'/fader/1\0\0\0\0,f\0\0'+struct.pack('>f',0.5),('127.0.0.1',9000))"

@@ -25,7 +25,7 @@ None.
 | `columns` | Columns | int | `160` | 1 – 4096 | points: points across the depth image (at most one per pixel); the rows follow its aspect ratio. |
 | `near` | Near | float | `0.5` | ≥ 0 | Depth closer than this (metres) is invalid. |
 | `far` | Far | float | `4.0` | ≥ 0 | Depth farther than this (metres) is invalid. |
-| `recording` | Recording | path | `""` |  | recording: a point-cache sequence with `$F` for the frame number (for example `capture/depth.$F4.atdpc`, made with `atidarla points convert`). |
+| `recording` | Recording | path | `""` |  | recording: a point-cache sequence with `$F` for the frame number (for example `capture/depth.$F4.lsrpc`, made with `lasair points convert`). |
 | `recording_fps` | Recording FPS | float | `30.0` | ≥ 0.1 | recording: frames per second of the recording. |
 | `first` | First Frame | int | `1` |  | recording: the first file's frame number. |
 | `length` | Length | int | `300` | ≥ 1 | recording: frames in the recording; playback loops over them. |
@@ -38,4 +38,4 @@ None.
 
 ## Examples
 
-- [PNT Capture](../../../examples/pnt-capture.atidarla/) — `sensor`, `joints`
+- [PNT Capture](../../../examples/pnt-capture.lasair/) — `sensor`, `joints`

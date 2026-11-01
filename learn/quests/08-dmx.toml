@@ -7,7 +7,7 @@ prerequisites = ["first-patch"]
 [[step]]
 title = "A signal to send"
 text = '''
-DMX is how lighting desks talk to fixtures: up to 512 slots per universe, each a number from 0 to 255. Atidarla sends it over Ethernet as Art-Net or sACN. Start with something that moves: add an **LFO** (SIG).
+DMX is how lighting desks talk to fixtures: up to 512 slots per universe, each a number from 0 to 255. Lasair sends it over Ethernet as Art-Net or sACN. Start with something that moves: add an **LFO** (SIG).
 '''
 check = { kind = "node_exists", type = "sig.lfo" }
 
@@ -37,7 +37,7 @@ title = "Save the project"
 text = '''
 Next you will write a **patch file** that places LED pixels on the picture. A patch lives in the project folder, so save first: **File, Save As...** and choose a name. This step ticks when the project folder exists.
 '''
-hint = "The Save As window creates a folder with a .atidarla ending. Everything the project needs goes inside it."
+hint = "The Save As window creates a folder with a .lasair ending. Everything the project needs goes inside it."
 check = { kind = "file_exists", path = "project.toml" }
 
 [[step]]

@@ -30,6 +30,6 @@ All platforms.
 
 ## Examples
 
-- [DAT files](../../../examples/dat-files.atidarla/) — `acts`
-- [DAT network](../../../examples/dat-network.atidarla/) — `cue`
-- [DAT tables](../../../examples/dat-tables.atidarla/) — `parsed`
+- [DAT files](../../../examples/dat-files.lasair/) — `acts`
+- [DAT network](../../../examples/dat-network.lasair/) — `cue`
+- [DAT tables](../../../examples/dat-tables.lasair/) — `parsed`

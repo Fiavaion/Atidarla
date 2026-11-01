@@ -35,6 +35,6 @@ All platforms.
 
 ## Examples
 
-- [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `ripple`
-- [PNT For-Each](../../../examples/pnt-foreach.atidarla/) — `ripple`
-- [PNT Outputs](../../../examples/pnt-outputs.atidarla/) — `ripple`
+- [PNT Deformers](../../../examples/pnt-deformers.lasair/) — `ripple`
+- [PNT For-Each](../../../examples/pnt-foreach.lasair/) — `ripple`
+- [PNT Outputs](../../../examples/pnt-outputs.lasair/) — `ripple`

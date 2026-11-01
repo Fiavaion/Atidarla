@@ -9,7 +9,7 @@
 4. Cross-process: does the NT handle survive `DuplicateHandle` into the AI Host process, and is the cost per frame flat?
 
 ## Procedure
-1. `atd-interop` example `cuda_export`: create a 512² RGBA8 storage texture through `wgpu-hal` DX12 with `D3D12_HEAP_FLAG_SHARED` and export the handle.
+1. `lsr-interop` example `cuda_export`: create a 512² RGBA8 storage texture through `wgpu-hal` DX12 with `D3D12_HEAP_FLAG_SHARED` and export the handle.
 2. In `ai-host`, a test script that imports it via `cuda-python`, wraps it with DLPack, runs `x = 1 - x`, and signals the fence.
 3. Compare with spike (d)'s shared-memory path at 512² and 1024².
 

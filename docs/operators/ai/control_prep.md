@@ -31,4 +31,4 @@ All platforms.
 
 ## Examples
 
-- [Live AI](../../../examples/ai-live.atidarla/) — `edges`
+- [Live AI](../../../examples/ai-live.lasair/) — `edges`

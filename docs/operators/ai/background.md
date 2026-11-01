@@ -37,4 +37,4 @@ All platforms.
 
 ## Examples
 
-- [Live AI](../../../examples/ai-live.atidarla/) — `background1`
+- [Live AI](../../../examples/ai-live.lasair/) — `background1`

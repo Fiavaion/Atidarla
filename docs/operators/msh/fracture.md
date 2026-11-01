@@ -31,4 +31,4 @@ All platforms.
 
 ## Examples
 
-- [Mesh Construction](../../../examples/mesh-construction.atidarla/) — `pieces`
+- [Mesh Construction](../../../examples/mesh-construction.lasair/) — `pieces`

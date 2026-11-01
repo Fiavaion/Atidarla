@@ -33,4 +33,4 @@ All platforms.
 
 ## Examples
 
-- [Signal scope](../../../examples/signal-scope.atidarla/) — `hits`
+- [Signal scope](../../../examples/signal-scope.lasair/) — `hits`

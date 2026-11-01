@@ -11,9 +11,9 @@
 
 | You need | Why | Notes |
 |---|---|---|
-| A computer with a recent GPU | Atidarla draws on the GPU | Windows (DirectX 12) or macOS (Metal). Linux needs a Vulkan driver and is best-effort. |
+| A computer with a recent GPU | Lasair draws on the GPU | Windows (DirectX 12) or macOS (Metal). Linux needs a Vulkan driver and is best-effort. |
 | **Rust** (through `rustup`) | To build the app | The exact version is pinned in `rust-toolchain.toml`; `rustup` installs it for you the first time you build. |
-| **Python 3.13** (3.11 or newer works) | Atidarla embeds Python for expressions, Python operators and the Textport | Only to build from source (the installers bundle their own). Must be on your `PATH`. |
+| **Python 3.13** (3.11 or newer works) | Lasair embeds Python for expressions, Python operators and the Textport | Only to build from source (the installers bundle their own). Must be on your `PATH`. |
 | **uv** | Only for AI features | A Python package manager. See [uv](https://docs.astral.sh/uv/). |
 | **Ollama** | Only for the Assistant and LLM Chat, if you want a local language model | Optional. See chapter 9. |
 
@@ -22,7 +22,7 @@ Sources: [`README.md`](../../README.md) (Quick start) and [`docs/HANDOFF.md`](..
 ## macOS
 
 1. Install Xcode from the App Store, open it once, and let it finish installing its components.
-   Atidarla builds its Syphon picture-sharing library from source, which needs Xcode with the
+   Lasair builds its Syphon picture-sharing library from source, which needs Xcode with the
    Metal toolchain.
 2. Install the tools with Homebrew:
 
@@ -40,11 +40,11 @@ Sources: [`README.md`](../../README.md) (Quick start) and [`docs/HANDOFF.md`](..
 
    Add that line to your shell start-up file (for example `~/.zshrc`) so you do not have to type
    it again.
-4. Get the Atidarla source folder (from your lecturer, or by cloning the repository), open a
+4. Get the Lasair source folder (from your lecturer, or by cloning the repository), open a
    terminal in it, and run:
 
    ```sh
-   cargo run -p atd-app
+   cargo run -p lsr-app
    ```
 
 The first build takes several minutes. Later starts are quick.
@@ -54,10 +54,10 @@ The first build takes several minutes. Later starts are quick.
 1. Install Rust with [rustup](https://rustup.rs). Its installer tells you if the Microsoft C++
    build tools are missing and how to add them.
 2. Install Python 3.13 and tick **Add python.exe to PATH** in its installer.
-3. Get the Atidarla source folder, open a terminal in it, and run:
+3. Get the Lasair source folder, open a terminal in it, and run:
 
    ```sh
-   cargo run -p atd-app
+   cargo run -p lsr-app
    ```
 
 On Windows the app draws with DirectX 12 by default.
@@ -65,16 +65,16 @@ On Windows the app draws with DirectX 12 by default.
 ## Starting the app
 
 ```sh
-cargo run -p atd-app                                  # opens the built-in demo patch
-cargo run -p atd-app -- examples/stage-deck.atidarla  # opens a project folder
-cargo run --release -p atd-app                        # same, built for speed
+cargo run -p lsr-app                                  # opens the built-in demo patch
+cargo run -p lsr-app -- examples/stage-deck.lasair  # opens a project folder
+cargo run --release -p lsr-app                        # same, built for speed
 ```
 
 The demo patch is noise, a kaleidoscope and a level node, animated by two oscillators. You
 should see a moving picture in the **Viewer** straight away.
 
-The built program is called `atidarla-app`. Command-line tools are in a second program called
-`atidarla` (chapter 13).
+The built program is called `lasair-app`. Command-line tools are in a second program called
+`lasair` (chapter 13).
 
 ## What you see
 
@@ -97,16 +97,16 @@ dragged to other places.
 
 **Video other than HAP.** Movie In plays HAP movies and PNG/JPEG stills in every build. Other
 video (H.264, HEVC, ProRes, VP9 and more) needs a build with FFmpeg:
-`cargo run -p atd-app --features ffmpeg`. FFmpeg development files must be installed (the
+`cargo run -p lsr-app --features ffmpeg`. FFmpeg development files must be installed (the
 Homebrew `ffmpeg` and `pkgconf` above provide them on macOS). Bundling FFmpeg's libraries with
 the app is not done yet.
 
-**Shader packs.** To use ISF shaders, set `ATIDARLA_ISF_PATH` to one or more folders of `.fs`
+**Shader packs.** To use ISF shaders, set `LASAIR_ISF_PATH` to one or more folders of `.fs`
 files (`;` between folders on Windows, `:` elsewhere). Each shader that translates appears as an
 `img.isf_*` operator.
 
 **AI features.** AI nodes run in a separate program, the AI Host. The installers ship it and the
-app starts it when needed; add the heavier adapters with `atidarla ai-host install <extra>`
+app starts it when needed; add the heavier adapters with `lasair ai-host install <extra>`
 ([chapter 8](08-ai.md)). From a source checkout, set it up once:
 
 ```sh
@@ -116,7 +116,7 @@ uv sync --extra diffusion --extra vision   # picture diffusion and vision models
 uv sync --extra stt                        # speech to text
 ```
 
-Model files are not installed with Atidarla. You download them later, with a licence check
+Model files are not installed with Lasair. You download them later, with a licence check
 (chapter 8).
 
 **Linux.** The app needs a Vulkan driver. On Debian or Ubuntu:
@@ -127,11 +127,11 @@ Model files are not installed with Atidarla. You download them later, with a lic
 Run the project check on an example. It loads the project and cooks every node on the GPU:
 
 ```sh
-cargo run -p atd-cli -- check --gpu examples/kaleidoscope-tunnel.atidarla
+cargo run -p lsr-cli -- check --gpu examples/kaleidoscope-tunnel.lasair
 ```
 
 A line starting `ok` means the project loaded and every node cooked, for example
-`ok    examples/kaleidoscope-tunnel.atidarla  10 nodes, 60 frames cooked in 1.0 s`. Problems are covered in
+`ok    examples/kaleidoscope-tunnel.lasair  10 nodes, 60 frames cooked in 1.0 s`. Problems are covered in
 [chapter 14](14-troubleshooting.md).
 
 Next: [your first patch](02-first-patch.md).

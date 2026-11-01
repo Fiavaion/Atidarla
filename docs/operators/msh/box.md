@@ -28,7 +28,7 @@ All platforms.
 
 ## Examples
 
-- [Mesh Boolean to glTF](../../../examples/mesh-boolean-gltf.atidarla/) — `cutter`
-- [Mesh Modelling](../../../examples/mesh-modelling.atidarla/) — `block`, `cutter`
-- [Mesh Primitives](../../../examples/mesh-primitives.atidarla/) — `box`
-- [Mesh Shaping](../../../examples/mesh-shaping.atidarla/) — `block`
+- [Mesh Boolean to glTF](../../../examples/mesh-boolean-gltf.lasair/) — `cutter`
+- [Mesh Modelling](../../../examples/mesh-modelling.lasair/) — `block`, `cutter`
+- [Mesh Primitives](../../../examples/mesh-primitives.lasair/) — `box`
+- [Mesh Shaping](../../../examples/mesh-shaping.lasair/) — `block`

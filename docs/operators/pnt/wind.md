@@ -33,4 +33,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Fountain](../../../examples/pnt-fountain.atidarla/) — `breeze`
+- [PNT Fountain](../../../examples/pnt-fountain.lasair/) — `breeze`

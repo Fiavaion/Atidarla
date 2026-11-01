@@ -1,8 +1,8 @@
 # ComfyUI workflows as operators
 
-> FR-A10, D9, M4 AC6. Code: `crates/atd-ai/src/comfy.rs` (protocol, parameter rules),
-> `crates/atd-ops-ai/src/comfy.rs` (operator, project files, import). Example:
-> [`examples/comfy-invert.atidarla`](../examples/comfy-invert.atidarla/).
+> FR-A10, D9, M4 AC6. Code: `crates/lsr-ai/src/comfy.rs` (protocol, parameter rules),
+> `crates/lsr-ops-ai/src/comfy.rs` (operator, project files, import). Example:
+> [`examples/comfy-invert.lasair`](../examples/comfy-invert.lasair/).
 
 A ComfyUI workflow saved in **API format** becomes an operator of the project. Its widget
 inputs (seeds, steps, prompts, menus) become the operator's parameters; its `LoadImage`
@@ -10,8 +10,8 @@ nodes become IMG inputs; the image its first `SaveImage` or `PreviewImage` node 
 becomes the IMG output. The node runs the workflow on a ComfyUI server and shows the
 result.
 
-**Atidarla does not include, install or start ComfyUI.** ComfyUI is GPL-3.0 software, so
-Atidarla only talks to a server you run yourself, over its HTTP and WebSocket API
+**Lasair does not include, install or start ComfyUI.** ComfyUI is GPL-3.0 software, so
+Lasair only talks to a server you run yourself, over its HTTP and WebSocket API
 (CLAUDE.md rule 3, PRD A6). The server can be on this machine or on the LAN. In Sovereign
 mode (on by default) a server on the internet is refused before anything is sent.
 
@@ -22,7 +22,7 @@ In ComfyUI, build the workflow and save it with **Workflow → Export (API)**. (
 says so.) Then, with the ComfyUI server running:
 
 ```sh
-atidarla comfy import my-workflow.json --project show.atidarla [--server 192.168.1.20:8188] [--name grade]
+lasair comfy import my-workflow.json --project show.lasair [--server 192.168.1.20:8188] [--name grade]
 ```
 
 or, in the app, **File → Import ComfyUI Workflow…** (it reads from `127.0.0.1:8188`; use the
@@ -61,21 +61,21 @@ wrong: `server not reachable at …`, the server's validation errors per node
 running (`node 3 (KSampler) failed: …`), or Sovereign mode's refusal. While it runs and
 after an error, the node keeps showing its last result (black before the first). A problem
 with the server is not a node error, so a project without its server still opens, cooks and
-passes `atidarla check --gpu`.
+passes `lasair check --gpu`.
 
 ### Which inputs become parameters
 
-The exposure rule (`atd_ai::comfy::derive`):
+The exposure rule (`lsr_ai::comfy::derive`):
 
 1. Every widget input of every node becomes a parameter: inputs whose value in the workflow
    is a value, not a link (`["4", 0]`, a wire from node 4's output 0). Link-only inputs
    (`MODEL`, `CLIP`, `LATENT`, …) never are. `LoadImage`'s `image` is not a parameter: it
    is fed from the IMG input.
-2. **Selecting:** if any node's title starts with `atd:` (set the title in ComfyUI, e.g.
-   `atd: Sampler`), only the inputs of nodes titled that way are exposed. Use this to show
+2. **Selecting:** if any node's title starts with `lsr:` (set the title in ComfyUI, e.g.
+   `lsr: Sampler`), only the inputs of nodes titled that way are exposed. Use this to show
    the five controls that matter out of a workflow with fifty.
 3. **Names:** `<node title or class>_<input>` as a lower-case identifier: `KSampler`'s
-   `seed` is `ksampler_seed`; a node titled `atd: Sampler` gives `sampler_seed`. When two
+   `seed` is `ksampler_seed`; a node titled `lsr: Sampler` gives `sampler_seed`. When two
    nodes would give the same name (two `CLIPTextEncode` nodes titled `Prompt`), each gets
    its node ID: `prompt_text_6`, `prompt_text_7`. A name that is one of the operator's own
    (`server`, `run`, `auto_run`) also gets its node ID.
@@ -95,11 +95,11 @@ The exposure rule (`atd_ai::comfy::derive`):
 - **Inputs:** each `LoadImage` node, by node ID, is an IMG input `in0`, `in1`, … When a
   run starts, the node copies the connected input images to the CPU without waiting for
   the GPU (a frame or two later), encodes them as PNG on its worker thread and uploads
-  them (`POST /upload/image`, to the server's `input/atidarla/` folder, named by a hash
+  them (`POST /upload/image`, to the server's `input/lasair/` folder, named by a hash
   of the pixels), and the run uses the uploaded file. ComfyUI's `LoadImage` drops alpha.
   An input left unconnected keeps the workflow's own `image` value (a file on the server).
 - **Output:** the first image of the first `SaveImage` or `PreviewImage` node (one titled
-  `atd:` first) is fetched (`GET /view`), decoded on the worker (PNG or JPEG) and uploaded
+  `lsr:` first) is fetched (`GET /view`), decoded on the worker (PNG or JPEG) and uploaded
   to the GPU. The output takes the result's size from the frame after it arrives.
 
 ### Never blocking
@@ -108,12 +108,12 @@ Live, everything that waits runs on the node's worker thread (rule 1): connectin
 uploading, the run, the download and decoding. The cook records the input copies,
 collects what the worker sent and draws the image it holds. While a prompt is in flight
 the node cooks every frame to collect progress, allocating no more than a WGSL node's
-frame does (rule 2, `crates/atd-ops-ai/tests/comfy_alloc.rs`). Closing the project stops
+frame does (rule 2, `crates/lsr-ops-ai/tests/comfy_alloc.rs`). Closing the project stops
 the worker after the current run notices; the server may finish that prompt on its own.
 
 ### Offline render
 
-`atidarla render` waits for the server (class **Waits** in [`render.md`](render.md)): a
+`lasair render` waits for the server (class **Waits** in [`render.md`](render.md)): a
 frame whose parameters or input images changed reads its inputs back, runs the workflow
 and waits for the result; other frames reuse the last result. A frame whose run fails
 (no server, a refused workflow) fails the render with the message. Whether two renders
@@ -125,13 +125,13 @@ match depends on the workflow: a fixed seed on the same server gives the same im
 | Call | When |
 |---|---|
 | `GET /object_info` | Import only. |
-| `POST /upload/image` (multipart: `image`, `type=input`, `subfolder=atidarla`, `overwrite=true`) | Each run with a connected input. |
+| `POST /upload/image` (multipart: `image`, `type=input`, `subfolder=lasair`, `overwrite=true`) | Each run with a connected input. |
 | WebSocket `/ws?clientId=…` | Each run, opened before the prompt is queued. Events: `execution_start`, `execution_cached`, `executing` (node `null` = done), `progress` and `progress_state` (both understood), `executed`, `execution_success`, `execution_error`, `execution_interrupted`; binary preview frames are ignored. |
 | `POST /prompt` `{prompt, client_id}` | Each run. A 400 lists `node_errors`, shown per node. |
 | `GET /history/{prompt_id}` | Polled about once a second as well as the events, so a missed event or no WebSocket still finishes the run; read at the end for the output's file name. |
 | `GET /view?filename=&subfolder=&type=` | The result. |
 
-Every connection goes through `atd_ai::egress`: the server's name is resolved once, the
+Every connection goes through `lsr_ai::egress`: the server's name is resolved once, the
 gate refuses internet addresses in Sovereign mode, and the HTTP and WebSocket connections
 go only to the addresses it returned (the `Host` header keeps the name you typed). There
 is no TLS.

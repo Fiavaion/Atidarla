@@ -28,5 +28,5 @@ All platforms.
 
 ## Examples
 
-- [Mesh Boolean to glTF](../../../examples/mesh-boolean-gltf.atidarla/) — `weld`
-- [Mesh Modelling](../../../examples/mesh-modelling.atidarla/) — `weld`
+- [Mesh Boolean to glTF](../../../examples/mesh-boolean-gltf.lasair/) — `weld`
+- [Mesh Modelling](../../../examples/mesh-modelling.lasair/) — `weld`

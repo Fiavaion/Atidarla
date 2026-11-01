@@ -40,7 +40,7 @@ compares them on a corpus of expressions, errors included).
 | `and`, `or`, `not`, `a if c else b` | Logic; `and`/`or` give back an operand, as in Python |
 | `abs min max round int float bool pow` | Built-ins; `round` rounds halves to even, like Python |
 | `sqrt exp log log2 log10 sin cos tan asin acos atan atan2 hypot degrees radians floor ceil trunc` | Maths (`log(x, base)` too) |
-| `clamp(x, low, high)`, `lerp(a, b, t)` | Atidarla additions (also defined for Python) |
+| `clamp(x, low, high)`, `lerp(a, b, t)` | Lasair additions (also defined for Python) |
 | `time`, `frame` | Seconds and frames since start. The node then cooks every frame |
 | `me.digits` | The number at the end of the node's name (`level3` → 3) |
 | `op('name').par.param`, `op('name').par.param[1]` | Another node's parameter, or one component of a vector or colour |
@@ -134,7 +134,7 @@ me.name.upper().count('L')
 
 ## Examples
 
-- [`kaleidoscope-tunnel`](../examples/kaleidoscope-tunnel.atidarla/): a native expression on Segments.
-- [`live-control`](../examples/live-control.atidarla/): a Python expression on Contrast.
-- [`dat-tables`](../examples/dat-tables.atidarla/): `swatch`'s colour reads a row of the `looks`
+- [`kaleidoscope-tunnel`](../examples/kaleidoscope-tunnel.lasair/): a native expression on Segments.
+- [`live-control`](../examples/live-control.lasair/): a Python expression on Contrast.
+- [`dat-tables`](../examples/dat-tables.lasair/): `swatch`'s colour reads a row of the `looks`
   table each second.

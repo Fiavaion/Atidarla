@@ -33,4 +33,4 @@ All platforms.
 
 ## Examples
 
-- [Beat switcher](../../../examples/beat-switcher.atidarla/) — `kick`
+- [Beat switcher](../../../examples/beat-switcher.lasair/) — `kick`

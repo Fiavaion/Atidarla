@@ -1,4 +1,4 @@
-# Show export (`atidarla export-show`, FR-S9)
+# Show export (`lasair export-show`, FR-S9)
 
 A show bundle is a project folder that carries everything it plays: every file its nodes
 read, wherever it lived, copied inside it with the parameters pointing there by relative
@@ -8,11 +8,11 @@ needs fixing (M3 AC2).
 ## Usage
 
 ```sh
-atidarla export-show shows/opening.atidarla dist/ --zip
-# dist/opening.atidarla/      the bundle (a project folder)
-# dist/opening.atidarla.zip   the same, zipped, if --zip
+lasair export-show shows/opening.lasair dist/ --zip
+# dist/opening.lasair/      the bundle (a project folder)
+# dist/opening.lasair.zip   the same, zipped, if --zip
 
-atidarla verify-show dist/opening.atidarla --gpu     # on the receiving machine
+lasair verify-show dist/opening.lasair --gpu     # on the receiving machine
 ```
 
 | Option | Meaning |
@@ -24,7 +24,7 @@ atidarla verify-show dist/opening.atidarla --gpu     # on the receiving machine
 
 ## What export does
 
-1. Loads and validates the project (as `atidarla check`): networks, Packs, shaders, Python
+1. Loads and validates the project (as `lasair check`): networks, Packs, shaders, Python
    operator declarations.
 2. Finds every **path parameter** set on a node, in every network and inside every Pack the
    project holds: Movie In, Audio File In, WGSL and Compute files, Kernel files, Text fonts,
@@ -59,7 +59,7 @@ Text, deterministic (sorted, no timestamps), at the bundle's root:
 ```toml
 format = 1
 name = "Audio-reactive feedback"
-atidarla = "0.0.1"
+lasair = "0.0.1"
 exported_on = "macos-aarch64"
 
 [[file]]                       # every file in the bundle, sorted
@@ -81,14 +81,14 @@ required = []                  # the model manifest, filled from M4
 ```
 
 `[[node]]` tells the receiving machine in advance what will not run there and what stands
-in for it; `atidarla check` and the app report the same when the bundle is opened (node
+in for it; `lasair check` and the app report the same when the bundle is opened (node
 "not available on this platform", with the fallback's explanation). `[models]` is a
 placeholder: from M4, AI nodes list the models they need (name, source, licence), and the
 model manager fetches them on open. **Model weights are never put in a bundle** (rule 4).
 
 ## `verify-show`
 
-`atidarla verify-show <bundle> [--gpu]` checks a bundle where it is, as the receiving
+`lasair verify-show <bundle> [--gpu]` checks a bundle where it is, as the receiving
 machine needs it:
 
 - every path parameter is relative, uses `/`, has no `..` or drive letter, and names a file
@@ -97,7 +97,7 @@ machine needs it:
   a case-sensitive one);
 - every file is listed in `bundle.toml` with a matching SHA-256, and every listed file is
   there (a copy that lost or changed a file is caught);
-- `atidarla check` passes, with `--gpu` cooking every node for 30 frames; platform-flagged
+- `lasair check` passes, with `--gpu` cooking every node for 30 frames; platform-flagged
   nodes are reported, not failed.
 
 ## Not covered
@@ -112,17 +112,17 @@ machine needs it:
 
 ## Windows → macOS check (M3 AC2)
 
-CI-portable tests (`cargo test -p atd-cli export`) export a project whose nodes name files
+CI-portable tests (`cargo test -p lsr-cli export`) export a project whose nodes name files
 by absolute path, move the bundle elsewhere, delete the originals and verify it, and check
 that tampering is caught. The cross-OS run needs two machines, or CI with an artifact
 hand-over:
 
-1. On the Windows PC: `atidarla export-show <project> D:\dist --zip`.
+1. On the Windows PC: `lasair export-show <project> D:\dist --zip`.
 2. Copy `D:\dist\<project>.zip` to the Mac (USB, network share, cloud drive) and unzip it.
-3. On the Mac: `atidarla verify-show <project folder> --gpu`, then open it in the app
-   (`cargo run -p atd-app -- <project folder>`) and play it. Nodes flagged for Windows only
+3. On the Mac: `lasair verify-show <project folder> --gpu`, then open it in the app
+   (`cargo run -p lsr-app -- <project folder>`) and play it. Nodes flagged for Windows only
    are listed by `verify-show` with their substitutes.
-4. Optional, for byte-level parity of a stateless project: `atidarla render` the same range
+4. Optional, for byte-level parity of a stateless project: `lasair render` the same range
    on both machines. Frames are only promised identical on the same machine and adapter
    (`docs/render.md`), so compare by eye or with a tolerance across OSes.
 

@@ -6,9 +6,9 @@ project can be compared and merged by ID rather than by line.
 ## Diff
 
 ```sh
-atidarla diff old.atidarla new.atidarla
-atidarla diff git:HEAD~1 myshow.atidarla     # the folder at a Git revision
-atidarla diff git:main git:feature --project myshow.atidarla
+lasair diff old.lasair new.lasair
+lasair diff git:HEAD~1 myshow.lasair     # the folder at a Git revision
+lasair diff git:main git:feature --project myshow.lasair
 ```
 
 The report lists, per network, nodes added (`+`), removed (`-`) and changed (`~`):
@@ -29,8 +29,8 @@ changes.
 ## Three-way merge
 
 ```sh
-atidarla merge base.atidarla ours.atidarla theirs.atidarla --out merged.atidarla
-atidarla merge git:main~3 git:main git:feature --project myshow.atidarla --out merged.atidarla
+lasair merge base.lasair ours.lasair theirs.lasair --out merged.lasair
+lasair merge git:main~3 git:main git:feature --project myshow.lasair --out merged.lasair
 ```
 
 Every node field, parameter, input wire, comment box, network and project section is
@@ -54,7 +54,7 @@ the merge keeps **ours'** position and reports it (`auto` lines). Positions do n
 change what a patch does.
 
 Exit status: 0 clean, 1 conflicts, 2 an error. With `--out`, a clean merge is written
-in canonical form; a merge with conflicts is written with `# atidarla-conflict`
+in canonical form; a merge with conflicts is written with `# lasair-conflict`
 blocks (below) when all its conflicts are inside networks, and not at all otherwise.
 An unresolved merge never writes a normal project.
 
@@ -68,28 +68,28 @@ otherwise the result is written to the folder.
 ## Git merge driver
 
 Git's line merge sees two edits to neighbouring lines of one node as a conflict, and
-cannot tell an edit from a delete. Let Atidarla merge network files instead.
+cannot tell an edit from a delete. Let Lasair merge network files instead.
 
 `.gitattributes` in the repository:
 
 ```gitattributes
-*.atidarla/networks/*.toml merge=atidarla
-*.atidarla/packs/*/network.toml merge=atidarla
+*.lasair/networks/*.toml merge=lasair
+*.lasair/packs/*/network.toml merge=lasair
 ```
 
 Once per clone (or `--global`):
 
 ```sh
-git config merge.atidarla.name "Atidarla network merge"
-git config merge.atidarla.driver "atidarla merge-file %O %A %B %P"
+git config merge.lasair.name "Lasair network merge"
+git config merge.lasair.driver "lasair merge-file %O %A %B %P"
 ```
 
-`atidarla merge-file BASE OURS THEIRS [PATH]` writes the merged network over OURS and
+`lasair merge-file BASE OURS THEIRS [PATH]` writes the merged network over OURS and
 exits 0 when clean. With conflicts it exits 1 (Git stops the merge) and the file is
 the merge with ours at each conflict, followed by a block of comments:
 
 ```toml
-# atidarla-conflict: 1 unresolved; the network above is a placeholder (ours). ...
+# lasair-conflict: 1 unresolved; the network above is a placeholder (ours). ...
 # [[conflict]]
 # kind = "param"
 # slot = "node/1/param/scale"

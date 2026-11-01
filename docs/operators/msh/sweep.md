@@ -33,4 +33,4 @@ All platforms.
 
 ## Examples
 
-- [Scatter to Iso Surface](../../../examples/mesh-scatter-iso.atidarla/) — `frame`
+- [Scatter to Iso Surface](../../../examples/mesh-scatter-iso.lasair/) — `frame`

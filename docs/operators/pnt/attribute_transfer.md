@@ -34,4 +34,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Fields](../../../examples/pnt-fields.atidarla/) — `paint`
+- [PNT Fields](../../../examples/pnt-fields.lasair/) — `paint`

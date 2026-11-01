@@ -30,5 +30,5 @@ All platforms.
 
 ## Examples
 
-- [Signal scope](../../../examples/signal-scope.atidarla/) — `mic`
-- [Speech and chat](../../../examples/speech-chat.atidarla/) — `mic`
+- [Signal scope](../../../examples/signal-scope.lasair/) — `mic`
+- [Speech and chat](../../../examples/speech-chat.lasair/) — `mic`

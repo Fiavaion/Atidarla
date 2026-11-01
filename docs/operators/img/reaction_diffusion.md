@@ -35,4 +35,4 @@ All platforms.
 
 ## Examples
 
-- [Simulations](../../../examples/simulations.atidarla/) — `pattern`
+- [Simulations](../../../examples/simulations.lasair/) — `pattern`

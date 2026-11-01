@@ -7,8 +7,8 @@ is an ordinary node of type `cmp.pack_<name>` (CMP family, PRD §6), and its par
 promoted parameters. So wires, type checks, cycles, channel bindings, expressions, undo/redo and
 the project file work as they do for built-in operators.
 
-Code: `crates/atd-core/src/pack.rs` (model, validation, flattening, lock, update, Make Pack),
-`crates/atd-format/src/pack.rs` (files, libraries), `crates/atd-cli/src/project.rs` (`check`,
+Code: `crates/lsr-core/src/pack.rs` (model, validation, flattening, lock, update, Make Pack),
+`crates/lsr-format/src/pack.rs` (files, libraries), `crates/lsr-cli/src/project.rs` (`check`,
 `fmt`). Shipped Packs: [`packs/`](../packs/README.md).
 
 ## The model
@@ -45,7 +45,7 @@ Python), SIG and IMG mixed, offline mode. A unit would have to re-implement all 
 operator.
 
 - Flattening runs when a network is loaded or edited, never per frame. Planning and cooking the
-  flat network allocates nothing after warm-up (`crates/atd-core/tests/pack_plan_alloc.rs`), and
+  flat network allocates nothing after warm-up (`crates/lsr-core/tests/pack_plan_alloc.rs`), and
   the cook order is the same every frame and every run.
 - Nodes outside any Pack keep their IDs and names. A node inside instance `glow1` is named
   `glow1__blur1` (shown as `glow1/blur1`), with an ID derived from the instance path and its ID
@@ -123,7 +123,7 @@ Flattening the result gives the original graph back (a test checks this).
 In a project, each Pack the project uses has its own copy:
 
 ```text
-myshow.atidarla/
+myshow.lasair/
   networks/main.toml       … type = "cmp.pack_glow", params.amount = 0.5 …
   packs/glow/pack.toml     interface and metadata
   packs/glow/network.toml  the network inside (the same form as networks/*.toml)
@@ -133,7 +133,7 @@ myshow.atidarla/
 `pack.toml`:
 
 ```toml
-# Atidarla Pack. Its network is network.toml; its help page is help.md.
+# Lasair Pack. Its network is network.toml; its help page is help.md.
 format = 1
 name = "glow"
 version = "1.2.0"
@@ -163,7 +163,7 @@ Keys are written in this order; empty optional keys (`label`, `summary`, `min`, 
 `derived_from`) are left out; node references are stable IDs into `network.toml`. Changing a
 default, a range, the version or the lock is a one-line diff, and so is changing an instance's
 value in `networks/main.toml`. Hand-written equivalents are accepted (`min = 0`, `to` as one
-table) and `atidarla fmt` rewrites them canonically. Unknown keys are errors. Folders under
+table) and `lasair fmt` rewrites them canonically. Unknown keys are errors. Folders under
 `packs/` without a `pack.toml` are skipped. Saving removes the files of a Pack no longer in the
 project and keeps any other file in its folder.
 
@@ -174,13 +174,13 @@ returns the newest compatible version; a missing version is an error listing tho
 ## Command line
 
 ```sh
-atidarla check examples/*.atidarla      # projects: their Packs are checked, errors name the file
-atidarla check --gpu examples/*.atidarla   # cooks the flattened network
-atidarla check packs/*/                 # Pack folders, checked with the rest of their library
-atidarla check --gpu packs/*/           # also cooks one instance of each with nothing connected
-atidarla fmt packs/glow my.atidarla     # canonical form
-atidarla render my.atidarla --out frames --node glow1        # a Pack instance's output
-atidarla render my.atidarla --out frames --node glow1/blur1  # a node inside it
+lasair check examples/*.lasair      # projects: their Packs are checked, errors name the file
+lasair check --gpu examples/*.lasair   # cooks the flattened network
+lasair check packs/*/                 # Pack folders, checked with the rest of their library
+lasair check --gpu packs/*/           # also cooks one instance of each with nothing connected
+lasair fmt packs/glow my.lasair     # canonical form
+lasair render my.lasair --out frames --node glow1        # a Pack instance's output
+lasair render my.lasair --out frames --node glow1/blur1  # a node inside it
 ```
 
 ## In the app (so far)

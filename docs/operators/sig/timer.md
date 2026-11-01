@@ -34,6 +34,6 @@ All platforms.
 
 ## Examples
 
-- [Audio-reactive feedback](../../../examples/audio-reactive-feedback.atidarla/) — `clock1`
-- [Beat clock](../../../examples/beat-clock.atidarla/) — `cycle`
-- [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.atidarla/) — `clock`
+- [Audio-reactive feedback](../../../examples/audio-reactive-feedback.lasair/) — `clock1`
+- [Beat clock](../../../examples/beat-clock.lasair/) — `cycle`
+- [Kaleidoscope tunnel](../../../examples/kaleidoscope-tunnel.lasair/) — `clock`

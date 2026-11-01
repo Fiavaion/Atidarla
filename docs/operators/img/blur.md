@@ -28,4 +28,4 @@ All platforms.
 
 ## Examples
 
-- [Image processing](../../../examples/image-processing.atidarla/) — `soft`
+- [Image processing](../../../examples/image-processing.lasair/) — `soft`

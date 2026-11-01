@@ -11,12 +11,12 @@ Proposed; questions are at the end.
 
 | Item | Where |
 |---|---|
-| **CPU mesh model**: indexed polygons and polylines (CSR like the GEO topology), typed point and primitive columns, groups as bits, size limits, attribute propagation (`Interp`), lossless conversion to and from `Geometry` | `crates/atd-ops-msh/src/mesh.rs` |
-| **Cook protocol** (`MeshNode`, the `GeoOp` of every MSH operator): parameter snapshot into a reused buffer, change detection (snapshot plus attribute identity of the inputs), a shared pool of 2-4 worker threads (64 MiB stacks), GPU-only inputs read back with `Readback`/`take_mapped` (plus the header of GPU-counted inputs), results converted and **uploaded on the worker** (point attributes and header, residency *both*), latest-wins with one job running and one waiting, cancellation flag checked in long loops, a starvation guard (a superseded job finishes if nothing was delivered for 250 ms), panics turned into node errors, status line ("cooking…", "cooked in N ms"). Offline: the frame's encoder is flushed, the readback and the job are waited for. | `crates/atd-ops-msh/src/cook.rs` |
-| **26 operators** (below), each with schema, help on every parameter, render-thread budget 100 µs, generated docs page, use in an example, tests, offline class | `crates/atd-ops-msh/src/*.rs`, `docs/operators/msh/` |
-| **File formats** written here: OBJ, PLY (ASCII, binary LE/BE), glTF 2.0 (.gltf with data URIs or relative files, .glb) readers and writers; counts checked against the bytes left before allocating; files over 512 MiB refused | `crates/atd-ops-msh/src/io.rs` |
-| **Four example projects** visible through Render Points | `examples/mesh-*.atidarla` |
-| Registration: `atd_ops_msh::library` in `atd-cli` `project::library` and the app; `classify()`: every `msh.*` is **Waits** (one prefix rule); `docs/render.md` Waits row | glue, one line each |
+| **CPU mesh model**: indexed polygons and polylines (CSR like the GEO topology), typed point and primitive columns, groups as bits, size limits, attribute propagation (`Interp`), lossless conversion to and from `Geometry` | `crates/lsr-ops-msh/src/mesh.rs` |
+| **Cook protocol** (`MeshNode`, the `GeoOp` of every MSH operator): parameter snapshot into a reused buffer, change detection (snapshot plus attribute identity of the inputs), a shared pool of 2-4 worker threads (64 MiB stacks), GPU-only inputs read back with `Readback`/`take_mapped` (plus the header of GPU-counted inputs), results converted and **uploaded on the worker** (point attributes and header, residency *both*), latest-wins with one job running and one waiting, cancellation flag checked in long loops, a starvation guard (a superseded job finishes if nothing was delivered for 250 ms), panics turned into node errors, status line ("cooking…", "cooked in N ms"). Offline: the frame's encoder is flushed, the readback and the job are waited for. | `crates/lsr-ops-msh/src/cook.rs` |
+| **26 operators** (below), each with schema, help on every parameter, render-thread budget 100 µs, generated docs page, use in an example, tests, offline class | `crates/lsr-ops-msh/src/*.rs`, `docs/operators/msh/` |
+| **File formats** written here: OBJ, PLY (ASCII, binary LE/BE), glTF 2.0 (.gltf with data URIs or relative files, .glb) readers and writers; counts checked against the bytes left before allocating; files over 512 MiB refused | `crates/lsr-ops-msh/src/io.rs` |
+| **Four example projects** visible through Render Points | `examples/mesh-*.lasair` |
+| Registration: `lsr_ops_msh::library` in `lsr-cli` `project::library` and the app; `classify()`: every `msh.*` is **Waits** (one prefix rule); `docs/render.md` Waits row | glue, one line each |
 
 Operators (26; the PRD asks for at least 18):
 
@@ -42,14 +42,14 @@ Other agents were compiling and running GPU work on the same machine, so timings
 
 | Check | Result |
 |---|---|
-| `cargo test -p atd-ops-msh` | 42 passed, 0 failed, 2 ignored (timings): unit 7, primitives 12, modelling 10, files 5, fuzz 2, engine (GPU) 6 |
+| `cargo test -p lsr-ops-msh` | 42 passed, 0 failed, 2 ignored (timings): unit 7, primitives 12, modelling 10, files 5, fuzz 2, engine (GPU) 6 |
 | Render thread, live at 60 fps, a Transform of a 130k-point sphere recooking every frame (time expression; release) | Transform node avg 46 µs (budget 100 µs), max 614 µs; whole frame p50 0.19 ms, p95 0.74 ms, max 1.27 ms; results keep arriving (starvation guard) |
 | `cargo test --workspace` | 454 passed, 0 failed, 6 ignored (the 4 spikes, 1 existing, 1 MSH timing) |
 | `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all -- --check` | clean |
-| `atidarla docs --check` | up to date (26 MSH pages) |
-| `atidarla check --gpu --allow-python-ops examples/*.atidarla` | 25 of 25 ok (including the four new `mesh-*`) |
+| `lasair docs --check` | up to date (26 MSH pages) |
+| `lasair check --gpu --allow-python-ops examples/*.lasair` | 25 of 25 ok (including the four new `mesh-*`) |
 | `cargo deny check` | **not run**: cargo-deny is not installed on this machine; no external dependency was added |
-| `atidarla render`, frames 0-120, twice, SHA-256 per frame (debug build) | mesh-primitives 120/120 identical (120 distinct images); mesh-modelling 120/120 (114 distinct); mesh-scatter-iso 120/120 (120 distinct); mesh-files 120/120 (1 distinct: static) |
+| `lasair render`, frames 0-120, twice, SHA-256 per frame (debug build) | mesh-primitives 120/120 identical (120 distinct images); mesh-modelling 120/120 (114 distinct); mesh-scatter-iso 120/120 (120 distinct); mesh-files 120/120 (1 distinct: static) |
 | AC5 chain test (GPU): sphere → Scatter → Iso Surface → `pnt.noise` → Render Points, offline, two engines | topology rides through the GPU deformer (P copied on write, prims kept), pixels lit, frames change with time, the two runs byte-identical |
 | Live behaviour tests | first cook returns at once with no result and no error; the worker's result is on the GPU (`Residency::Both`) with a header; unchanged inputs start no job; a GPU-only PNT input is read back (≥ 2 frames) and matches; a parameter changed every frame for 40 frames ends on the last value; an error clears when the parameter is fixed |
 | Offline test | frame *i* uses frame *i*'s parameters through a GPU-only PNT input (flush, readback, wait); nothing is left in flight |
@@ -57,7 +57,7 @@ Other agents were compiling and running GPU work on the same machine, so timings
 | Round trips | OBJ, glTF, GLB: `P`, `N`, `uv`, `Cd` exact; PLY: exact except 8-bit colour (≤ 0.51/255); writers byte-identical across runs |
 | Worker cook times (release, best of 3) | polar sphere 256×512 (131k quads) 3.4 ms; Subdivide box 5 levels 0.9 ms; Normals cusp 30° on it 31 ms; PolyReduce to 10% 398 ms; Boolean ico (5120 triangles) minus box 156 ms (425 ms before removing allocations from the BSP loop); Scatter 1M points 84 ms; Iso Surface 2000 points at resolution 128 (506k prims) 264 ms; Extrude every polygon 47 ms; GLB write 15 ms, read 12 ms; Mesh→GEO 1M points 9.4 ms, GEO→Mesh 12.8 ms |
 
-Commands: `cargo test -p atd-ops-msh`; `cargo test -p atd-ops-msh --release --test timings -- --ignored --nocapture` (worker times and the render-thread cost); `python .scratch/determinism.py target/debug/atidarla.exe 0-120 mesh-primitives mesh-modelling mesh-scatter-iso mesh-files` (a throwaway script, not committed: two renders, SHA-256 per frame).
+Commands: `cargo test -p lsr-ops-msh`; `cargo test -p lsr-ops-msh --release --test timings -- --ignored --nocapture` (worker times and the render-thread cost); `python .scratch/determinism.py target/debug/lasair.exe 0-120 mesh-primitives mesh-modelling mesh-scatter-iso mesh-files` (a throwaway script, not committed: two renders, SHA-256 per frame).
 
 ## Limits, stated honestly
 
@@ -72,14 +72,14 @@ Commands: `cargo test -p atd-ops-msh`; `cargo test -p atd-ops-msh --release --te
 ## Not done
 
 - Lazy upload (upload only when a GPU consumer reads the value): every MSH result is uploaded now, which costs VRAM for MSH-to-MSH chains.
-- A counting-allocator test for the render-thread side, a `.atdgeo` bake, File In reload on file change, multi-curve Sweep, Boolean with exact predicates or Manifold, a Remesh operator (spike: Geogram needs Mark's sign-off).
+- A counting-allocator test for the render-thread side, a `.lsrgeo` bake, File In reload on file change, multi-curve Sweep, Boolean with exact predicates or Manifold, a Remesh operator (spike: Geogram needs Mark's sign-off).
 - Viewing meshes as meshes: examples draw vertices through `img.render_points`. **At merge time** the examples can be upgraded to the MAT/3D renderer (swap `img.render_points` for the mesh renderer; the GEO wires stay).
 
 ## For the other areas
 
-- **MAT/3D render**: an MSH result has point attributes on the GPU (`P`, `N`, `Cd`, `uv`, … uploaded by the worker) and a header, but its **topology (`__kind`, `__start`, `__corners`) is CPU-only**. Polygons may be n-gons and polylines. To draw triangles, triangulate on the CPU (`atd_ops_msh::edit::triangulate_polygon` is public) or call `Attribute::ensure_gpu` on the topology and triangulate on the GPU. Normals are point normals; flat shading needs `msh.normals` mode `flat` (split points).
+- **MAT/3D render**: an MSH result has point attributes on the GPU (`P`, `N`, `Cd`, `uv`, … uploaded by the worker) and a header, but its **topology (`__kind`, `__start`, `__corners`) is CPU-only**. Polygons may be n-gons and polylines. To draw triangles, triangulate on the CPU (`lsr_ops_msh::edit::triangulate_polygon` is public) or call `Attribute::ensure_gpu` on the topology and triangulate on the GPU. Normals are point normals; flat shading needs `msh.normals` mode `flat` (split points).
 - **PNT**: MSH outputs are ordinary GEO values with a CPU header (`Geometry::set_points(n, Some(header))`), so `Deformer` works on them (copy on write; topology shared). PNT outputs feed MSH nodes directly; GPU-counted (particle) inputs are read up to their live count.
-- **Glue conflicts**: `classify()` gained one `starts_with("msh.")` rule; `project::library` and the app each gained one `atd_ops_msh::library` line; `docs/render.md` one sentence in the Waits row; `examples/README.md` four rows.
+- **Glue conflicts**: `classify()` gained one `starts_with("msh.")` rule; `project::library` and the app each gained one `lsr_ops_msh::library` line; `docs/render.md` one sentence in the Waits row; `examples/README.md` four rows.
 
 ## Questions for Mark
 

@@ -28,4 +28,4 @@ None.
 
 ## Examples
 
-- [Texture sharing](../../../examples/texture-sharing.atidarla/) — `share_in1`
+- [Texture sharing](../../../examples/texture-sharing.lasair/) — `share_in1`

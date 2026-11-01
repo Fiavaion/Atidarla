@@ -9,14 +9,14 @@ the decision-log rows proposed below are for Mark to accept, amend or reject.
 
 | Item | Where | Reference |
 |---|---|---|
-| **`img.nca` Neural CA**, the fourth 2D solver of PRD §9 M2 | `crates/atd-ops-img/src/nca.rs`, tests `tests/nca.rs` | `docs/nca.md` |
-| **`img.compute` Compute**, FR-K5's raw WGSL node with `#bind`, tile size and iterations | `crates/atd-ops-img/src/compute.rs`, `src/watch.rs`, tests `tests/compute.rs` | `docs/compute.md` |
-| Generator wording: sinks are *requested* every frame and cook only when dirty | `crates/atd-cli/src/docs.rs`, regenerated `docs/operators/` | commit `9d310d2` |
-| Examples | `examples/neural-growth.atidarla`, `examples/compute-shaders.atidarla` | `examples/README.md` |
+| **`img.nca` Neural CA**, the fourth 2D solver of PRD §9 M2 | `crates/lsr-ops-img/src/nca.rs`, tests `tests/nca.rs` | `docs/nca.md` |
+| **`img.compute` Compute**, FR-K5's raw WGSL node with `#bind`, tile size and iterations | `crates/lsr-ops-img/src/compute.rs`, `src/watch.rs`, tests `tests/compute.rs` | `docs/compute.md` |
+| Generator wording: sinks are *requested* every frame and cook only when dirty | `crates/lsr-cli/src/docs.rs`, regenerated `docs/operators/` | commit `9d310d2` |
+| Examples | `examples/neural-growth.lasair`, `examples/compute-shaders.lasair` | `examples/README.md` |
 
 Both operators ship complete (rule 7): schema with help and cook budget, generated docs page,
-runnable example cooked by `atidarla check --gpu`, unit and GPU pixel tests, classification for
-offline render (`classify()` in `crates/atd-cli/src/render.rs`, table in `docs/render.md`), and
+runnable example cooked by `lasair check --gpu`, unit and GPU pixel tests, classification for
+offline render (`classify()` in `crates/lsr-cli/src/render.rs`, table in `docs/render.md`), and
 steady-state allocation checks (`tests/alloc.rs`). `img.wgsl` is unchanged.
 
 ### Neural CA (`img.nca`)
@@ -68,12 +68,12 @@ invocations and 256 wide, buffers up to the device's `max_storage_buffer_binding
 ## Evidence (run on the RTX 5070 Ti PC, Windows 11, DX12, while four other agents were
 compiling and running GPU tests)
 
-- `cargo test -p atd-ops-img --lib`: 17 passed (new: 4 Compute, 2 Neural CA).
-- `ATD_REQUIRE_GPU=1 cargo test -p atd-ops-img --test compute`: 5 passed (blur vs CPU within
+- `cargo test -p lsr-ops-img --lib`: 17 passed (new: 4 Compute, 2 Neural CA).
+- `LSR_REQUIRE_GPU=1 cargo test -p lsr-ops-img --test compute`: 5 passed (blur vs CPU within
   1/255 at every tile size; 8 diffusion iterations vs CPU within 1/255; state and buffer persist,
   5 iterations add exactly 10/255 per cook, Reset clears, an edit keeps state; syntax, directive
   and validation errors with line/col while the last image stays; file reload; all four formats).
-- `ATD_REQUIRE_GPU=1 cargo test -p atd-ops-img --test nca`: 4 passed, 2 ignored (16 steps from a
+- `LSR_REQUIRE_GPU=1 cargo test -p lsr-ops-img --test nca`: 4 passed, 2 ignored (16 steps from a
   noise seed equal a CPU reference **with no value off by more than 1/255** over 4 frames; growth
   from the centre and regrowth into an erased hole; file weights byte-identical to the built-in
   rule frame by frame, CRLF file, broken file reported and recovered; the shipped weights file
@@ -86,15 +86,15 @@ compiling and running GPU tests)
   about 3.6 per dispatch, all inside wgpu's pass recording; the operators' own paths hit their
   bind-group caches (no bind groups or views per frame). The existing per-operator test caught
   both while still compiling (13.8), which is why the dedicated test waits.
-- `atidarla check --gpu examples/neural-growth.atidarla examples/compute-shaders.atidarla`: ok
+- `lasair check --gpu examples/neural-growth.lasair examples/compute-shaders.lasair`: ok
   (each reports 4.0 s because a watched file keeps the node pending through the 3 s settle, as
   Analyze does in signal-scope).
-- `atidarla render` of both examples (release): neural-growth 900 frames at 1280×720 and each
+- `lasair render` of both examples (release): neural-growth 900 frames at 1280×720 and each
   node alone for 600 frames; compute-shaders 90 frames; frames inspected by eye (labyrinth
   organism with the eraser's regrowing cut over dimmed coral; blur, glow and trails).
 - `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all -- --check`,
-  `atidarla docs --check`: pass. `atidarla check --gpu examples/*.atidarla`: 13 ok.
-- Full `ATD_REQUIRE_GPU=1 cargo test --workspace` at `e65a249`: **311 passed, 0 failed, 3
+  `lasair docs --check`: pass. `lasair check --gpu examples/*.lasair`: 13 ok.
+- Full `LSR_REQUIRE_GPU=1 cargo test --workspace` at `e65a249`: **311 passed, 0 failed, 3
   ignored** (72 test binaries; the new ignored ones are `frame_time` and
   `write_example_weights`).
 
@@ -141,7 +141,7 @@ names, the downlevel limits test) is written to be extended rather than copied:
 - **New kinds for attributes**, following `docs/design/geometry-attributes.md` §5 and D10:
   `#bind point P vec3f read_write`, `#bind point v vec3f read`, `#bind point age f32 create
   default=0`, and `prim`, `vertex`, `detail` classes. The resolved plan comes from the upstream
-  attribute schema at plan time; the binding generator in `atd-gpu`/`atd-core` (D10) writes the
+  attribute schema at plan time; the binding generator in `lsr-gpu`/`lsr-core` (D10) writes the
   declarations, so the image `#bind` kinds and the attribute kinds share one `Decl` list and one
   binding order (declaration order, deterministic, rule 8).
 - **Kernel signature by class**: `fn point(i: u32)` runs once per point (1D dispatch; Tile becomes
@@ -167,12 +167,12 @@ names, the downlevel limits test) is written to be extended rather than copied:
 
 ## What other areas should know
 
-- `atd-ops-img` now depends on `naga` and `serde_json` (both already workspace dependencies).
-- Shared files touched minimally: `crates/atd-ops-img/src/lib.rs` (two `mod` lines, one schema,
+- `lsr-ops-img` now depends on `naga` and `serde_json` (both already workspace dependencies).
+- Shared files touched minimally: `crates/lsr-ops-img/src/lib.rs` (two `mod` lines, one schema,
   one factory; the registry-count test is now `+ 8`), `stateful.rs` (one `STATEFUL` row),
-  `crates/atd-cli/src/render.rs` (two `classify()` arms), `docs/render.md` (two table cells),
+  `crates/lsr-cli/src/render.rs` (two `classify()` arms), `docs/render.md` (two table cells),
   `examples/README.md` (two rows and a note on generated weights), regenerated `docs/operators/`.
-- `crates/atd-ops-img/src/watch.rs` is a generic file watcher (build each new version on its own
+- `crates/lsr-ops-img/src/watch.rs` is a generic file watcher (build each new version on its own
   thread) that Packs or Python ops could reuse; WGSL keeps its own copy, unchanged.
 - Test binaries `tests/compute.rs` and `tests/nca.rs` serialise their GPU tests on a mutex (WARP
   and parallel compute), as `tests/analyze.rs` does; the new allocation test shares

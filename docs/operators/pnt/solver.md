@@ -33,6 +33,6 @@ All platforms.
 
 ## Examples
 
-- [Kernel Particles](../../../examples/kernel-particles.atidarla/) — `sim`
-- [PNT Motion](../../../examples/pnt-motion.atidarla/) — `sky`
-- [PNT Solver](../../../examples/pnt-solver.atidarla/) — `sim`
+- [Kernel Particles](../../../examples/kernel-particles.lasair/) — `sim`
+- [PNT Motion](../../../examples/pnt-motion.lasair/) — `sky`
+- [PNT Solver](../../../examples/pnt-solver.lasair/) — `sim`

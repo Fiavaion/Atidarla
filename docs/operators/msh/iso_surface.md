@@ -36,4 +36,4 @@ All platforms.
 
 ## Examples
 
-- [Scatter to Iso Surface](../../../examples/mesh-scatter-iso.atidarla/) — `blob`
+- [Scatter to Iso Surface](../../../examples/mesh-scatter-iso.lasair/) — `blob`

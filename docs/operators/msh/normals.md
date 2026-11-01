@@ -30,6 +30,6 @@ All platforms.
 
 ## Examples
 
-- [Mesh Files](../../../examples/mesh-files.atidarla/) — `edges`
-- [Mesh Shaping](../../../examples/mesh-shaping.atidarla/) — `crease`
-- [VAT Playback](../../../examples/mesh-vat.atidarla/) — `flat`
+- [Mesh Files](../../../examples/mesh-files.lasair/) — `edges`
+- [Mesh Shaping](../../../examples/mesh-shaping.lasair/) — `crease`
+- [VAT Playback](../../../examples/mesh-vat.lasair/) — `flat`

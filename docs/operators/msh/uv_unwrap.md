@@ -30,4 +30,4 @@ All platforms.
 
 ## Examples
 
-- [Mesh Construction](../../../examples/mesh-construction.atidarla/) — `charts`
+- [Mesh Construction](../../../examples/mesh-construction.lasair/) — `charts`

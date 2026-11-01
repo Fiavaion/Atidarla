@@ -34,4 +34,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Motion](../../../examples/pnt-motion.atidarla/) — `shrink_wrap`
+- [PNT Motion](../../../examples/pnt-motion.lasair/) — `shrink_wrap`

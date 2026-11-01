@@ -36,10 +36,10 @@ All platforms.
 
 ## Examples
 
-- [Kernel Particles](../../../examples/kernel-particles.atidarla/) — `colour`
-- [PNT Constellation](../../../examples/pnt-constellation.atidarla/) — `shade`
-- [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `height`
-- [PNT Fields](../../../examples/pnt-fields.atidarla/) — `heat`, `by_crowd`
-- [PNT Fountain](../../../examples/pnt-fountain.atidarla/) — `by_speed`
-- [PNT Motion](../../../examples/pnt-motion.atidarla/) — `blob_colour`, `birds`
-- [PNT Outputs](../../../examples/pnt-outputs.atidarla/) — `tint`
+- [Kernel Particles](../../../examples/kernel-particles.lasair/) — `colour`
+- [PNT Constellation](../../../examples/pnt-constellation.lasair/) — `shade`
+- [PNT Deformers](../../../examples/pnt-deformers.lasair/) — `height`
+- [PNT Fields](../../../examples/pnt-fields.lasair/) — `heat`, `by_crowd`
+- [PNT Fountain](../../../examples/pnt-fountain.lasair/) — `by_speed`
+- [PNT Motion](../../../examples/pnt-motion.lasair/) — `blob_colour`, `birds`
+- [PNT Outputs](../../../examples/pnt-outputs.lasair/) — `tint`

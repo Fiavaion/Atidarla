@@ -31,4 +31,4 @@ All platforms.
 
 ## Examples
 
-- [Mesh Shaping](../../../examples/mesh-shaping.atidarla/) — `sizes`
+- [Mesh Shaping](../../../examples/mesh-shaping.lasair/) — `sizes`

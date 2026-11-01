@@ -34,4 +34,4 @@ All platforms.
 
 ## Examples
 
-- [DAT files](../../../examples/dat-files.atidarla/) — `export`
+- [DAT files](../../../examples/dat-files.lasair/) — `export`

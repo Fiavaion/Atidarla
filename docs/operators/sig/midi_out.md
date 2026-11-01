@@ -32,4 +32,4 @@ All platforms.
 
 ## Examples
 
-- [Live control](../../../examples/live-control.atidarla/) — `midi_out1`
+- [Live control](../../../examples/live-control.lasair/) — `midi_out1`

@@ -32,4 +32,4 @@ All platforms.
 
 ## Examples
 
-- [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `taper`
+- [PNT Deformers](../../../examples/pnt-deformers.lasair/) — `taper`

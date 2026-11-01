@@ -29,16 +29,16 @@ All platforms.
 
 ## Examples
 
-- [Beat switcher](../../../examples/beat-switcher.atidarla/) — `gradient`
-- [ComfyUI Invert](../../../examples/comfy-invert.atidarla/) — `ramp`
-- [Image processing](../../../examples/image-processing.atidarla/) — `palette`
-- [Keying](../../../examples/keying.atidarla/) — `backdrop`
-- [Pack: Beat Flash](../../../examples/pack-beat-flash.atidarla/) — `wheel`
-- [Pack: Film Grain](../../../examples/pack-film-grain.atidarla/) — `sky`
-- [Pack: LFO Bank](../../../examples/pack-lfo-bank.atidarla/) — `backdrop`
-- [PNT Capture](../../../examples/pnt-capture.atidarla/) — `depth_map`
-- [Render Textures](../../../examples/render-textures.atidarla/) — `sphere_look`
-- [Soak show](../../../examples/soak-show.atidarla/) — `sunset`, `glow_ramp`
-- [Stage deck](../../../examples/stage-deck.atidarla/) — `sunset`, `glow_ramp`
-- [Time effects](../../../examples/time-effects.atidarla/) — `columns`
-- [Two outputs](../../../examples/two-outputs.atidarla/) — `sky`
+- [Beat switcher](../../../examples/beat-switcher.lasair/) — `gradient`
+- [ComfyUI Invert](../../../examples/comfy-invert.lasair/) — `ramp`
+- [Image processing](../../../examples/image-processing.lasair/) — `palette`
+- [Keying](../../../examples/keying.lasair/) — `backdrop`
+- [Pack: Beat Flash](../../../examples/pack-beat-flash.lasair/) — `wheel`
+- [Pack: Film Grain](../../../examples/pack-film-grain.lasair/) — `sky`
+- [Pack: LFO Bank](../../../examples/pack-lfo-bank.lasair/) — `backdrop`
+- [PNT Capture](../../../examples/pnt-capture.lasair/) — `depth_map`
+- [Render Textures](../../../examples/render-textures.lasair/) — `sphere_look`
+- [Soak show](../../../examples/soak-show.lasair/) — `sunset`, `glow_ramp`
+- [Stage deck](../../../examples/stage-deck.lasair/) — `sunset`, `glow_ramp`
+- [Time effects](../../../examples/time-effects.lasair/) — `columns`
+- [Two outputs](../../../examples/two-outputs.lasair/) — `sky`

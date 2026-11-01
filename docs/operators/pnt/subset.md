@@ -44,5 +44,5 @@ All platforms.
 
 ## Examples
 
-- [PNT Constellation](../../../examples/pnt-constellation.atidarla/) — `some`
-- [PNT Deformers](../../../examples/pnt-deformers.atidarla/) — `every_other`
+- [PNT Constellation](../../../examples/pnt-constellation.lasair/) — `some`
+- [PNT Deformers](../../../examples/pnt-deformers.lasair/) — `every_other`
