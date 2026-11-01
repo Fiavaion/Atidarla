@@ -328,7 +328,15 @@ pub fn install(
     source: &Source,
     allow_internet_once: bool,
 ) -> Result<Vec<String>, InstallError> {
-    install_with(bundled, root, extras, source, allow_internet_once, None)
+    install_with(
+        bundled,
+        root,
+        extras,
+        source,
+        allow_internet_once,
+        None,
+        &|from, to| std::fs::rename(from, to),
+    )
 }
 
 /// [`install`] for an app: pip runs without a console window and its output
@@ -351,8 +359,12 @@ pub fn install_cancellable(
         source,
         allow_internet_once,
         Some(cancelled),
+        &|from, to| std::fs::rename(from, to),
     )
 }
+
+/// Renames a folder: `std::fs::rename`, or a failing one in tests.
+type Rename<'a> = &'a dyn Fn(&Path, &Path) -> std::io::Result<()>;
 
 fn install_with(
     bundled: &Bundled,
@@ -361,6 +373,7 @@ fn install_with(
     source: &Source,
     allow_internet_once: bool,
     cancelled: Option<&dyn Fn() -> bool>,
+    rename: Rename<'_>,
 ) -> Result<Vec<String>, InstallError> {
     let known = bundled.extras();
     for extra in extras {
@@ -372,6 +385,13 @@ fn install_with(
         }
     }
     let packages = bundled.packages(root);
+    let fresh = packages.dir.join("site-packages.new");
+    let old = packages.dir.join("site-packages.old");
+    let site = packages.site();
+    // A swap stopped between its two renames left the packages in `old`.
+    if !site.exists() && old.is_dir() {
+        rename(&old, &site).map_err(io(format!("restoring {}", old.display())))?;
+    }
     let mut installed = packages.installed();
     installed.retain(|e| known.contains(e));
     let all = merge_extras(&installed, extras)?;
@@ -387,15 +407,21 @@ fn install_with(
 
     std::fs::create_dir_all(&packages.dir)
         .map_err(io(format!("creating {}", packages.dir.display())))?;
-    let fresh = packages.dir.join("site-packages.new");
-    let old = packages.dir.join("site-packages.old");
-    for leftover in [&fresh, &old] {
+    let tmp = TempDir(packages.dir.join("pip-tmp"));
+    for leftover in [&fresh, &old, &tmp.0] {
         if leftover.exists() {
             std::fs::remove_dir_all(leftover)
                 .map_err(io(format!("removing {}", leftover.display())))?;
         }
     }
+    std::fs::create_dir_all(&tmp.0).map_err(io(format!("creating {}", tmp.0.display())))?;
     let mut pip = pip_command(bundled, &all, &fresh, source);
+    // pip unpacks wheels in its temporary folder: keep that with the
+    // packages, so it goes with them and a cancelled pip leaves nothing in
+    // the system's.
+    for key in ["TMPDIR", "TEMP", "TMP"] {
+        pip.env(key, &tmp.0);
+    }
     let starting = io(format!("starting {}", bundled.python().display()));
     match cancelled {
         None => {
@@ -407,11 +433,9 @@ fn install_with(
         }
         Some(cancelled) => run_quietly(pip, cancelled, &fresh, starting)?,
     }
-    let site = packages.site();
-    if site.exists() {
-        std::fs::rename(&site, &old).map_err(io(format!("moving {}", site.display())))?;
-    }
-    std::fs::rename(&fresh, &site).map_err(io(format!("moving {}", fresh.display())))?;
+    drop(tmp);
+    swap_in(&site, &fresh, &old, rename)?;
+    // Only now: a failed swap leaves the record of the packages still there.
     let mut record = all.join("\n");
     record.push('\n');
     std::fs::write(packages.record(), record)
@@ -420,6 +444,41 @@ fn install_with(
         let _ = std::fs::remove_dir_all(&old);
     }
     Ok(all)
+}
+
+/// A folder removed when dropped, whichever way the install ends.
+struct TempDir(PathBuf);
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Moves `site` to `old` and `fresh` to `site`. When the second rename
+/// fails, `old` goes back to `site` and `fresh` is removed, so the previous
+/// packages stay installed.
+fn swap_in(site: &Path, fresh: &Path, old: &Path, rename: Rename<'_>) -> Result<(), InstallError> {
+    let had_site = site.exists();
+    if had_site && let Err(source) = rename(site, old) {
+        let _ = std::fs::remove_dir_all(fresh);
+        return Err(InstallError::Io {
+            what: format!("moving {}", site.display()),
+            source,
+        });
+    }
+    if let Err(source) = rename(fresh, site) {
+        if had_site {
+            // If this fails too, the next install restores `old`.
+            let _ = rename(old, site);
+        }
+        let _ = std::fs::remove_dir_all(fresh);
+        return Err(InstallError::Io {
+            what: format!("moving {}", fresh.display()),
+            source,
+        });
+    }
+    Ok(())
 }
 
 /// How many of pip's last error lines [`InstallError::PipSaid`] keeps.
@@ -1051,8 +1110,141 @@ mod tests {
             "pip was killed"
         );
         assert!(!p.dir.join("site-packages.new").exists());
+        assert!(!p.dir.join("pip-tmp").exists(), "pip's temp folder goes");
         assert_eq!(p.installed(), ["vision"]);
         assert!(p.site().join("pkg.py").is_file());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A rename that fails when it moves `from` a folder named `name`.
+    fn failing_rename(name: &'static str) -> impl Fn(&Path, &Path) -> std::io::Result<()> {
+        move |from, to| {
+            if from.file_name() == Some(name.as_ref()) {
+                Err(std::io::Error::other("injected"))
+            } else {
+                std::fs::rename(from, to)
+            }
+        }
+    }
+
+    fn mark(dir: &Path, file: &str) {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join(file), "").unwrap();
+    }
+
+    #[test]
+    fn a_failed_swap_puts_the_old_packages_back() {
+        let root = scratch("swap");
+        let (site, fresh, old) = (root.join("site"), root.join("new"), root.join("old"));
+
+        // The second rename fails: `old` goes back to `site`.
+        mark(&site, "before.py");
+        mark(&fresh, "after.py");
+        let err = swap_in(&site, &fresh, &old, &failing_rename("new")).unwrap_err();
+        assert!(matches!(err, InstallError::Io { .. }), "{err}");
+        assert!(site.join("before.py").is_file());
+        assert!(!old.exists() && !fresh.exists());
+
+        // The first rename fails: nothing moved.
+        mark(&fresh, "after.py");
+        swap_in(&site, &fresh, &old, &failing_rename("site")).unwrap_err();
+        assert!(site.join("before.py").is_file());
+        assert!(!old.exists() && !fresh.exists());
+
+        mark(&fresh, "after.py");
+        swap_in(&site, &fresh, &old, &|a, b| std::fs::rename(a, b)).unwrap();
+        assert!(site.join("after.py").is_file());
+        assert!(old.join("before.py").is_file(), "the caller removes old");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_record_changes_only_after_a_successful_swap() {
+        let root = scratch("record");
+        let b = layout(&root);
+        let data = root.join("data");
+        let wheels = Source::Wheelhouse(root.clone());
+        let p = b.packages(&data);
+        fake_pip(&b, "exit 0");
+        install_cancellable(&b, &data, &["vision".into()], &wheels, false, &|| false).unwrap();
+
+        let err = install_with(
+            &b,
+            &data,
+            &["stt".into()],
+            &wheels,
+            false,
+            None,
+            &failing_rename("site-packages.new"),
+        )
+        .unwrap_err();
+        assert!(matches!(err, InstallError::Io { .. }), "{err}");
+        assert_eq!(
+            std::fs::read_to_string(p.dir.join("extras.txt")).unwrap(),
+            "vision\n"
+        );
+        assert_eq!(p.installed(), ["vision"]);
+        assert!(p.site().join("pkg.py").is_file());
+        assert!(!p.dir.join("site-packages.old").exists());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A swap interrupted between its renames (the app was killed) left the
+    /// packages in `site-packages.old` and none in `site-packages`: the next
+    /// install restores them instead of deleting them.
+    #[cfg(unix)]
+    #[test]
+    fn an_interrupted_swap_is_restored_by_the_next_install() {
+        let root = scratch("interrupted");
+        let b = layout(&root);
+        let data = root.join("data");
+        let wheels = Source::Wheelhouse(root.clone());
+        let p = b.packages(&data);
+        let old = p.dir.join("site-packages.old");
+        mark(&old, "vision_pkg.py");
+        std::fs::write(p.dir.join("extras.txt"), "vision\n").unwrap();
+
+        // pip fails: the restored packages stay installed.
+        fake_pip(&b, "exit 1");
+        install_cancellable(&b, &data, &["stt".into()], &wheels, false, &|| false).unwrap_err();
+        assert_eq!(p.installed(), ["vision"]);
+        assert!(p.site().join("vision_pkg.py").is_file());
+        assert!(!old.exists());
+
+        // Again interrupted, then pip succeeds: both extras are recorded.
+        std::fs::rename(p.site(), &old).unwrap();
+        fake_pip(&b, "exit 0");
+        let got = install_cancellable(&b, &data, &["stt".into()], &wheels, false, &|| false);
+        assert_eq!(got.unwrap(), ["stt", "vision"]);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// pip's temporary files go in a folder beside the packages, removed
+    /// once it ends.
+    #[cfg(unix)]
+    #[test]
+    fn pip_unpacks_in_a_folder_beside_the_packages() {
+        let root = scratch("tmp");
+        let b = layout(&root);
+        let data = root.join("data");
+        let wheels = Source::Wheelhouse(root.clone());
+        let p = b.packages(&data);
+        let said = root.join("said.txt");
+        fake_pip(
+            &b,
+            &format!(
+                "test -d \"$TMPDIR\" || exit 3\necho \"$TMPDIR $TEMP $TMP\" > '{}'",
+                said.display()
+            ),
+        );
+        install_cancellable(&b, &data, &["vision".into()], &wheels, false, &|| false).unwrap();
+        let tmp = p.dir.join("pip-tmp").display().to_string();
+        assert_eq!(
+            std::fs::read_to_string(&said).unwrap().trim(),
+            format!("{tmp} {tmp} {tmp}")
+        );
+        assert!(!p.dir.join("pip-tmp").exists());
         std::fs::remove_dir_all(&root).unwrap();
     }
 
