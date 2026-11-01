@@ -41,7 +41,7 @@ Turn on **OSCQuery** in the Mappings window (saved with the project), or start t
 
 Text and file parameters are advertised read-only. Values are current when asked: a request makes the app publish them on its next frame. `LISTEN` (WebSocket streaming) is not offered.
 
-A value set over OSCQuery is a live value too: it holds until another writer changes the parameter or another project is opened, and it is not written back on save.
+A value set over OSCQuery is a live value too: it holds until another writer changes the parameter or another project is opened, and it is not written back on save. Messages to one address between two frames give one write, the latest. A colour or vector sent fewer numbers than it has components holds those, and its other components keep following their binding or expression on every frame until the next message.
 
 ## `mappings.toml`
 

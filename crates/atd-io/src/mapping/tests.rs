@@ -603,3 +603,84 @@ fn a_route_fills_components_it_does_not_set_from_their_binding() {
         "[0] from OSC, [1] stored, [2] driven"
     );
 }
+
+/// A route that sets [0] of a vector keeps it between messages while [1]
+/// follows its expression, frame by frame, over a real UDP socket; another
+/// writer ends the hold.
+#[test]
+fn a_route_holds_its_components_between_messages_over_udp() {
+    let scale = || Route {
+        address: "/s".into(),
+        node: N,
+        param: "scale".into(),
+        kind: ParamKind::Vec { n: 2 },
+    };
+    let mut rt = MappingRuntime::new();
+    let port = rt.listen_osc(0, true).unwrap();
+    rt.set_routes(vec![scale()]);
+    let maps = Mappings::default();
+    let mut fake = Fake::new(&[("scale", ParamKind::Vec { n: 2 }, json!([1.0, 1.0]))]);
+    let lfo = |t: f64| (t * 0.7).sin();
+    let drive = |fake: &mut Fake, t: f64| {
+        for c in 0..2 {
+            fake.driven.insert(("scale".into(), c), lfo(t));
+        }
+    };
+    let tx = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let send = |v: f32| {
+        let msg = rosc::encoder::encode(&OscPacket::Message(rosc::OscMessage {
+            addr: "/s".into(),
+            args: vec![OscType::Float(v)],
+        }))
+        .unwrap();
+        tx.send_to(&msg, (Ipv4Addr::LOCALHOST, port)).unwrap();
+    };
+    let arrived = |rt: &MappingRuntime, n: u64| {
+        let start = Instant::now();
+        while rt.hub().lock().received < n {
+            assert!(start.elapsed() < Duration::from_secs(5), "no OSC arrived");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    };
+    drive(&mut fake, 0.0);
+    send(0.5);
+    arrived(&rt, 1);
+    assert_eq!(fake.frame(&mut rt, &maps), 1);
+    assert_eq!(fake.get("scale"), &json!([0.5, lfo(0.0)]));
+    for f in 1..5 {
+        let t = f64::from(f);
+        drive(&mut fake, t);
+        assert_eq!(fake.frame(&mut rt, &maps), 1, "the expression moved");
+        assert_eq!(
+            fake.get("scale"),
+            &json!([0.5, lfo(t)]),
+            "OSC holds [0], [1] follows the expression"
+        );
+    }
+    assert_eq!(fake.frame(&mut rt, &maps), 0, "nothing moved: no write");
+    // Several messages between two frames: the latest wins, one write.
+    send(0.1);
+    send(0.25);
+    arrived(&rt, 3);
+    drive(&mut fake, 7.0);
+    assert_eq!(fake.frame(&mut rt, &maps), 1);
+    assert_eq!(fake.get("scale"), &json!([0.25, lfo(7.0)]));
+    // Routes rebuilt (a node added elsewhere) keep the hold.
+    rt.set_routes(vec![
+        Route {
+            address: "/other/x".into(),
+            node: NodeId(2),
+            param: "x".into(),
+            kind: float(),
+        },
+        scale(),
+    ]);
+    drive(&mut fake, 8.0);
+    assert_eq!(fake.frame(&mut rt, &maps), 1);
+    assert_eq!(fake.get("scale"), &json!([0.25, lfo(8.0)]));
+    // Another writer (the timeline) sets the parameter: the hold ends.
+    fake.params.get_mut("scale").unwrap().1 = json!([2.0, 2.0]);
+    drive(&mut fake, 9.0);
+    assert_eq!(fake.frame(&mut rt, &maps), 0, "released");
+    assert_eq!(fake.get("scale"), &json!([2.0, 2.0]));
+}
