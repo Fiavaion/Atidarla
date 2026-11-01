@@ -21,12 +21,35 @@
 //! with an explicit `allow_internet_once` (Sovereign mode refuses
 //! otherwise); the offline route is a wheelhouse folder (`--no-index
 //! --find-links`). Nothing here runs on start or on the render thread.
+//!
+//! `diffusion` and `diffusion-cuda` hold the same packages; the second takes
+//! torch from PyTorch's CUDA index on Windows and Linux (PRD A70), where
+//! PyPI's Windows torch is CPU only. One replaces the other when installed.
+//! [`recommended_extras`] picks the extras a machine should get, CUDA only
+//! when its NVIDIA driver is new enough ([`nvidia_driver`]).
 
 use std::ffi::OsString;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use crate::client::HostCommand;
+
+/// The diffusion extra with PyPI's torch (CPU on Windows, Metal on macOS).
+pub const DIFFUSION: &str = "diffusion";
+/// The diffusion extra with PyTorch's CUDA build on Windows and Linux.
+pub const DIFFUSION_CUDA: &str = "diffusion-cuda";
+/// The index `diffusion-cuda` takes torch from (`ai-host/pyproject.toml`).
+pub const PYTORCH_INDEX: &str = "https://download.pytorch.org/whl/cu134";
+/// The CUDA version of that build.
+pub const CUDA_BUILD: &str = "CUDA 13.4";
+/// The oldest NVIDIA driver that runs it: every CUDA 13.x build runs on
+/// R580 or later (NVIDIA's minor-version compatibility). Covers Turing to
+/// Blackwell (RTX 20 to RTX 50).
+pub const CUDA_DRIVER_FLOOR: (u32, u32) = (580, 0);
+/// How long [`nvidia_driver`] waits for `nvidia-smi`.
+const NVIDIA_SMI_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// The folder an installer's AI Host keeps its packages in, per user.
 pub fn data_root() -> PathBuf {
@@ -196,6 +219,8 @@ pub enum InstallError {
     Sovereign,
     #[error("{0} is not a folder")]
     NoWheelhouse(PathBuf),
+    #[error("install one of `{0}` and `{1}`, not both")]
+    Exclusive(String, String),
     #[error("{what}: {source}")]
     Io {
         what: String,
@@ -231,8 +256,15 @@ pub fn pip_command(
         .args(["--require-hashes", "--no-deps", "--only-binary", ":all:"])
         .arg("--target")
         .arg(target);
-    if let Source::Wheelhouse(dir) = source {
-        cmd.arg("--no-index").arg("--find-links").arg(dir);
+    match source {
+        Source::Wheelhouse(dir) => {
+            cmd.arg("--no-index").arg("--find-links").arg(dir);
+        }
+        // The hashes still pin every file, whichever index serves it.
+        Source::Index if extras.iter().any(|e| e == DIFFUSION_CUDA) => {
+            cmd.args(["--extra-index-url", PYTORCH_INDEX]);
+        }
+        Source::Index => {}
     }
     for extra in extras {
         cmd.arg("-r").arg(bundled.requirements(extra));
@@ -240,8 +272,46 @@ pub fn pip_command(
     cmd
 }
 
+/// The extra that cannot be installed beside `extra`, if any.
+fn rival(extra: &str) -> Option<&'static str> {
+    match extra {
+        DIFFUSION => Some(DIFFUSION_CUDA),
+        DIFFUSION_CUDA => Some(DIFFUSION),
+        _ => None,
+    }
+}
+
+/// The extras recorded after installing `requested` over `installed`,
+/// sorted: a requested extra replaces its rival (`diffusion` and
+/// `diffusion-cuda`), and asking for both is refused.
+pub fn merge_extras(
+    installed: &[String],
+    requested: &[String],
+) -> Result<Vec<String>, InstallError> {
+    for extra in requested {
+        if let Some(rival) = rival(extra)
+            && requested.iter().any(|e| e == rival)
+        {
+            return Err(InstallError::Exclusive(
+                DIFFUSION.into(),
+                DIFFUSION_CUDA.into(),
+            ));
+        }
+    }
+    let mut all: Vec<String> = installed
+        .iter()
+        .filter(|e| !requested.iter().any(|r| rival(r) == Some(e.as_str())))
+        .chain(requested)
+        .cloned()
+        .collect();
+    all.sort();
+    all.dedup();
+    Ok(all)
+}
+
 /// Installs `extras` (with every extra already installed, so they share one
 /// consistent set of locked packages) into a fresh folder, then swaps it in.
+/// `diffusion` and `diffusion-cuda` replace each other ([`merge_extras`]).
 /// A failed install leaves the previous packages as they were. Blocks while
 /// pip runs; call it from a command or a worker thread, never the render
 /// thread. Returns the extras now installed.
@@ -261,6 +331,10 @@ pub fn install(
             });
         }
     }
+    let packages = bundled.packages(root);
+    let mut installed = packages.installed();
+    installed.retain(|e| known.contains(e));
+    let all = merge_extras(&installed, extras)?;
     match source {
         Source::Index if crate::egress::sovereign() && !allow_internet_once => {
             return Err(InstallError::Sovereign);
@@ -270,12 +344,6 @@ pub fn install(
         }
         _ => {}
     }
-    let packages = bundled.packages(root);
-    let mut all = packages.installed();
-    all.retain(|e| known.contains(e));
-    all.extend(extras.iter().cloned());
-    all.sort();
-    all.dedup();
 
     std::fs::create_dir_all(&packages.dir)
         .map_err(io(format!("creating {}", packages.dir.display())))?;
@@ -317,6 +385,140 @@ pub fn remove_all(bundled: &Bundled, root: &Path) -> Result<(), InstallError> {
             .map_err(io(format!("removing {}", packages.dir.display())))?;
     }
     Ok(())
+}
+
+/// The NVIDIA driver's `(major, minor)` version, from `nvidia-smi`, or `None`
+/// without one (always on macOS). Gives up after two seconds. It starts a
+/// process: call it from a command or a worker thread, never the render
+/// thread.
+pub fn nvidia_driver() -> Option<(u32, u32)> {
+    if cfg!(target_os = "macos") {
+        return None;
+    }
+    let mut cmd = Command::new("nvidia-smi");
+    cmd.args(["--query-gpu=driver_version", "--format=csv,noheader"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = cmd.spawn().ok()?;
+    let deadline = Instant::now() + NVIDIA_SMI_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => break,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
+            Ok(Some(_)) => return None,
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+    let mut out = String::new();
+    child.stdout.take()?.read_to_string(&mut out).ok()?;
+    parse_driver_version(&out)
+}
+
+/// The first `major.minor[.patch]` line of `nvidia-smi`'s output (one line
+/// per GPU, all the same driver): `566.36` on Windows, `580.65.06` on Linux.
+fn parse_driver_version(out: &str) -> Option<(u32, u32)> {
+    out.lines().find_map(|line| {
+        let mut parts = line.trim().split('.');
+        let major = parts.next()?.parse().ok()?;
+        let minor = parts.next()?.parse().ok()?;
+        Some((major, minor))
+    })
+}
+
+fn driver_text((major, minor): (u32, u32)) -> String {
+    if minor == 0 {
+        major.to_string()
+    } else {
+        format!("{major}.{minor:02}")
+    }
+}
+
+/// The extras a machine should get, and one sentence saying why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Recommendation {
+    /// Sorted; `cloud` is never recommended (it needs the user's own key).
+    pub extras: Vec<String>,
+    pub reason: String,
+}
+
+/// The extras this machine should get from `bundled`: `vision`, `stt` and
+/// one diffusion extra, `diffusion-cuda` on Windows or Linux with an NVIDIA
+/// driver of [`CUDA_DRIVER_FLOOR`] or later, else `diffusion`. Runs
+/// `nvidia-smi` off macOS ([`nvidia_driver`]), so never call it on the
+/// render thread.
+pub fn recommended_extras(bundled: &Bundled) -> Recommendation {
+    let cuda_platform = cfg!(any(windows, target_os = "linux"));
+    let driver = if cuda_platform { nvidia_driver() } else { None };
+    recommend(&bundled.extras(), cuda_platform, driver)
+}
+
+/// [`recommended_extras`] for given facts: the extras a build offers,
+/// whether this platform has CUDA builds at all (Windows, Linux) and the
+/// NVIDIA driver found.
+pub fn recommend(
+    available: &[String],
+    cuda_platform: bool,
+    driver: Option<(u32, u32)>,
+) -> Recommendation {
+    let has = |e: &str| available.iter().any(|a| a == e);
+    let floor = driver_text(CUDA_DRIVER_FLOOR);
+    let (diffusion, reason) = match driver {
+        _ if !cuda_platform => (
+            DIFFUSION,
+            "PyTorch's standard build runs diffusion on this platform (Metal on macOS); CUDA \
+             builds are for Windows and Linux."
+                .to_owned(),
+        ),
+        None => (
+            DIFFUSION,
+            format!(
+                "No NVIDIA driver found; installing PyTorch's standard build (CPU). Real-time \
+                 diffusion needs an NVIDIA GPU with driver {floor} or later."
+            ),
+        ),
+        Some(d) if d < CUDA_DRIVER_FLOOR => (
+            DIFFUSION,
+            format!(
+                "NVIDIA driver {} is older than {floor} needed for {CUDA_BUILD}; installing the \
+                 CPU build. Update the driver for real-time diffusion.",
+                driver_text(d)
+            ),
+        ),
+        Some(d) if !has(DIFFUSION_CUDA) => (
+            DIFFUSION,
+            format!(
+                "NVIDIA driver {} found, but this build has no `{DIFFUSION_CUDA}` extra; \
+                 installing the CPU build.",
+                driver_text(d)
+            ),
+        ),
+        Some(d) => (
+            DIFFUSION_CUDA,
+            format!(
+                "NVIDIA driver {} runs {CUDA_BUILD}; installing PyTorch's CUDA build for \
+                 real-time diffusion.",
+                driver_text(d)
+            ),
+        ),
+    };
+    let mut extras: Vec<String> = ["vision", "stt", diffusion]
+        .into_iter()
+        .filter(|e| has(e))
+        .map(str::to_owned)
+        .collect();
+    extras.sort();
+    Recommendation { extras, reason }
 }
 
 /// `PYTHONPATH` of a host command, split (for tests and status output).
@@ -464,6 +666,157 @@ mod tests {
         let index = pip_command(&b, &["stt".into()], &root.join("t"), &Source::Index);
         assert!(!index.get_args().any(|a| a == "--no-index"));
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    fn strings(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    #[test]
+    fn only_the_cuda_extra_reaches_pytorchs_index() {
+        let root = scratch("pip-cuda");
+        let b = layout(&root);
+        let args = |extras: &[&str], source: &Source| -> Vec<String> {
+            pip_command(&b, &strings(extras), &root.join("t"), source)
+                .get_args()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect()
+        };
+        let cuda = args(&["diffusion-cuda", "vision"], &Source::Index);
+        let at = cuda.iter().position(|a| a == "--extra-index-url").unwrap();
+        assert_eq!(cuda[at + 1], PYTORCH_INDEX);
+        assert!(cuda.iter().any(|a| a == "--require-hashes"));
+        for plain in [args(&["diffusion", "vision"], &Source::Index), {
+            args(&["diffusion-cuda"], &Source::Wheelhouse(root.join("w")))
+        }] {
+            assert!(
+                !plain
+                    .iter()
+                    .any(|a| a.contains("index-url") || a.contains("pytorch")),
+                "{plain:?}"
+            );
+        }
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn diffusion_and_diffusion_cuda_replace_each_other() {
+        let merge = |installed: &[&str], requested: &[&str]| {
+            merge_extras(&strings(installed), &strings(requested))
+        };
+        assert_eq!(
+            merge(&["diffusion", "vision"], &["diffusion-cuda"]).unwrap(),
+            ["diffusion-cuda", "vision"]
+        );
+        assert_eq!(
+            merge(&["diffusion-cuda", "stt"], &["diffusion"]).unwrap(),
+            ["diffusion", "stt"]
+        );
+        assert_eq!(
+            merge(&["diffusion-cuda"], &["diffusion-cuda", "stt"]).unwrap(),
+            ["diffusion-cuda", "stt"]
+        );
+        assert_eq!(merge(&["vision"], &["stt"]).unwrap(), ["stt", "vision"]);
+        let err = merge(&[], &["diffusion", "diffusion-cuda"]).unwrap_err();
+        assert!(matches!(err, InstallError::Exclusive(..)), "{err}");
+    }
+
+    #[test]
+    fn install_refuses_both_diffusion_extras_before_touching_anything() {
+        let root = scratch("exclusive");
+        let b = layout(&root);
+        for e in [DIFFUSION, DIFFUSION_CUDA] {
+            std::fs::write(b.requirements(e), "").unwrap();
+        }
+        let data = root.join("data");
+        let both = strings(&[DIFFUSION, DIFFUSION_CUDA]);
+        let err = install(&b, &data, &both, &Source::Wheelhouse(root.clone()), false).unwrap_err();
+        assert!(matches!(err, InstallError::Exclusive(..)), "{err}");
+        assert!(!data.exists());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn nvidia_smi_output_parses_on_windows_and_linux() {
+        assert_eq!(parse_driver_version("566.36\n"), Some((566, 36)));
+        assert_eq!(
+            parse_driver_version("580.65.06\r\n580.65.06\n"),
+            Some((580, 65))
+        );
+        assert_eq!(parse_driver_version("\n  591.44 \n"), Some((591, 44)));
+        assert_eq!(parse_driver_version("NVIDIA-SMI has failed\n"), None);
+        assert_eq!(parse_driver_version(""), None);
+        if cfg!(target_os = "macos") {
+            assert_eq!(nvidia_driver(), None);
+        }
+    }
+
+    #[test]
+    fn the_recommendation_follows_the_platform_and_the_driver() {
+        let all = strings(&["cloud", "diffusion", "diffusion-cuda", "stt", "vision"]);
+        let rec = recommend(&all, true, Some((581, 57)));
+        assert_eq!(rec.extras, ["diffusion-cuda", "stt", "vision"]);
+        assert!(
+            rec.reason.contains("581.57") && rec.reason.contains(CUDA_BUILD),
+            "{}",
+            rec.reason
+        );
+        // The floor itself is enough.
+        assert!(
+            recommend(&all, true, Some(CUDA_DRIVER_FLOOR))
+                .extras
+                .contains(&DIFFUSION_CUDA.into())
+        );
+
+        let old = recommend(&all, true, Some((566, 36)));
+        assert_eq!(old.extras, ["diffusion", "stt", "vision"]);
+        assert_eq!(
+            old.reason,
+            "NVIDIA driver 566.36 is older than 580 needed for CUDA 13.4; installing the CPU \
+             build. Update the driver for real-time diffusion."
+        );
+        let none = recommend(&all, true, None);
+        assert_eq!(none.extras, ["diffusion", "stt", "vision"]);
+        assert!(
+            none.reason.starts_with("No NVIDIA driver found"),
+            "{}",
+            none.reason
+        );
+
+        // macOS: always the standard build, whatever a driver query says.
+        let mac = recommend(&all, false, Some((600, 0)));
+        assert_eq!(mac.extras, ["diffusion", "stt", "vision"]);
+        assert!(mac.reason.contains("Metal"), "{}", mac.reason);
+
+        // Only what the build offers; an older build without the CUDA extra.
+        let older = strings(&["diffusion", "vision"]);
+        let rec = recommend(&older, true, Some((581, 57)));
+        assert_eq!(rec.extras, ["diffusion", "vision"]);
+        assert!(rec.reason.contains("no `diffusion-cuda`"), "{}", rec.reason);
+        assert!(recommend(&[], true, None).extras.is_empty());
+    }
+
+    #[test]
+    fn the_cuda_constants_match_the_ai_host_project() {
+        let pyproject = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../ai-host/pyproject.toml"
+        ))
+        .unwrap();
+        assert!(
+            pyproject.contains(&format!("url = \"{PYTORCH_INDEX}\"")),
+            "PYTORCH_INDEX is not the index in ai-host/pyproject.toml"
+        );
+        let digits = PYTORCH_INDEX.rsplit_once("/cu").unwrap().1;
+        let (major, minor) = digits.split_at(digits.len() - 1);
+        assert_eq!(CUDA_BUILD, format!("CUDA {major}.{minor}"));
+        if major.starts_with("13") {
+            assert_eq!(
+                CUDA_DRIVER_FLOOR,
+                (580, 0),
+                "CUDA 13.x runs on R580 or later"
+            );
+        }
     }
 
     #[test]

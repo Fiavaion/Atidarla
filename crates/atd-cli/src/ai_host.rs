@@ -1,18 +1,18 @@
 //! `atidarla ai-host status|check|install|remove`: the AI Host an installer
-//! ships and its optional packages (PRD A68, `atd_ai::hostenv`).
+//! ships and its optional packages (PRD A68, A70, `atd_ai::hostenv`).
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow, bail};
-use atd_ai::hostenv::{self, Bundled, Source};
+use atd_ai::hostenv::{self, Bundled, DIFFUSION, DIFFUSION_CUDA, Recommendation, Source};
 use atd_ai::supervisor::{HostState, Supervisor, default_local_command};
 use clap::Subcommand;
 
 #[derive(Debug, Subcommand)]
 pub enum AiHostCommand {
-    /// Show which local host runs, the extras this build offers and those
-    /// installed.
+    /// Show which local host runs, the extras this build offers, those
+    /// installed and those this machine should get.
     Status,
     /// Start the local host, wait until it is ready and list its adapters
     /// and built-in models. Reaches nothing beyond this machine.
@@ -24,10 +24,24 @@ pub enum AiHostCommand {
     /// Install optional adapters' packages (vision, stt, diffusion, cloud)
     /// for the bundled host into your user folder, from the locked,
     /// hash-pinned requirements shipped with the app (wheels only).
+    /// `diffusion` takes PyTorch's CUDA build (`diffusion-cuda`) on a
+    /// Windows or Linux machine with a new enough NVIDIA driver.
     Install {
-        /// Extras to add; those already installed stay.
-        #[arg(required = true)]
+        /// Extras to add; those already installed stay (`diffusion` and
+        /// `diffusion-cuda` replace each other).
+        #[arg(
+            required_unless_present = "recommended",
+            conflicts_with = "recommended"
+        )]
         extras: Vec<String>,
+        /// Install the extras this machine should get (`status` shows them
+        /// and why); `cloud` stays opt-in.
+        #[arg(long)]
+        recommended: bool,
+        /// Use PyTorch's standard build for diffusion even on an NVIDIA
+        /// machine.
+        #[arg(long)]
+        cpu: bool,
         /// Allow this one install to download from PyPI although Sovereign
         /// mode (the default) blocks the internet.
         #[arg(long, conflicts_with = "wheelhouse")]
@@ -56,10 +70,17 @@ pub fn run(cmd: AiHostCommand) -> Result<()> {
         AiHostCommand::Check { timeout } => check(Duration::from_secs(timeout)),
         AiHostCommand::Install {
             extras,
+            recommended,
+            cpu,
             allow_internet,
             wheelhouse,
         } => {
             let b = bundled()?;
+            let (extras, note) =
+                choose(extras, recommended, cpu, || hostenv::recommended_extras(&b));
+            if let Some(note) = note {
+                println!("{note}");
+            }
             let source = wheelhouse.map_or(Source::Index, Source::Wheelhouse);
             let root = hostenv::data_root();
             let now = hostenv::install(&b, &root, &extras, &source, allow_internet)?;
@@ -78,6 +99,64 @@ pub fn run(cmd: AiHostCommand) -> Result<()> {
             Ok(())
         }
     }
+}
+
+/// The extras to install for a request, and what to tell the user about
+/// the diffusion build. `diffusion` becomes `diffusion-cuda` when this
+/// machine is recommended it (`recommend` runs `nvidia-smi`, so it is only
+/// called when needed); `cpu` turns either back into `diffusion`.
+fn choose(
+    requested: Vec<String>,
+    recommended: bool,
+    cpu: bool,
+    recommend: impl FnOnce() -> Recommendation,
+) -> (Vec<String>, Option<String>) {
+    let (mut extras, mut note) = if recommended {
+        let rec = recommend();
+        (rec.extras, Some(rec.reason))
+    } else if !cpu && requested.iter().any(|e| e == DIFFUSION) {
+        let rec = recommend();
+        let cuda = rec.extras.iter().any(|e| e == DIFFUSION_CUDA);
+        let extras = requested
+            .into_iter()
+            .map(|e| {
+                if cuda && e == DIFFUSION {
+                    DIFFUSION_CUDA.to_owned()
+                } else {
+                    e
+                }
+            })
+            .collect();
+        let note = if cuda {
+            format!(
+                "{} (`{DIFFUSION_CUDA}`; `--cpu` installs the standard build)",
+                rec.reason
+            )
+        } else {
+            rec.reason
+        };
+        (extras, Some(note))
+    } else {
+        (requested, None)
+    };
+    if cpu && extras.iter().any(|e| e == DIFFUSION_CUDA) {
+        extras = extras
+            .into_iter()
+            .map(|e| {
+                if e == DIFFUSION_CUDA {
+                    DIFFUSION.to_owned()
+                } else {
+                    e
+                }
+            })
+            .collect();
+        note = Some(format!(
+            "`--cpu`: installing `{DIFFUSION}`, PyTorch's standard build"
+        ));
+    }
+    extras.sort();
+    extras.dedup();
+    (extras, note)
 }
 
 fn status() -> Result<()> {
@@ -118,6 +197,9 @@ fn status() -> Result<()> {
             }
         );
         println!("packages:    {}", b.packages(&root).site().display());
+        let rec = hostenv::recommended_extras(&b);
+        println!("recommended: {}", rec.extras.join(", "));
+        println!("             {}", rec.reason);
     }
     Ok(())
 }
@@ -157,5 +239,77 @@ fn check(timeout: Duration) -> Result<()> {
             }
             _ => std::thread::sleep(Duration::from_millis(50)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn strings(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    fn rec(extras: &[&str]) -> Recommendation {
+        Recommendation {
+            extras: strings(extras),
+            reason: "because".into(),
+        }
+    }
+
+    #[test]
+    fn diffusion_takes_the_cuda_build_when_recommended_unless_cpu() {
+        let nvidia = || rec(&["diffusion-cuda", "stt", "vision"]);
+        let (extras, note) = choose(strings(&["diffusion", "vision"]), false, false, nvidia);
+        assert_eq!(extras, ["diffusion-cuda", "vision"]);
+        assert!(note.unwrap().contains("--cpu"));
+
+        let (extras, _) = choose(strings(&["diffusion"]), false, true, || unreachable!());
+        assert_eq!(extras, ["diffusion"], "--cpu needs no driver query");
+        let (extras, _) = choose(strings(&["diffusion-cuda"]), false, true, || unreachable!());
+        assert_eq!(extras, ["diffusion"]);
+
+        let cpu_only = || rec(&["diffusion", "stt", "vision"]);
+        let (extras, note) = choose(strings(&["diffusion"]), false, false, cpu_only);
+        assert_eq!(extras, ["diffusion"]);
+        assert_eq!(note.as_deref(), Some("because"), "says why not CUDA");
+
+        // No diffusion asked for: no driver query, no note.
+        let (extras, note) = choose(strings(&["vision"]), false, false, || unreachable!());
+        assert_eq!((extras, note), (strings(&["vision"]), None));
+    }
+
+    #[test]
+    fn recommended_installs_the_recommendation() {
+        let nvidia = || rec(&["diffusion-cuda", "stt", "vision"]);
+        let (extras, note) = choose(vec![], true, false, nvidia);
+        assert_eq!(extras, ["diffusion-cuda", "stt", "vision"]);
+        assert_eq!(note.as_deref(), Some("because"));
+        let (extras, _) = choose(vec![], true, true, nvidia);
+        assert_eq!(extras, ["diffusion", "stt", "vision"]);
+    }
+
+    #[test]
+    fn install_takes_extras_or_recommended() {
+        use clap::Parser;
+        #[derive(Parser)]
+        struct Cli {
+            #[command(subcommand)]
+            cmd: AiHostCommand,
+        }
+        let parse = |args: &[&str]| Cli::try_parse_from([&["x"], args].concat()).map(|c| c.cmd);
+        assert!(matches!(
+            parse(&["install", "--recommended", "--cpu"]),
+            Ok(AiHostCommand::Install {
+                recommended: true,
+                cpu: true,
+                ..
+            })
+        ));
+        assert!(
+            parse(&["install"]).is_err(),
+            "needs extras or --recommended"
+        );
+        assert!(parse(&["install", "vision", "--recommended"]).is_err());
     }
 }
