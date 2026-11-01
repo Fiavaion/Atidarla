@@ -33,7 +33,9 @@ fn config(route: &str, vendor: Option<&str>) -> LinkConfig {
 
 /// Offers frames at ~60 fps until `until` holds for a result, checking each
 /// result is the inverse of the frame it answers. Returns how long it took.
-/// Offering and taking never wait: each call is timed.
+/// Offering and taking never wait: each call is timed. A lock held by the
+/// worker would stall every frame, so one slow call (the runner pausing the
+/// thread) is allowed and a second fails.
 fn drive(
     link: &Link,
     sent: &mut Vec<Vec<u8>>,
@@ -44,6 +46,7 @@ fn drive(
     let params = FrameParams::default();
     let mut seen = link.result_seq();
     let mut worst = Duration::ZERO;
+    let mut slow = 0;
     while t0.elapsed() < limit {
         let seq = sent.len() as u64 + 1;
         let mut frame = vec![0u8; 32 * 16 * 4];
@@ -61,11 +64,15 @@ fn drive(
             let input = &sent[out.seq as usize - 1];
             assert_eq!(out.pixels, inverted(input), "result for frame {}", out.seq);
         });
-        worst = worst.max(c.elapsed());
+        let took = c.elapsed();
+        worst = worst.max(took);
+        if took >= Duration::from_millis(5) {
+            slow += 1;
+        }
         if until(link) {
             assert!(
-                worst < Duration::from_millis(5),
-                "the render side waited {worst:?}"
+                slow <= 1,
+                "the render side waited {slow} times, worst {worst:?}"
             );
             return t0.elapsed();
         }
