@@ -25,6 +25,7 @@ pub mod refhost;
 pub mod ring;
 pub mod router;
 pub mod speech;
+pub mod storage;
 pub mod supervisor;
 
 pub use client::{ClientError, FramePath, HostClient, HostCommand, Pending};
