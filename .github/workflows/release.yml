@@ -66,6 +66,8 @@ jobs:
         run: |
           export ATD_VERSION="${ATD_VERSION#v}"
           packaging/macos/build-dmg.sh
+      - name: Check that the bundled Python loads user-installed extensions
+        run: packaging/macos/check-library-validation.sh dist/*.dmg
       - uses: actions/upload-artifact@v4
         with:
           name: installer-macos

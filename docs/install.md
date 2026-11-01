@@ -160,6 +160,38 @@ and validates it. The script signs the bundled Python's libraries and program fi
 The entitlements allow loading Python extension modules not signed by our team and ask for the
 microphone and camera (Audio In, Video In).
 
+**Notarising on your Mac.** Store the credentials once in your login keychain (it asks for an
+app-specific password from account.apple.com; nothing goes into the repository):
+
+```sh
+xcrun notarytool store-credentials atidarla --apple-id <your Apple ID> --team-id <TEAMID>
+ATD_MACOS_SIGN_IDENTITY="Developer ID Application: <Name> (<TEAMID>)" ATD_NOTARY_PROFILE=atidarla \
+    packaging/macos/build-dmg.sh
+```
+
+Before notarisation, `spctl -a -vv -t exec Atidarla.app` reports `rejected`,
+`source=Unnotarized Developer ID`; that is expected.
+
+**AI Host extras and library validation.** The extras are pip wheels whose `.so` and `.dylib`
+files are linker-signed or ad hoc, with no Team ID, and live in your user folder, outside the
+signed bundle. Under the hardened runtime, library validation refuses them ("mapping process and
+mapped file (non-platform) have different Team IDs") unless the loading program has
+`com.apple.security.cs.disable-library-validation`. The bundled `python3.13`, which runs the AI
+Host, is signed with it (as are both executables, for Python operators in the app). This is a
+deliberate trade-off: these programs accept any library they are told to load, so something that
+can already write to your user folder (or the Python path) can run code in them; the signature
+does not stop it. The hardened runtime still blocks `DYLD_*` variables and debugger attach. Apple notarises Developer ID apps with
+this entitlement. Wheels are not quarantined: pip writes the files itself, and a browser-
+downloaded wheelhouse loses its quarantine flag when pip unpacks it, so Gatekeeper never assesses
+them.
+
+`packaging/macos/check-library-validation.sh <dmg or app>` checks this on a copy: it builds a
+probe extension module with no Team ID outside the bundle and imports it with the bundled Python,
+then re-signs the copy without the entitlement and expects library validation to refuse it. An
+ad hoc build (the release dry run) is first re-signed ad hoc with the hardened runtime and the
+entitlements, which enforces library validation the same way. The release workflow runs it after
+building the DMG.
+
 The script builds the app against the bundled Python (`PYO3_CONFIG_FILE` from
 `packaging/fetch-python.sh`), precompiles its standard library and the AI Host
 (`packaging/stage-ai-host.sh`, shared with the AppImage; the MSI script does the same) so nothing
