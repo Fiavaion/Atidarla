@@ -8,10 +8,12 @@
 //! refuses it before any packet leaves.
 
 use std::fmt::Write as _;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{Value, json};
 
+use lsr_ai::models::DownloadOptions;
 use lsr_core::registry::ParamKind;
 
 use crate::tools::{Agent, Output, output_text};
@@ -63,22 +65,39 @@ fn post_json(url: &str, headers: &[(&str, &str)], body: &Value) -> Result<Value,
     };
     // The egress gate decides (Sovereign mode refuses the internet).
     lsr_ai::egress::resolve(host, port).map_err(|e| e.to_string())?;
-    let agent: ureq::Agent = ureq::Agent::config_builder()
+    // The gated agent carries the TLS provider and ignores proxies from the
+    // environment, which would bypass the gate.
+    let refused = Arc::new(Mutex::new(None));
+    let agent = lsr_ai::models::gated_agent(&DownloadOptions::default(), refused.clone());
+    let mut req = agent
+        .post(url)
+        .config()
         .timeout_global(Some(Duration::from_secs(300)))
+        .timeout_recv_response(Some(Duration::from_secs(300)))
         .build()
-        .into();
-    let mut req = agent.post(url).header("content-type", "application/json");
+        .header("content-type", "application/json");
     for (k, v) in headers {
         req = req.header(*k, *v);
     }
-    let mut resp = req
-        .send(body.to_string())
-        .map_err(|e| format!("{url}: {e}"))?;
+    let mut resp = req.send(body.to_string()).map_err(|e| {
+        match refused.lock().ok().and_then(|mut r| r.take()) {
+            Some(host) => format!("{url}: Sovereign mode refused {host}"),
+            None => format!("{url}: {e}"),
+        }
+    })?;
+    let status = resp.status().as_u16();
     let text = resp
         .body_mut()
         .read_to_string()
         .map_err(|e| e.to_string())?;
-    serde_json::from_str(&text).map_err(|e| format!("{url}: {e}: {}", &text[..text.len().min(300)]))
+    if !(200..300).contains(&status) {
+        return Err(format!(
+            "{url} answered {status}: {}",
+            text.get(..300).unwrap_or(&text)
+        ));
+    }
+    serde_json::from_str(&text)
+        .map_err(|e| format!("{url}: {e}: {}", text.get(..300).unwrap_or(&text)))
 }
 
 impl Llm for Ollama {
@@ -886,6 +905,26 @@ mod tests {
     use super::*;
     use crate::lock::{Scope, ShowLock};
     use crate::workspace::NetworkWorkspace;
+
+    /// HTTPS gets as far as the TLS handshake and fails as an error: the
+    /// agent carries a crypto provider (a bare ureq agent panics here).
+    #[test]
+    fn https_fails_as_an_error_not_a_panic() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let _ = std::io::Write::write_all(&mut s, b"not tls\r\n\r\n");
+        });
+        let err = post_json(
+            &format!("https://127.0.0.1:{port}/v1/messages"),
+            &[],
+            &json!({}),
+        )
+        .unwrap_err();
+        assert!(err.contains("127.0.0.1"), "{err}");
+        server.join().unwrap();
+    }
 
     /// A scripted model: replays tool calls, then stops.
     struct Script(Vec<Value>);
