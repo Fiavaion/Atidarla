@@ -8,13 +8,18 @@
 //! corner between unbevelled edges stays (gaining the slid points of its
 //! neighbours, so no edge gets a T-junction). A strip joins the two
 //! polygons of each bevelled edge; the holes left at the corners are
-//! filled (one polygon, or a fan from a rounded centre).
+//! filled: one polygon when it is flat, otherwise a fan of triangles from
+//! its (rounded) centre, or from the original point where a polygon still
+//! keeps it. A strip quad that is twisted (a slid point shared by two
+//! strips sits off each one's offset line) becomes two triangles, so
+//! every polygon stays flat.
 //!
 //! Where one strip ends at an inside point, the point splits: the two
 //! polygons beside the strip lose it to their slid points. With three
-//! polygons the third is cut along the strip's end; with four or more the
-//! point stays in the others and the end is a fan of flat triangles from
-//! it over the strip's end (one triangle for a chamfer).
+//! polygons the third is cut along the strip's end, the arc moved along
+//! the strip into that polygon's plane; with four or more the point stays
+//! in the others and the end is a fan of flat triangles from it over the
+//! strip's end (one triangle for a chamfer).
 //!
 //! Points on an open border bevel too when their polygons form one open
 //! fan: a strip runs out to the border, which keeps its place and gains
@@ -28,7 +33,7 @@ use atd_core::geo::{AttrClass, names};
 use atd_core::registry::ParamSchema;
 
 use crate::cook::{Job, Snap};
-use crate::mesh::{Column, Interp, Mesh, limits, v3};
+use crate::mesh::{Column, Interp, Mesh, limits, newell, v3};
 use crate::normals::point_normals;
 use crate::topo::{Edges, key, loops};
 
@@ -179,11 +184,15 @@ pub fn run(s: &Snap, inputs: &[Option<Mesh>], job: &Job) -> Result<Mesh, String>
     let bevelled = |a: u32, b: u32| selected.contains(&key(a, b));
     let mut touched = vec![false; np];
     let mut ends = vec![0u32; np];
+    // The other end of a point's bevelled edge (where it has just one).
+    let mut partner = vec![0u32; np];
     for &(a, b) in &selected {
         touched[a as usize] = true;
         touched[b as usize] = true;
         ends[a as usize] += 1;
         ends[b as usize] += 1;
+        partner[a as usize] = b;
+        partner[b as usize] = a;
     }
     if selected.is_empty() {
         let mut out = m.clone();
@@ -373,7 +382,13 @@ pub fn run(s: &Snap, inputs: &[Option<Mesh>], job: &Job) -> Result<Mesh, String>
             ids.clear();
             ids.extend_from_slice(&quad);
             ids.dedup();
-            if ids.len() >= 3 {
+            if ids.len() == 4 && !flat(&out, &ids) {
+                // Twisted, where a slid point is shared with another strip
+                // (two strips ending at one point between them): two
+                // triangles.
+                strips.push((vec![ids[0], ids[1], ids[2]], f));
+                strips.push((vec![ids[0], ids[2], ids[3]], f));
+            } else if ids.len() >= 3 {
                 strips.push((ids.clone(), f));
             }
         }
@@ -387,12 +402,25 @@ pub fn run(s: &Snap, inputs: &[Option<Mesh>], job: &Job) -> Result<Mesh, String>
             for c in first_corner[f]..first_corner[f + 1] {
                 ids.push(chain[c][0]);
                 if cut[c] {
-                    // The strip's end between the two slid points.
+                    // The strip's end between the two slid points, its arc
+                    // moved along the strip into this polygon's plane.
                     let (p, q) = (chain[c][0], chain[c][1]);
+                    let start = ids.len();
                     if let Some(r) = arcs.get(&(p, q)) {
                         ids.extend_from_slice(r);
                     } else if let Some(r) = arcs.get(&(q, p)) {
                         ids.extend(r.iter().rev());
+                    }
+                    let v = corners[c].v;
+                    let e = along(v, partner[v as usize]);
+                    let n = normal[f];
+                    let across = v3::dot(n, e);
+                    if across.abs() > 1e-9 {
+                        for &id in &ids[start..] {
+                            let x = v3::of(out.p[id as usize]);
+                            let t = v3::dot(n, v3::sub(pos[v as usize], x)) / across;
+                            out.p[id as usize] = v3::f32(v3::add(x, v3::scale(e, t)));
+                        }
                     }
                 }
                 ids.extend_from_slice(&chain[c][1..]);
@@ -466,12 +494,13 @@ pub fn run(s: &Snap, inputs: &[Option<Mesh>], job: &Job) -> Result<Mesh, String>
             continue;
         };
         let src = corners[around[v as usize][0]].f;
-        // The end of one strip at an inside point of four or more polygons:
-        // the point stays in the polygons away from the strip and closes
-        // its end with a fan of triangles (one for a chamfer).
+        // An inside point of four or more polygons that a polygon away from
+        // the strips keeps (one strip ends there, or two or more pass with
+        // a polygon between them unbevelled): the gap is a fan of
+        // triangles from it (one for a single chamfer's end).
         if let Some(i) = ring.iter().position(|&p| {
             let p = p as usize;
-            p < np && ends[p] == 1 && !border[p]
+            p < np && touched[p] && !border[p]
         }) {
             let k = ring.len();
             for j in 1..k - 1 {
@@ -480,16 +509,18 @@ pub fn run(s: &Snap, inputs: &[Option<Mesh>], job: &Job) -> Result<Mesh, String>
             }
             continue;
         }
-        if segments == 1 || ring.len() <= 4 {
-            patches.push(ring);
-            patch_src.push(src);
-            continue;
-        }
         let ring_pos: Vec<V> = ring.iter().map(|&p| v3::of(out.p[p as usize])).collect();
         let mean = v3::scale(
             ring_pos.iter().fold([0.0; 3], |a, &b| v3::add(a, b)),
             1.0 / ring.len() as f64,
         );
+        // A gap that is not flat (where four or more strips meet at a
+        // point unevenly) is a fan from its centre instead of one polygon.
+        if flat(&out, &ring) && (segments == 1 || ring.len() <= 4) {
+            patches.push(ring);
+            patch_src.push(src);
+            continue;
+        }
         let (sum, n) = centre_sum[v as usize];
         let centre = if n > 0 {
             let c = v3::scale(sum, 1.0 / f64::from(n));
@@ -543,6 +574,26 @@ pub fn run(s: &Snap, inputs: &[Option<Mesh>], job: &Job) -> Result<Mesh, String>
     Ok(out)
 }
 
+/// Whether the polygon `ids` of `m` lies in one plane (to a millionth of
+/// its size).
+fn flat(m: &Mesh, ids: &[u32]) -> bool {
+    if ids.len() <= 3 {
+        return true;
+    }
+    let pts: Vec<V> = ids.iter().map(|&p| v3::of(m.p[p as usize])).collect();
+    let mean = v3::scale(
+        pts.iter().fold([0.0; 3], |a, &b| v3::add(a, b)),
+        1.0 / pts.len() as f64,
+    );
+    let n = v3::norm(newell(ids.iter().map(|&p| m.p[p as usize])));
+    let size = pts
+        .iter()
+        .map(|&p| v3::len(v3::sub(p, mean)))
+        .fold(0.0, f64::max);
+    pts.iter()
+        .all(|&p| v3::dot(n, v3::sub(p, mean)).abs() <= 1e-6 * size)
+}
+
 /// Splits sorted directed edges into the open paths that start at a point
 /// no edge ends on, and the edges left over (for closed loops).
 fn paths(edges: Vec<(u32, u32)>) -> (Vec<Vec<u32>>, Vec<(u32, u32)>) {
@@ -583,6 +634,9 @@ fn paths(edges: Vec<(u32, u32)>) -> (Vec<Vec<u32>>, Vec<(u32, u32)>) {
 /// The `segments - 1` inner points of an arc from `p` (on a plane with
 /// normal `np`) to `q` (normal `nq`), tangent to both planes, and the
 /// arc's centre (`None` when the planes are parallel: a straight line).
+/// The points lie on the cylinder round the crease at equal angles, moving
+/// along its axis as far as `q` is ahead of `p`, so the arcs at a strip's
+/// two ends lie on the same lines along it.
 fn arc_points(p: V, q: V, np: V, nq: V, segments: usize) -> (Vec<V>, Option<V>) {
     let dn = v3::sub(np, nq);
     let dd = v3::dot(dn, dn);
@@ -591,11 +645,13 @@ fn arc_points(p: V, q: V, np: V, nq: V, segments: usize) -> (Vec<V>, Option<V>) 
         return ((1..segments).map(|i| v3::lerp(p, q, t(i))).collect(), None);
     }
     let r = v3::dot(v3::sub(p, q), dn) / dd;
-    let o = v3::scale(
-        v3::add(v3::sub(p, v3::scale(np, r)), v3::sub(q, v3::scale(nq, r))),
-        0.5,
-    );
-    let (dp, dq) = (v3::sub(p, o), v3::sub(q, o));
+    let (op, oq) = (v3::sub(p, v3::scale(np, r)), v3::sub(q, v3::scale(nq, r)));
+    let o = v3::scale(v3::add(op, oq), 0.5);
+    // The axis points beside p and q.
+    let skew = v3::sub(oq, op);
+    let op = v3::sub(o, v3::scale(skew, 0.5));
+    let oq = v3::add(o, v3::scale(skew, 0.5));
+    let (dp, dq) = (v3::sub(p, op), v3::sub(q, oq));
     let (lp, lq) = (v3::len(dp), v3::len(dq));
     let (up, uq) = (v3::norm(dp), v3::norm(dq));
     let theta = v3::dot(up, uq).clamp(-1.0, 1.0).acos();
@@ -610,7 +666,10 @@ fn arc_points(p: V, q: V, np: V, nq: V, segments: usize) -> (Vec<V>, Option<V>) 
                 (s * theta).sin() / theta.sin(),
             );
             let d = v3::add(v3::scale(up, wa), v3::scale(uq, wb));
-            v3::add(o, v3::scale(v3::norm(d), lp + (lq - lp) * s))
+            v3::add(
+                v3::add(op, v3::scale(skew, s)),
+                v3::scale(v3::norm(d), lp + (lq - lp) * s),
+            )
         })
         .collect();
     (points, Some(o))

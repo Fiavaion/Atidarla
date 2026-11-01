@@ -840,12 +840,22 @@ fn bevel_one_edge_between_four_polygons() {
         ],
         &p,
     );
-    // The base, cut by the arc at its three-polygon corner, is not flat
-    // (the base is not square to the edge), so only the topology is
-    // checked here.
-    assert!(watertight(&r));
+    // The base is not square to the edge: the arc that cuts its corner
+    // still lies in it, and the strips stay flat.
+    assert!(surface(&r).is_empty());
     assert_eq!(r.prims(), 5 + 4 + 4);
     assert_eq!(r.points(), 5 - 1 + 4 + 2 * 3);
+    let base = (0..r.prims())
+        .find(|&f| r.prim(f).len() > 4)
+        .expect("the cut base");
+    assert_eq!(r.prim(base).len(), 3 + 2 + 3);
+    assert!(
+        r.prim(base)
+            .iter()
+            .all(|&i| r.p[i as usize][1].abs() < 1e-7)
+    );
+    let v = volume(&r);
+    assert!(v > 4.0 / 3.0 - cut && v < 4.0 / 3.0, "{v}");
 
     // A box of two divisions, bevelled along half of its top front edge:
     // the end at the edge's midpoint meets four quads. The chamfer stops
@@ -904,6 +914,80 @@ fn bevel_one_edge_between_four_polygons() {
         ),
         "deterministic"
     );
+}
+
+/// An octahedron with unequal arms, so no corner is symmetric: four
+/// triangles meet at every point.
+fn uneven_octahedron(group: &[u32]) -> Mesh {
+    polyhedron(
+        &[
+            [1.0, 0.0, 0.0],
+            [-0.8, 0.0, 0.0],
+            [0.0, 1.2, 0.0],
+            [0.0, -0.9, 0.0],
+            [0.0, 0.0, 0.7],
+            [0.0, 0.0, -1.1],
+        ],
+        &[
+            &[0, 2, 4],
+            &[2, 1, 4],
+            &[1, 3, 4],
+            &[3, 0, 4],
+            &[2, 0, 5],
+            &[1, 2, 5],
+            &[3, 1, 5],
+            &[0, 3, 5],
+        ],
+        group,
+    )
+}
+
+#[test]
+fn bevel_several_edges_between_four_polygons() {
+    let d = 0.08;
+    let whole = volume(&uneven_octahedron(&[]));
+    // Two neighbouring edges at each of +X, +Y, +Z (the three edges of
+    // one face); two opposite edges at +Y (ends at ±X); every edge.
+    // Points and polygons for s segments:
+    // - neighbours: at each end a mitre, two slid points and the kept
+    //   point; 3 strips, each end an arc; the gap a fan of 2s from the
+    //   point.
+    // - opposite: +Y goes, the strips share their ends there; their
+    //   quads are twisted (the slid points are shared), so two triangles
+    //   each; a fan of s at ±X.
+    // - all: four mitres and a centre at each point, 12 strips, the
+    //   uneven gaps fans of 4s from the centre.
+    type Count = fn(usize) -> (usize, usize);
+    let cases: [(&str, Mesh, Count); 3] = [
+        ("neighbours", uneven_octahedron(&[0, 2, 4]), |s| {
+            (15 + 6 * (s - 1), 8 + 3 * s + 6 * s)
+        }),
+        ("opposite", uneven_octahedron(&[2, 0, 1]), |s| {
+            (11 + 3 * (s - 1), 8 + 4 * s + 2 * s)
+        }),
+        ("all", uneven_octahedron(&[0, 1, 2, 3, 4, 5]), |s| {
+            (30 + 24 * (s - 1), 8 + 12 * s + 24 * s)
+        }),
+    ];
+    for (name, m, count) in &cases {
+        for s in [1, 2, 3, 5] {
+            let params = [
+                ("offset", json!(d)),
+                ("group", json!("edge")),
+                ("segments", json!(s)),
+            ];
+            let c = on("msh.bevel", &params, m);
+            assert_eq!((c.points(), c.prims()), count(s), "{name}, {s} segments");
+            assert!(surface(&c).is_empty(), "{name}, {s} segments: closed");
+            assert!(watertight(&c), "{name}, {s} segments");
+            let v = volume(&c);
+            assert!(
+                v > 0.9 * whole && v < whole,
+                "{name}, {s} segments: {v} {whole}"
+            );
+            assert_eq!(c, on("msh.bevel", &params, m), "{name}: deterministic");
+        }
+    }
 }
 
 /// Mean edge length and the share of edges within `lo..hi`.
