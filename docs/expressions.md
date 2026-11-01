@@ -45,6 +45,7 @@ compares them on a corpus of expressions, errors included).
 | `me.digits` | The number at the end of the node's name (`level3` → 3) |
 | `op('name').par.param`, `op('name').par.param[1]` | Another node's parameter, or one component of a vector or colour |
 | `op('name')['channel']` | The current value of a SIG node's channel |
+| `op('name')[row, col]` | A DAT cell as a number (see [DAT cells](#dat-cells)) |
 
 Nodes named in `op('…')` are dependencies: they cook first, and a change to them recooks the
 expression's node. A reference loop (two parameters reading each other) is reported as an
@@ -53,6 +54,41 @@ error; a loop through channels reads the previous frame's value.
 Errors follow Python: dividing by zero, `sqrt(-1)`, `log(0)` and a name that does not exist
 are errors, not silent zeros. Renaming a node breaks expressions that name it, as in
 TouchDesigner.
+
+## DAT cells
+
+`op('table1')[row, col]` reads one cell of a DAT node as a number. Each of `row` and `col` is
+either a number, which may be an expression (`op('table1')[1 + int(time) % 3, 1]`), or a name in
+quotes: a row name finds the first row whose first cell is that text, a column name the first
+column whose header (the first row) is that text. So with a table
+
+```text
+name	level
+dim	0.2
+full	1
+```
+
+`op('table1')[1, 1]`, `op('table1')[1, 'level']`, `op('table1')['dim', 1]` and
+`op('table1')['dim', 'level']` all give 0.2. Rows and columns count from 0, and the header row
+is row 0. A Text DAT reads as one row per line, in column 0.
+
+The cell's text must be a number (spaces around it are ignored). Anything else is an error,
+not a zero, and the parameter keeps its stored value; the node says which cell:
+
+- `op('table1')[5, 'level']: no such cell; it has 3 rows and 2 columns` (a row or column outside
+  the table, or no row or header with that name);
+- `op('table1')[0, 'level']: the cell is not a number; it holds 'level'`;
+- `op('lfo1'): not a DAT, so it has no cells`;
+- a row or column that is not a whole number from 0 (`1.5`, `-1`).
+
+The DAT is a dependency like any `op('…')`: it cooks first, and a change to the table cooks the
+expression's node again. A cell is read once per table value and kept until the table changes
+(or the row or column asked for does), so reading cells allocates nothing per frame.
+
+In **Python** the same `op('table1')[row, col]` gives the cell as a float when its text is a
+number, and the text otherwise, so `len(op('table1')[1, 'name'])` works there. A cell is data:
+its text is never run as code, and Python expressions that read cells are allowed or refused
+like any other.
 
 ## Vectors and colours (PRD A66)
 
@@ -100,3 +136,5 @@ me.name.upper().count('L')
 
 - [`kaleidoscope-tunnel`](../examples/kaleidoscope-tunnel.atidarla/): a native expression on Segments.
 - [`live-control`](../examples/live-control.atidarla/): a Python expression on Contrast.
+- [`dat-tables`](../examples/dat-tables.atidarla/): `swatch`'s colour reads a row of the `looks`
+  table each second.

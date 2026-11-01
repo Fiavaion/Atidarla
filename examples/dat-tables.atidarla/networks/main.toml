@@ -1,6 +1,6 @@
 # Atidarla network. Node IDs are stable: inputs and bindings refer to them.
 format = 1
-next_id = 10
+next_id = 12
 
 [[node]]
 id = 0
@@ -89,3 +89,21 @@ inputs.text = { node = 7, output = "out" }
 inputs.values = { node = 6, output = "out" }
 params.precision = 2
 params.template = "{subject} in {style}, {text}, brightness {lfo}"
+
+[[node]]
+id = 10
+name = "looks"
+type = "dat.table"
+pos = [0.0, 840.0]
+params.rows = '''
+name	level
+dim	0.2
+mid	0.5
+full	1'''
+
+[[node]]
+id = 11
+name = "swatch"
+type = "img.constant"
+pos = [220.0, 840.0]
+params.colour = { value = [1.0, 1.0, 1.0, 1.0], expr = "op('looks')[1 + int(time) % 3, 'level']" }

@@ -616,6 +616,23 @@ pub struct MappingRuntime {
     /// Indices into `held` whose driven components changed this frame
     /// with no mapping writing (see [`Self::writes`]).
     refreshed: Vec<usize>,
+    /// Vectors and colours OSCQuery routes set, kept between messages.
+    route_held: Vec<RouteHold>,
+    /// Indices into `route_held` refreshed this frame.
+    route_refreshed: Vec<usize>,
+}
+
+/// The live vector or colour a route last set. The components its message
+/// did not set keep following their binding or expression on later frames,
+/// until another writer changes the parameter (PRD A66).
+#[derive(Debug)]
+struct RouteHold {
+    route: usize,
+    node: NodeId,
+    param: String,
+    /// Components the message set (the first `set`).
+    set: usize,
+    value: Value,
 }
 
 impl MappingRuntime {
@@ -741,6 +758,22 @@ impl MappingRuntime {
         self.routes = routes;
         self.routes.truncate(MAX_ROUTES);
         self.route_snap.clear();
+        // Routes are rebuilt when nodes are added, removed or renamed:
+        // a held value follows its parameter to the new route index.
+        let routes = &self.routes;
+        self.route_held.retain_mut(|h| {
+            match routes
+                .iter()
+                .position(|r| r.node == h.node && r.param == h.param)
+            {
+                Some(r) => {
+                    h.route = r;
+                    true
+                }
+                None => false,
+            }
+        });
+        self.route_refreshed.clear();
     }
 
     pub fn routes(&self) -> &[Route] {
@@ -828,6 +861,7 @@ impl MappingRuntime {
     ) {
         self.released.clear();
         self.refreshed.clear();
+        self.route_refreshed.clear();
         self.sync(maps);
         self.out.clear();
         {
@@ -927,12 +961,67 @@ impl MappingRuntime {
                 kind => live_value(kind, current, None, slot.args[0]),
             };
             if let Some(value) = value {
+                if value.is_array() {
+                    let set = usize::from(slot.n);
+                    match self.route_held.iter_mut().find(|h| h.route == r) {
+                        Some(h) => {
+                            h.set = set;
+                            assign_value(&mut h.value, &value);
+                        }
+                        None => self.route_held.push(RouteHold {
+                            route: r,
+                            node: route.node,
+                            param: route.param.clone(),
+                            set,
+                            value: value.clone(),
+                        }),
+                    }
+                }
                 self.out.push(Write {
                     node: route.node,
                     from: Origin::Route(r),
                     value,
                 });
             }
+        }
+        self.refresh_routes(&lookup, &driven);
+    }
+
+    /// Between messages, the components a route did not set follow their
+    /// binding or expression. A hold ends when the parameter's value is no
+    /// longer the one the route left (another writer changed it, or the
+    /// project's live values were cleared). Allocates nothing.
+    fn refresh_routes<'e>(
+        &mut self,
+        lookup: &impl Fn(NodeId, &str) -> Option<(&'e ParamKind, &'e Value)>,
+        driven: &impl Fn(NodeId, &str, usize) -> Option<f64>,
+    ) {
+        let mut k = 0;
+        while k < self.route_held.len() {
+            let h = &mut self.route_held[k];
+            if self
+                .route_snap
+                .get(h.route)
+                .is_some_and(|s| s.fresh && s.n > 0)
+            {
+                k += 1;
+                continue;
+            }
+            if lookup(h.node, &h.param).is_none_or(|(_, current)| *current != h.value) {
+                self.route_held.swap_remove(k);
+                continue;
+            }
+            if fill_driven(
+                &self.synced,
+                &self.state,
+                (h.node, &h.param),
+                &mut h.value,
+                h.set,
+                driven,
+            ) {
+                self.route_refreshed.push(k);
+            }
+            k += 1;
         }
     }
 
@@ -980,6 +1069,8 @@ impl MappingRuntime {
         self.held.clear();
         self.released.clear();
         self.refreshed.clear();
+        self.route_held.clear();
+        self.route_refreshed.clear();
     }
 
     fn param(&self, from: Origin) -> &str {
@@ -995,10 +1086,15 @@ impl MappingRuntime {
             let (n, p, v) = &self.held[k];
             (*n, p.as_str(), v)
         });
+        let routes = self.route_refreshed.iter().map(|&k| {
+            let h = &self.route_held[k];
+            (h.node, h.param.as_str(), &h.value)
+        });
         self.out
             .iter()
             .map(|w| (w.node, self.param(w.from), &w.value))
             .chain(refreshed)
+            .chain(routes)
     }
 
     /// The mapped parameters (for write-back on save and for the UI).

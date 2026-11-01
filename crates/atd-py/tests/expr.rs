@@ -4,7 +4,8 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use atd_core::expr::{self, EvalError, Expr, ExprValue, PyJob, PyRef, PythonHost};
+use atd_core::dat::{Dat, Table};
+use atd_core::expr::{self, CellAt, EvalError, Expr, ExprValue, PyJob, PyRef, PythonHost};
 use atd_py::expr::PyExprHost;
 
 fn snapshot() -> Vec<PyRef> {
@@ -18,12 +19,33 @@ fn snapshot() -> Vec<PyRef> {
                 ("monochrome".into(), vec![1.0]),
             ],
             channels: vec![],
+            dat: None,
         },
         PyRef {
             name: "lfo1".into(),
             exists: true,
             params: vec![],
             channels: vec![("lfo".into(), -0.75), ("x y".into(), 2.0)],
+            dat: None,
+        },
+        PyRef {
+            name: "table1".into(),
+            exists: true,
+            params: vec![],
+            channels: vec![],
+            dat: Some(Dat::table(Table::from_rows([
+                ["name", "speed", "label"],
+                ["slow", " 0.25", "calm"],
+                ["fast", "4", "wild"],
+                ["neg", "-1.5e1", ""],
+            ]))),
+        },
+        PyRef {
+            name: "text1".into(),
+            exists: true,
+            params: vec![],
+            channels: vec![],
+            dat: Some(Dat::text("10\n20\n")),
         },
     ]
 }
@@ -65,6 +87,17 @@ impl expr::Env for SnapshotEnv<'_> {
             .map(|(_, v)| *v)
             .ok_or(EvalError::NoChannel(node))
     }
+    fn cell(
+        &self,
+        node: usize,
+        slot: usize,
+        row: CellAt<'_>,
+        col: CellAt<'_>,
+    ) -> Result<f64, EvalError> {
+        let r = self.refs[node].ok_or(EvalError::NoNode(node))?;
+        let dat = r.dat.as_ref().ok_or(EvalError::NotDat(node))?;
+        expr::cell_number(dat, slot, row, col)
+    }
 }
 
 const CORPUS: &[&str] = &[
@@ -105,6 +138,22 @@ const CORPUS: &[&str] = &[
     "op('lfo1')['nope']",
     "0 and 1 / 0",
     "1 or 1 / 0",
+    // DAT cells, by index and by name.
+    "op('table1')[1, 1] + op('table1')[2, 'speed'] * 10",
+    "op('table1')['neg', 'speed'] + op('table1')['fast', 1]",
+    "op('table1')[1 + frame % 2, 'speed']",
+    "op('table1')[time // 6, 1]",
+    "op('text1')[1, 0] + op('text1')['10', 0]",
+    "op('table1')[9, 1]",
+    "op('table1')[1, 'nope']",
+    "op('table1')['nope', 1]",
+    "op('table1')[1, 'label']",
+    "op('table1')[3, 'label']",
+    "op('table1')[0.5, 1]",
+    "op('table1')[-1, 1]",
+    "op('text1')[0, 1]",
+    "op('lfo1')[0, 0]",
+    "op('nothere')[0, 0]",
 ];
 
 fn python_results(jobs: &[PyJob]) -> Vec<Result<ExprValue, String>> {

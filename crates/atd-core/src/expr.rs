@@ -19,7 +19,10 @@
 //! - `time` (seconds) and `frame`, which make the node cook every frame;
 //! - `me.digits`: the number at the end of the node's name (`noise3` → 3);
 //! - `op('name').par.param` (`[i]` for one component of a vector or colour)
-//!   and `op('name')['channel']`, another node's parameter or SIG channel.
+//!   and `op('name')['channel']`, another node's parameter or SIG channel;
+//! - `op('name')[row, col]`, a DAT cell read as a number: each of `row` and
+//!   `col` is a number (an expression) or a name in quotes, the row whose
+//!   first cell is it or the column whose header (first-row cell) is it.
 //!   Referenced nodes are dependencies: they cook first.
 //!
 //! As in Python, dividing by zero is an error, as is a maths domain error
@@ -29,6 +32,8 @@
 use std::fmt;
 use std::sync::Arc;
 
+use crate::dat::Dat;
+
 /// A parsed native expression.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Expr {
@@ -36,8 +41,44 @@ pub struct Expr {
     /// Node names referenced with `op('…')`, in order of first use. The
     /// evaluator's [`Env`] receives indices into this list.
     refs: Vec<String>,
+    /// Each `op('…')[row, col]`, by slot: its node and the names it uses,
+    /// for messages.
+    cells: Vec<CellSpec>,
     uses_time: bool,
     uses_channels: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct CellSpec {
+    node: usize,
+    row: Option<String>,
+    col: Option<String>,
+}
+
+/// A row or column of a DAT cell in the expression.
+#[derive(Debug, Clone, PartialEq)]
+enum At {
+    Index(Box<Node>),
+    Name(String),
+}
+
+impl At {
+    /// As [`Env::cell`] takes it, with `index` the evaluated number.
+    fn at(&self, index: u32) -> CellAt<'_> {
+        match self {
+            At::Index(_) => CellAt::Index(index),
+            At::Name(n) => CellAt::Name(n),
+        }
+    }
+}
+
+/// A row or column of a DAT cell, as [`Env::cell`] receives it: an index,
+/// or a name (the row whose first cell is it, the column whose header is
+/// it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CellAt<'a> {
+    Index(u32),
+    Name(&'a str),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -67,6 +108,13 @@ enum Node {
     Chan {
         node: usize,
         channel: String,
+    },
+    Cell {
+        node: usize,
+        /// Index into [`Expr::cells`]; the engine caches by it.
+        slot: usize,
+        row: At,
+        col: At,
     },
 }
 
@@ -190,6 +238,23 @@ pub enum EvalError {
     Index(usize),
     /// Too many nested references (a parameter referring to itself).
     TooDeep,
+    /// `op(name)[row, col]` on a node with no DAT value.
+    NotDat(usize),
+    /// A cell's row or column is not a whole number from 0 (by slot).
+    CellIndex(usize),
+    /// No such cell: the row or column is outside the table, or no row or
+    /// header has that name. By slot, with the indices asked for.
+    NoCell {
+        slot: usize,
+        row: u32,
+        col: u32,
+    },
+    /// The cell's text is not a number.
+    NotNumber {
+        slot: usize,
+        row: u32,
+        col: u32,
+    },
 }
 
 impl EvalError {
@@ -204,6 +269,19 @@ impl EvalError {
             Self::NoChannel(i) => format!("op('{}'): no such channel", name(i)),
             Self::Index(i) => format!("op('{}').par: index out of range", name(i)),
             Self::TooDeep => "parameters refer to each other in a loop".into(),
+            Self::NotDat(i) => format!("op('{}'): not a DAT, so it has no cells", name(i)),
+            Self::CellIndex(slot) => format!(
+                "{}: a row or column must be a whole number, 0 or more",
+                expr.cell_label(*slot, None)
+            ),
+            Self::NoCell { slot, row, col } => format!(
+                "{}: no such cell",
+                expr.cell_label(*slot, Some((*row, *col)))
+            ),
+            Self::NotNumber { slot, row, col } => format!(
+                "{}: the cell is not a number",
+                expr.cell_label(*slot, Some((*row, *col)))
+            ),
         }
     }
 }
@@ -219,6 +297,58 @@ pub trait Env {
     fn param(&self, node: usize, param: &str, index: Option<usize>) -> Result<f64, EvalError>;
     /// The current value of channel `channel` of referenced node `node`.
     fn channel(&self, node: usize, channel: &str) -> Result<f64, EvalError>;
+    /// A cell of referenced node `node`'s DAT as a number
+    /// ([`cell_number`]); `slot` identifies the reference
+    /// ([`Expr::cell_count`]) for caching. Without DATs, none has cells.
+    fn cell(
+        &self,
+        node: usize,
+        slot: usize,
+        row: CellAt<'_>,
+        col: CellAt<'_>,
+    ) -> Result<f64, EvalError> {
+        let _ = (slot, row, col);
+        Err(EvalError::NotDat(node))
+    }
+}
+
+/// What `op('t')[row, col]` gives: the cell of `dat` as a number (spaces
+/// around it ignored). A name finds the first row whose first cell is it,
+/// or the first column whose header (first-row cell) is it. Allocates
+/// nothing. `slot` is reported in errors.
+pub fn cell_number(
+    dat: &Dat,
+    slot: usize,
+    row: CellAt<'_>,
+    col: CellAt<'_>,
+) -> Result<f64, EvalError> {
+    let index = |at: CellAt<'_>| match at {
+        CellAt::Index(i) => i,
+        CellAt::Name(_) => u32::MAX,
+    };
+    let missing = EvalError::NoCell {
+        slot,
+        row: index(row),
+        col: index(col),
+    };
+    let r = match row {
+        CellAt::Index(i) => i as usize,
+        CellAt::Name(n) => (0..dat.rows())
+            .find(|&r| dat.cell(r, 0) == Some(n))
+            .ok_or(missing)?,
+    };
+    let c = match col {
+        CellAt::Index(i) => i as usize,
+        CellAt::Name(n) => (0..dat.cols())
+            .find(|&c| dat.cell(0, c) == Some(n))
+            .ok_or(missing)?,
+    };
+    let text = dat.cell(r, c).ok_or(missing)?;
+    text.trim().parse().map_err(|_| EvalError::NotNumber {
+        slot,
+        row: r as u32,
+        col: c as u32,
+    })
 }
 
 impl Expr {
@@ -229,6 +359,7 @@ impl Expr {
             tokens,
             pos: 0,
             refs: Vec::new(),
+            cells: Vec::new(),
             uses_time: false,
             uses_channels: false,
         };
@@ -239,9 +370,35 @@ impl Expr {
         Ok(Self {
             root,
             refs: p.refs,
+            cells: p.cells,
             uses_time: p.uses_time,
             uses_channels: p.uses_channels,
         })
+    }
+
+    /// How many `op('…')[row, col]` cell references there are (slots
+    /// `0..cell_count()`).
+    pub fn cell_count(&self) -> usize {
+        self.cells.len()
+    }
+
+    /// `op('t')[3, 'speed']` for slot `slot`; without indices, `…` stands
+    /// for the computed ones.
+    fn cell_label(&self, slot: usize, at: Option<(u32, u32)>) -> String {
+        let Some(c) = self.cells.get(slot) else {
+            return "op(…)[…]".into();
+        };
+        let part = |name: &Option<String>, i: Option<u32>| match (name, i) {
+            (Some(n), _) => format!("'{n}'"),
+            (None, Some(i)) => i.to_string(),
+            (None, None) => "…".into(),
+        };
+        format!(
+            "op('{}')[{}, {}]",
+            self.refs.get(c.node).map_or("?", String::as_str),
+            part(&c.row, at.map(|a| a.0)),
+            part(&c.col, at.map(|a| a.1)),
+        )
     }
 
     /// Node names referenced with `op('…')`.
@@ -356,6 +513,23 @@ fn eval(n: &Node, env: &dyn Env) -> Result<f64, EvalError> {
         Node::Call(f, args) => call(*f, args, env)?,
         Node::Par { node, param, index } => env.param(*node, param, *index)?,
         Node::Chan { node, channel } => env.channel(*node, channel)?,
+        Node::Cell {
+            node,
+            slot,
+            row,
+            col,
+        } => {
+            let index = |a: &At| -> Result<u32, EvalError> {
+                let At::Index(i) = a else { return Ok(0) };
+                let v = eval(i, env)?;
+                if v.fract() != 0.0 || !(0.0..f64::from(u32::MAX)).contains(&v) {
+                    return Err(EvalError::CellIndex(*slot));
+                }
+                Ok(v as u32)
+            };
+            let (r, c) = (index(row)?, index(col)?);
+            env.cell(*node, *slot, row.at(r), col.at(c))?
+        }
     })
 }
 
@@ -583,6 +757,7 @@ struct Parser {
     tokens: Vec<Tok>,
     pos: usize,
     refs: Vec<String>,
+    cells: Vec<CellSpec>,
     uses_time: bool,
     uses_channels: bool,
 }
@@ -822,7 +997,17 @@ impl Parser {
         Ok(Node::Call(f, args))
     }
 
-    /// `op('name').par.param[i]` or `op('name')['channel']`.
+    /// A cell's row or column: a name in quotes, or an expression.
+    fn cell_at(&mut self) -> Result<At, NotNative> {
+        if let Some(Tok::Str(name)) = self.peek().cloned() {
+            self.pos += 1;
+            return Ok(At::Name(name));
+        }
+        Ok(At::Index(Box::new(self.ternary()?)))
+    }
+
+    /// `op('name').par.param[i]`, `op('name')['channel']` or
+    /// `op('name')[row, col]`.
     fn op_ref(&mut self) -> Result<Node, NotNative> {
         self.expect_op("(")?;
         let Some(Tok::Str(name)) = self.peek().cloned() else {
@@ -832,10 +1017,30 @@ impl Parser {
         self.expect_op(")")?;
         let node = self.reference(name);
         if self.eat_op("[") {
-            let Some(Tok::Str(channel)) = self.peek().cloned() else {
+            let row = self.cell_at()?;
+            if self.eat_op(",") {
+                let col = self.cell_at()?;
+                self.expect_op("]")?;
+                let name = |a: &At| match a {
+                    At::Name(n) => Some(n.clone()),
+                    At::Index(_) => None,
+                };
+                let slot = self.cells.len();
+                self.cells.push(CellSpec {
+                    node,
+                    row: name(&row),
+                    col: name(&col),
+                });
+                return Ok(Node::Cell {
+                    node,
+                    slot,
+                    row,
+                    col,
+                });
+            }
+            let At::Name(channel) = row else {
                 return Err(NotNative("op(…)[…] needs a channel name in quotes".into()));
             };
-            self.pos += 1;
             self.expect_op("]")?;
             self.uses_channels = true;
             return Ok(Node::Chan { node, channel });
@@ -984,6 +1189,8 @@ pub struct PyRef {
     pub params: Vec<(Arc<str>, Vec<f64>)>,
     /// SIG channels: the latest value of each.
     pub channels: Vec<(Arc<str>, f64)>,
+    /// Its DAT value, for `op('t')[row, col]` (shared, not copied).
+    pub dat: Option<Dat>,
 }
 
 /// Why a Python-tier expression gives no value: this expression, as it is
@@ -1165,6 +1372,125 @@ mod tests {
         assert_eq!(ev("1 if 1 else 1 / 0").unwrap(), 1.0);
         let e = Expr::parse("op('a').par.b").unwrap();
         assert_eq!(EvalError::NoNode(0).message(&e), "op('a'): no such node");
+    }
+
+    /// `op('t')` is a table; `op('note')` is text; `op('x')` has no DAT.
+    struct DatEnv {
+        table: Dat,
+        text: Dat,
+    }
+
+    impl Env for DatEnv {
+        fn time(&self) -> f64 {
+            2.5
+        }
+        fn frame(&self) -> f64 {
+            0.0
+        }
+        fn me_digits(&self) -> Option<f64> {
+            None
+        }
+        fn param(&self, node: usize, _: &str, _: Option<usize>) -> Result<f64, EvalError> {
+            Err(EvalError::NoParam(node))
+        }
+        fn channel(&self, node: usize, _: &str) -> Result<f64, EvalError> {
+            Err(EvalError::NoChannel(node))
+        }
+        fn cell(
+            &self,
+            node: usize,
+            slot: usize,
+            row: CellAt<'_>,
+            col: CellAt<'_>,
+        ) -> Result<f64, EvalError> {
+            let dat = match node {
+                0 => &self.table,
+                1 => &self.text,
+                _ => return Err(EvalError::NotDat(node)),
+            };
+            cell_number(dat, slot, row, col)
+        }
+    }
+
+    fn dat_env() -> DatEnv {
+        DatEnv {
+            table: Dat::table(crate::dat::Table::from_rows([
+                ["name", "speed", "label"],
+                ["slow", " 0.25 ", "calm"],
+                ["fast", "4", "wild"],
+            ])),
+            text: Dat::text("10\n20\n"),
+        }
+    }
+
+    fn cell_ev(src: &str) -> Result<f64, EvalError> {
+        // `t`, `note` and `x` are refs 0, 1 and 2 when named in that order.
+        let full = format!(
+            "0 * op('t')[0, 0] if 0 else 0 * op('note')[0, 0] if 0 else 0 * op('x')[0, 0] if 0 else {src}"
+        );
+        Expr::parse(&full)
+            .unwrap_or_else(|e| panic!("{src}: {e}"))
+            .eval(&dat_env())
+    }
+
+    #[test]
+    fn dat_cells_by_index_and_name() {
+        for (src, want) in [
+            ("op('t')[1, 1]", 0.25),
+            ("op('t')[2, 'speed']", 4.0),
+            ("op('t')['fast', 1]", 4.0),
+            ("op('t')['slow', 'speed'] * 2", 0.5),
+            ("op('t')[1 + int(time) - 2, 'speed']", 0.25),
+            ("op('t')[2.0, 1]", 4.0),
+            ("op('note')[1, 0] + op('note')['10', 0]", 30.0),
+        ] {
+            assert_eq!(cell_ev(src).unwrap(), want, "{src}");
+        }
+        let e = Expr::parse("op('t')[1, 'speed'] + op('t')['fast', 1] + op('u')['c']").unwrap();
+        assert_eq!(e.refs(), ["t", "u"]);
+        assert_eq!(e.cell_count(), 2);
+        assert!(e.uses_channels() && !e.uses_time());
+    }
+
+    #[test]
+    fn missing_cells_fail_clearly() {
+        let msg = |src: &str| {
+            let full = format!(
+                "0 * op('t')[0, 0] if 0 else 0 * op('note')[0, 0] if 0 else 0 * op('x')[0, 0] if 0 else {src}"
+            );
+            let e = Expr::parse(&full).unwrap();
+            e.eval(&dat_env()).unwrap_err().message(&e)
+        };
+        assert_eq!(msg("op('t')[3, 1]"), "op('t')[3, 1]: no such cell");
+        assert_eq!(
+            msg("op('t')[1, 'colour']"),
+            "op('t')[1, 'colour']: no such cell"
+        );
+        assert_eq!(
+            msg("op('t')['medium', 2]"),
+            "op('t')['medium', 2]: no such cell"
+        );
+        assert_eq!(msg("op('note')[0, 1]"), "op('note')[0, 1]: no such cell");
+        assert_eq!(
+            msg("op('t')[1, 'label']"),
+            "op('t')[1, 'label']: the cell is not a number"
+        );
+        assert_eq!(
+            msg("op('t')[time, 0]"),
+            "op('t')[…, …]: a row or column must be a whole number, 0 or more"
+        );
+        assert_eq!(
+            msg("op('t')[-1, 0]"),
+            "op('t')[…, …]: a row or column must be a whole number, 0 or more"
+        );
+        assert_eq!(
+            msg("op('x')[0, 0]"),
+            "op('x'): not a DAT, so it has no cells"
+        );
+        // Short-circuiting skips a missing cell, as in Python.
+        assert_eq!(cell_ev("1 if 1 else op('t')[9, 9]").unwrap(), 1.0);
+        // An environment without DATs has none.
+        assert_eq!(ev("op('t')[0, 0]"), Err(EvalError::NotDat(0)));
     }
 
     #[test]

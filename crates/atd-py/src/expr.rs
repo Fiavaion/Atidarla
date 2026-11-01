@@ -15,8 +15,10 @@
 //! evaluates it.
 //!
 //! Expressions see the same names as the native tier (`time`, `frame`,
-//! `me`, `op('name').par.x`, `op('name')['channel']`, the `math` module's
-//! functions, `clamp` and `lerp`), plus the rest of Python.
+//! `me`, `op('name').par.x`, `op('name')['channel']`, `op('name')[row,
+//! col]`, the `math` module's functions, `clamp` and `lerp`), plus the rest
+//! of Python. A DAT cell is a float when its text is a number and the text
+//! otherwise; it is data, never run as code.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -51,17 +53,50 @@ class _Par:
         return v[0] if len(v) == 1 else tuple(v)
 
 
+def _cell_index(at):
+    if isinstance(at, float) and at.is_integer():
+        at = int(at)
+    if not isinstance(at, int) or at < 0:
+        raise IndexError("a row or column must be a whole number, 0 or more, or a name")
+    return at
+
+
 class _Op:
-    def __init__(self, name, params, channels):
+    def __init__(self, name, params, channels, table):
         self.name = name
         self.par = _Par(params)
         self._channels = channels
+        self._table = table
 
-    def __getitem__(self, channel):
+    def __getitem__(self, key):
+        if isinstance(key, tuple):
+            return self._cell(*key)
         try:
-            return self._channels[channel]
+            return self._channels[key]
         except KeyError:
-            raise KeyError(f"op('{self.name}') has no channel '{channel}'") from None
+            raise KeyError(f"op('{self.name}') has no channel '{key}'") from None
+
+    def _cell(self, row, col):
+        # As the native tier: a name is the row whose first cell is it, or
+        # the column whose header (first-row cell) is it.
+        t = self._table
+        if t is None:
+            raise TypeError(f"op('{self.name}'): not a DAT, so it has no cells")
+        if isinstance(row, str):
+            r = next((i for i, cells in enumerate(t) if cells and cells[0] == row), None)
+        else:
+            r = _cell_index(row)
+        if isinstance(col, str):
+            c = next((j for j, v in enumerate(t[0]) if v == col), None) if t else None
+        else:
+            c = _cell_index(col)
+        if r is None or c is None or r >= len(t) or c >= len(t[r]):
+            raise IndexError(f"op('{self.name}')[{row!r}, {col!r}]: no such cell")
+        text = t[r][c]
+        try:
+            return float(text)
+        except ValueError:
+            return text
 
 
 class _Me:
@@ -81,9 +116,9 @@ def evaluate(source, time, frame, me, refs):
         code = compile(source, "<expression>", "eval")
         _codes[source] = code
     nodes = {}
-    for name, exists, params, channels in refs:
+    for name, exists, params, channels, table in refs:
         if exists:
-            nodes[name] = _Op(name, dict(params), dict(channels))
+            nodes[name] = _Op(name, dict(params), dict(channels), table)
 
     def op(name):
         try:
@@ -302,8 +337,14 @@ fn run(shared: &Shared) {
 }
 
 /// A referenced node as the helper takes it: (name, exists, parameters,
-/// channels).
-type RefTuple<'a> = (&'a str, bool, Vec<(&'a str, Vec<f64>)>, Vec<(&'a str, f64)>);
+/// channels, DAT rows of cells).
+type RefTuple<'a> = (
+    &'a str,
+    bool,
+    Vec<(&'a str, Vec<f64>)>,
+    Vec<(&'a str, f64)>,
+    Option<Vec<Vec<&'a str>>>,
+);
 
 fn evaluate(helper: &Bound<'_, PyModule>, job: &PyJob) -> Result<ExprValue, String> {
     let refs: Vec<RefTuple<'_>> = job
@@ -315,6 +356,11 @@ fn evaluate(helper: &Bound<'_, PyModule>, job: &PyJob) -> Result<ExprValue, Stri
                 r.exists,
                 r.params.iter().map(|(n, v)| (&**n, v.clone())).collect(),
                 r.channels.iter().map(|(n, v)| (&**n, *v)).collect(),
+                r.dat.as_ref().map(|d| {
+                    (0..d.rows())
+                        .map(|i| (0..d.cols()).map(|j| d.cell(i, j).unwrap_or("")).collect())
+                        .collect()
+                }),
             )
         })
         .collect();

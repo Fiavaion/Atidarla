@@ -6,13 +6,20 @@
 //! its native expressions are evaluated (allocating nothing) and the values
 //! kept for [`crate::engine::Params`]; Python results latched from the
 //! worker are used as they arrive, a frame late.
+//!
+//! A DAT cell (`op('t')[row, col]`) is parsed once per DAT value: each
+//! reference keeps the value it read with the cell's number, and reads the
+//! cell again only when the DAT gives a new value or the row or column
+//! changes. The DAT is a dependency like any `op('…')`, so a change to it
+//! cooks the expression's node again.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use atd_core::cook::Extra;
-use atd_core::expr::{self, EvalError, Expr, ExprValue, PyJob, PyRef};
+use atd_core::dat::Dat;
+use atd_core::expr::{self, CellAt, EvalError, Expr, ExprValue, PyJob, PyRef};
 use atd_core::graph::{Network, NodeId};
 use atd_core::registry::{ParamKind, Registry};
 use serde_json::Value;
@@ -28,6 +35,8 @@ pub(crate) enum Tier {
         expr: Expr,
         /// `expr.refs()` resolved; `None` for a name with no node.
         refs: Vec<Option<NodeId>>,
+        /// One per DAT cell reference ([`Expr::cell_count`]).
+        cells: Vec<RefCell<Option<CellMemo>>>,
     },
     Python {
         key: u64,
@@ -55,6 +64,24 @@ pub(crate) struct Entry {
     /// ([`ExprTable::check_python`]), then whether it may run. Only an
     /// entry checked and allowed is offered to the worker.
     allowed: Cell<Option<bool>>,
+}
+
+/// What a DAT cell reference last read: the DAT value (shared, so keeping
+/// it allocates nothing), the indices asked for (`None` for a name, which
+/// never changes) and the result.
+#[derive(Debug)]
+pub(crate) struct CellMemo {
+    dat: Dat,
+    row: Option<u32>,
+    col: Option<u32>,
+    value: Result<f64, EvalError>,
+}
+
+fn memo_key(at: CellAt<'_>) -> Option<u32> {
+    match at {
+        CellAt::Index(i) => Some(i),
+        CellAt::Name(_) => None,
+    }
 }
 
 /// A Python result the parameter cannot take.
@@ -145,7 +172,8 @@ impl ExprTable {
                         let refs: Vec<Option<NodeId>> =
                             expr.refs().iter().map(|r| resolve(r)).collect();
                         time |= expr.uses_time();
-                        Tier::Native { expr, refs }
+                        let cells = (0..expr.cell_count()).map(|_| RefCell::new(None)).collect();
+                        Tier::Native { expr, refs, cells }
                     }
                     Err(_) => {
                         let key = match previous.as_ref().map(|e| &e.tier) {
@@ -374,6 +402,7 @@ impl ExprTable {
                             exists: id.is_some(),
                             params: Vec::new(),
                             channels: Vec::new(),
+                            dat: None,
                         })
                         .collect(),
                 });
@@ -387,6 +416,8 @@ pub(crate) struct Ctx<'a> {
     pub net: &'a Network,
     pub registry: &'a Registry,
     pub sig: &'a HashMap<NodeId, Channels>,
+    /// DAT values, for `op('t')[row, col]`.
+    pub dat: &'a HashMap<NodeId, Dat>,
     pub table: &'a ExprTable,
     /// Live values win over everything else, as in `Params`.
     pub live: &'a crate::engine::LiveValues,
@@ -401,10 +432,10 @@ impl Ctx<'_> {
             return;
         };
         for e in entries {
-            let Tier::Native { expr, refs } = &e.tier else {
+            let Tier::Native { expr, refs, cells } = &e.tier else {
                 continue;
             };
-            let result = self.eval(node, expr, refs, 0).and_then(|v| {
+            let result = self.eval(node, expr, refs, cells, 0).and_then(|v| {
                 if v.is_finite() {
                     Ok(v)
                 } else {
@@ -436,6 +467,25 @@ impl Ctx<'_> {
                             let names: Vec<&str> = c.names().collect();
                             message.push_str(&format!("; it has: {}", names.join(", ")));
                         }
+                        // The table's size, or what the cell holds.
+                        if let EvalError::NoCell { slot, .. } | EvalError::NotNumber { slot, .. } =
+                            err
+                            && let Some(Ok(memo)) = cells.get(slot).map(RefCell::try_borrow)
+                            && let Some(m) = memo.as_ref()
+                        {
+                            match err {
+                                EvalError::NotNumber { row, col, .. } => {
+                                    let text = m.dat.cell(row as usize, col as usize).unwrap_or("");
+                                    let short: String = text.chars().take(40).collect();
+                                    message.push_str(&format!("; it holds '{short}'"));
+                                }
+                                _ => message.push_str(&format!(
+                                    "; it has {} rows and {} columns",
+                                    m.dat.rows(),
+                                    m.dat.cols()
+                                )),
+                            }
+                        }
                         e.error
                             .replace(Some(format!("expression for `{}`: {message}", e.param)));
                     }
@@ -449,12 +499,14 @@ impl Ctx<'_> {
         node: NodeId,
         expr: &Expr,
         refs: &[Option<NodeId>],
+        cells: &[RefCell<Option<CellMemo>>],
         depth: u8,
     ) -> Result<f64, EvalError> {
         let me = self.net.node(node).and_then(|n| expr::name_digits(&n.name));
         expr.eval(&Env {
             ctx: self,
             refs,
+            cells,
             me,
             depth,
         })
@@ -496,11 +548,11 @@ impl Ctx<'_> {
             }
             if let Some(e) = self.table.entry(node, param) {
                 match &e.tier {
-                    Tier::Native { expr, refs } => {
+                    Tier::Native { expr, refs, cells } => {
                         if depth >= MAX_DEPTH {
                             return Err(NumError::Loop);
                         }
-                        match self.eval(node, expr, refs, depth + 1) {
+                        match self.eval(node, expr, refs, cells, depth + 1) {
                             Ok(v) => return Ok(v),
                             Err(EvalError::TooDeep) => return Err(NumError::Loop),
                             Err(_) => {}
@@ -542,6 +594,7 @@ impl Ctx<'_> {
             for r in &mut job.refs {
                 let Some(node) = self.net.node_by_name(&r.name) else {
                     r.exists = false;
+                    r.dat = None;
                     continue;
                 };
                 r.exists = true;
@@ -602,6 +655,10 @@ impl Ctx<'_> {
                     }
                     None => r.channels.clear(),
                 }
+                match self.dat.get(&node.id) {
+                    Some(d) if r.dat.as_ref().is_some_and(|old| Dat::ptr_eq(old, d)) => {}
+                    d => r.dat = d.cloned(),
+                }
             }
         }
     }
@@ -616,6 +673,7 @@ enum NumError {
 struct Env<'a> {
     ctx: &'a Ctx<'a>,
     refs: &'a [Option<NodeId>],
+    cells: &'a [RefCell<Option<CellMemo>>],
     me: Option<f64>,
     depth: u8,
 }
@@ -651,5 +709,36 @@ impl expr::Env for Env<'_> {
             .and_then(|c| c.value(channel))
             .map(f64::from)
             .ok_or(EvalError::NoChannel(node))
+    }
+    fn cell(
+        &self,
+        node: usize,
+        slot: usize,
+        row: CellAt<'_>,
+        col: CellAt<'_>,
+    ) -> Result<f64, EvalError> {
+        let id = self.refs[node].ok_or(EvalError::NoNode(node))?;
+        let dat = self.ctx.dat.get(&id).ok_or(EvalError::NotDat(node))?;
+        // The same expression evaluated again inside itself (a loop
+        // through parameters) reads without the memo.
+        let Some(Ok(mut memo)) = self.cells.get(slot).map(RefCell::try_borrow_mut) else {
+            return expr::cell_number(dat, slot, row, col);
+        };
+        let (r, c) = (memo_key(row), memo_key(col));
+        if let Some(m) = memo.as_ref()
+            && Dat::ptr_eq(&m.dat, dat)
+            && m.row == r
+            && m.col == c
+        {
+            return m.value;
+        }
+        let value = expr::cell_number(dat, slot, row, col);
+        *memo = Some(CellMemo {
+            dat: dat.clone(),
+            row: r,
+            col: c,
+            value,
+        });
+        value
     }
 }

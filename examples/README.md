@@ -19,7 +19,7 @@ every IMG and SIG operator (CLAUDE.md rule 7); each operator's page in
 | [soak-show](soak-show.atidarla/) | The PT-10 soak patch: the Stage deck plus a 400,000-particle system and an image feedback loop as a fifth column (M6); `atidarla soak` runs it for hours |
 | [ai-live](ai-live.atidarla/) | Every AI operator (M4): Diffusion with Prompt Blend and a Control Prep edge map, the built-in Invert model, the ONNX vision nodes and Video Model, governed at the project frame rate |
 | [speech-chat](speech-chat.atidarla/) | Speech to Text (Whisper) feeding LLM Chat (Ollama) over a DAT wire, both on this machine, so Sovereign mode stays on (FR-A13) |
-| [dat-tables](dat-tables.atidarla/) | Text and tables on DAT wires: Table, Text, Select, Convert, JSON and a Prompt Template filled from a table, text and a channel |
+| [dat-tables](dat-tables.atidarla/) | Text and tables on DAT wires: Table, Text, Select, Convert, JSON and a Prompt Template filled from a table, text and a channel, and an expression reading a table cell |
 | [dat-files](dat-files.atidarla/) | File In reading a CSV and a JSON file (reloaded on save), Select and JSON over them, and File Out writing the result |
 | [dat-network](dat-network.atidarla/) | A Web Server on loopback serving a DAT, a Web Client polling it into JSON, and a WebSocket client (inactive until given a server) |
 | [dat-serial](dat-serial.atidarla/) | A serial device's lines as table rows, filtered with Select, and commands written back to it |
