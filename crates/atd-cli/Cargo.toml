@@ -52,7 +52,13 @@ ctrlc.workspace = true
 
 # `storage uninstall --models ask`: the Yes/No message box.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_UI_WindowsAndMessaging"] }
+windows-sys = { workspace = true, features = [
+    "Win32_System_RemoteDesktop",
+    "Win32_System_StationsAndDesktops",
+    "Win32_System_Threading",
+    "Win32_System_WindowsProgramming",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [dev-dependencies]
 # The mock ComfyUI server shared with atd-ops-ai's tests (render test).

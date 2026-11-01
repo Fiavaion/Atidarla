@@ -38,11 +38,17 @@
       UI of its own, so UILevel says nothing. The bundle passes its own UI
       level as ATDBUNDLEUILEVEL ([WixBundleUILevel], Burn's
       BOOTSTRAPPER_DISPLAY: 2 none (/quiet), 3 passive, 4 full). Asks at 4.
-    - The bare MSI (managed deployment): asks at UILevel 3 or more (basic
-      or full UI: Settings > Apps, msiexec /x); /qn (UILevel 2) keeps.
+    - The bare MSI (managed deployment): asks only at UILevel 5 (full UI,
+      msiexec /x); basic (/passive, 3), reduced (4) and none (/qn, 2) keep.
   The command runs through the Util extension's WixQuietExec, so atidarla.exe
   (a console program) shows no console window; its question is a message
-  box, which still shows, and its output goes to the MSI log.
+  box, which still shows, and its output goes to the MSI log. It never waits
+  for a click: in session 0, on a window station nobody sees, or with no
+  answer in two minutes it keeps the models; run as an account other than
+  the one signed in (an elevation prompt answered by an administrator), it
+  removes nothing (crates/atd-cli/src/storage.rs). There is no rollback: an
+  uninstall cancelled after this action leaves the app without the user's
+  data, so it runs as late as it can, just before RemoveFiles.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package
@@ -80,9 +86,9 @@
                   DllEntry="WixQuietExec" Execute="deferred" Impersonate="yes" Return="ignore" />
     <InstallExecuteSequence>
       <Custom Action="RemoveUserDataAsk" Before="RemoveFiles"
-              Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND ((ATDBUNDLEUILEVEL AND ATDBUNDLEUILEVEL &gt;= 4) OR (NOT ATDBUNDLEUILEVEL AND UILevel &gt;= 3))" />
+              Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND ((ATDBUNDLEUILEVEL AND ATDBUNDLEUILEVEL &gt;= 4) OR (NOT ATDBUNDLEUILEVEL AND UILevel = 5))" />
       <Custom Action="RemoveUserDataKeep" Before="RemoveFiles"
-              Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND NOT ((ATDBUNDLEUILEVEL AND ATDBUNDLEUILEVEL &gt;= 4) OR (NOT ATDBUNDLEUILEVEL AND UILevel &gt;= 3))" />
+              Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND NOT ((ATDBUNDLEUILEVEL AND ATDBUNDLEUILEVEL &gt;= 4) OR (NOT ATDBUNDLEUILEVEL AND UILevel = 5))" />
     </InstallExecuteSequence>
 
     <StandardDirectory Id="ProgramFiles64Folder">

@@ -266,7 +266,9 @@ caches and logs, your settings (`ui.toml`, Learn progress, trusted Python operat
 or other tools pointed at the model folder, may reuse them, so you choose whether to keep them in
 storage or remove them. Models that other tools manage themselves (Ollama's `~/.ollama`, the
 Hugging Face cache) are never touched. When `ATD_MODELS_DIR` points the model cache at a folder of
-your own, only the catalogue models' folders in it are removed.
+your own, only the catalogue models' folders in it are removed, and nothing beside it:
+`accepted.toml`, `hosts.toml` and `secrets.toml` always live in Atidarla's own folder (the table
+below), so files of those names next to your folder belong to other tools and are left alone.
 
 See what is kept, with sizes, and remove it by kind at any time: in the app under
 **View → Storage** (the Storage section of the AI Hosts window; removing models asks first), or:
@@ -287,15 +289,26 @@ keeps them); a quiet one keeps them:
 | Settings > Apps (the setup bundle's entry; it hides the MSI's own) | asks |
 | `Atidarla-<version>-windows-x64-setup.exe /uninstall` | asks |
 | `...-setup.exe /uninstall /quiet` or `/passive` | kept |
-| bare MSI: `msiexec /x Atidarla-<version>-windows-x64.msi` (full or basic UI) | asks |
-| bare MSI: `msiexec /x ... /qn` | kept |
+| bare MSI: `msiexec /x Atidarla-<version>-windows-x64.msi` (full UI) | asks |
+| bare MSI: `msiexec /x ... /passive` (basic UI), reduced UI, or `/qn` | kept |
 
 The setup `.exe` runs the MSI without UI, so it tells the MSI its own UI level
-(`ATDBUNDLEUILEVEL`, from Burn's `WixBundleUILevel`). Note that `msiexec /x ... /passive` on the
-bare MSI is basic UI and asks; use `/qn` for unattended removal. An upgrade to a newer version
-removes nothing. If the clean-up fails, the uninstall still completes;
-run `atidarla storage` from the new install, or delete the folders below. The data is per user:
-other accounts on the machine keep theirs.
+(`ATDBUNDLEUILEVEL`, from Burn's `WixBundleUILevel`). An unattended uninstall never waits for a
+click: the question is not shown in session 0 (an uninstall run as SYSTEM by a deployment tool) or
+on a desktop nobody can see, and with no answer in 2 minutes the models are kept. An upgrade to a
+newer version removes nothing. If the clean-up fails, the uninstall still completes; run
+`atidarla storage` from the new install, or delete the folders below. The data is per user: other
+accounts on the machine keep theirs.
+
+If Windows asks for an administrator's name and password to uninstall (you are signed in as a
+standard user), the uninstall runs as that administrator, whose folders are not yours. Atidarla
+then removes nothing for anyone and writes why to the MSI log; remove your data afterwards with
+`atidarla storage uninstall` from your own account, or delete the folders below.
+
+The clean-up runs just before the program files are removed and has no rollback: if you cancel
+the uninstall after that step, Atidarla stays installed without its AI add-ons (AI Host packages)
+and settings (host tokens and cloud keys included). Turn on AI assist again to reinstall the
+packages.
 
 **macOS** has no uninstaller. Remove your data with
 `/Applications/Atidarla.app/Contents/MacOS/atidarla storage uninstall`, or **Remove app data…**
