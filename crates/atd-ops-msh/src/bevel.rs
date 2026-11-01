@@ -10,6 +10,12 @@
 //! polygons of each bevelled edge; the holes left at the corners are
 //! filled (one polygon, or a fan from a rounded centre).
 //!
+//! Where one strip ends at an inside point, the point splits: the two
+//! polygons beside the strip lose it to their slid points. With three
+//! polygons the third is cut along the strip's end; with four or more the
+//! point stays in the others and the end is a fan of flat triangles from
+//! it over the strip's end (one triangle for a chamfer).
+//!
 //! Points on an open border bevel too when their polygons form one open
 //! fan: a strip runs out to the border, which keeps its place and gains
 //! the slid points. The gap there is open; it is patched (closed along
@@ -460,6 +466,20 @@ pub fn run(s: &Snap, inputs: &[Option<Mesh>], job: &Job) -> Result<Mesh, String>
             continue;
         };
         let src = corners[around[v as usize][0]].f;
+        // The end of one strip at an inside point of four or more polygons:
+        // the point stays in the polygons away from the strip and closes
+        // its end with a fan of triangles (one for a chamfer).
+        if let Some(i) = ring.iter().position(|&p| {
+            let p = p as usize;
+            p < np && ends[p] == 1 && !border[p]
+        }) {
+            let k = ring.len();
+            for j in 1..k - 1 {
+                patches.push(vec![ring[i], ring[(i + j) % k], ring[(i + j + 1) % k]]);
+                patch_src.push(src);
+            }
+            continue;
+        }
         if segments == 1 || ring.len() <= 4 {
             patches.push(ring);
             patch_src.push(src);
