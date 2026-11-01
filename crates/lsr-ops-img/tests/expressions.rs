@@ -635,8 +635,10 @@ fn driven_vectors_do_not_allocate() {
     );
     let vectors = measure(&mut e);
     assert_eq!(e.error(second), None);
+    // wgpu's own count drifts by a few dozen between runs on Metal; one
+    // allocation per frame in either node would add at least 60.
     assert!(
-        vectors <= baseline,
+        vectors <= baseline + 30,
         "driven vectors allocated: {vectors} vs {baseline} over 60 frames"
     );
 }
