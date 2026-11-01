@@ -1,0 +1,47 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 5
+
+[[node]]
+id = 0
+name = "lfo_bank1"
+type = "cmp.pack_lfo_bank"
+pos = [0.0, 0.0]
+params.rate = 0.5
+
+[[node]]
+id = 1
+name = "backdrop"
+type = "img.ramp"
+pos = [0.0, 160.0]
+params.colour_a = [1.0, 0.3, 0.2, 1.0]
+params.colour_b = [0.2, 0.4, 1.0, 1.0]
+params.type = "radial"
+
+[[node]]
+id = 2
+name = "hue"
+type = "img.hsv_adjust"
+pos = [240.0, 160.0]
+inputs.in = { node = 1, output = "out" }
+params.hue = { value = 0.0, expr = "op('lfo_bank1')['lfo2'] * 180" }
+
+[[node]]
+id = 3
+name = "pentagon"
+type = "img.shape"
+pos = [240.0, 320.0]
+params.fill = [1.0, 0.95, 0.8, 1.0]
+params.rotate = { value = 0.0, expr = "op('lfo_bank1')['lfo1'] * 144" }
+params.shape = "polygon"
+params.sides = 5
+params.size = [0.55, 0.55]
+
+[[node]]
+id = 4
+name = "stack"
+type = "img.composite"
+pos = [480.0, 240.0]
+inputs.a = { node = 3, output = "out" }
+inputs.b = { node = 2, output = "out" }
+params.opacity = { value = 1.0, bind = { node = 0, channel = "lfo3" } }

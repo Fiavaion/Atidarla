@@ -1,0 +1,1936 @@
+//! Graph store: one network of nodes and typed wires (PRD §5.2 `lsr-core`).
+//!
+//! - **Stable IDs:** [`NodeId`]s come from a per-network counter and are never
+//!   reused; files and wires reference IDs, people see names (`noise1`).
+//! - **Deterministic order:** nodes and wires live in ordered maps, so
+//!   iteration and serialisation are stable (CLAUDE.md rule 8).
+//! - **Typed wires:** an output connects only to an input of the same
+//!   [`WireType`]; an input holds at most one wire. Cycles are rejected
+//!   unless they pass through a feedback input.
+//! - **Edits:** every change is an [`Edit`] applied with [`Network::apply`],
+//!   which validates it against the [`Registry`] and returns its exact
+//!   inverse plus the nodes whose results it invalidates. Undo and
+//!   transactions live in [`crate::history`].
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use crate::registry::{OperatorSchema, Registry, SocketSchema, WireType};
+
+/// Stable node identifier, unique within a network and never reused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct NodeId(pub u64);
+
+impl fmt::Display for NodeId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "n{}", self.0)
+    }
+}
+
+/// Stable comment-box identifier. Comments draw from the same counter as
+/// nodes, so every ID in a network is unique.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct CommentId(pub u64);
+
+impl fmt::Display for CommentId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "c{}", self.0)
+    }
+}
+
+/// A comment box on the Patch canvas (FR-P1): a note with an area.
+/// Moving it in the editor also moves the nodes inside it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Comment {
+    pub id: CommentId,
+    pub text: String,
+    /// Top-left corner and size in canvas units.
+    pub pos: [f32; 2],
+    pub size: [f32; 2],
+}
+
+/// A parameter override: a constant value, optionally driven by an expression.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Param {
+    pub value: Value,
+    /// Expression source (Python, M1); `value` holds its last result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expr: Option<String>,
+    /// Channel export (FR-P2): the parameter follows a SIG channel; `value`
+    /// is the fallback when the channel is unavailable. Resolved natively,
+    /// never through Python, so it is safe on the cook path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bind: Option<ChannelRef>,
+}
+
+impl Param {
+    pub fn constant(value: Value) -> Self {
+        Self {
+            value,
+            expr: None,
+            bind: None,
+        }
+    }
+
+    /// A parameter driven by `channel` of SIG node `node`, falling back to `value`.
+    pub fn bound(value: Value, node: NodeId, channel: impl Into<String>) -> Self {
+        Self {
+            value,
+            expr: None,
+            bind: Some(ChannelRef {
+                node,
+                channel: channel.into(),
+            }),
+        }
+    }
+}
+
+/// Makes `dst` equal to `src`, reusing `dst`'s storage where the shapes
+/// match: numbers and booleans are overwritten, arrays of the same length
+/// element by element. So updating a live number or colour every frame
+/// allocates nothing; other changes clone.
+pub fn assign_value(dst: &mut Value, src: &Value) {
+    match (&mut *dst, src) {
+        (Value::Number(d), Value::Number(s)) => d.clone_from(s),
+        (Value::Bool(d), Value::Bool(s)) => *d = *s,
+        (Value::Array(d), Value::Array(s)) if d.len() == s.len() => {
+            for (d, s) in d.iter_mut().zip(s) {
+                assign_value(d, s);
+            }
+        }
+        _ => *dst = src.clone(),
+    }
+}
+
+/// A reference to one channel of a SIG node's output.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct ChannelRef {
+    pub node: NodeId,
+    /// Channel name; empty means the first channel.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub channel: String,
+}
+
+/// One operator instance.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Node {
+    pub id: NodeId,
+    /// Operator type, e.g. `img.noise`.
+    pub type_id: String,
+    /// Unique, human-facing name within the network, e.g. `noise1`.
+    pub name: String,
+    /// Position on the Patch canvas.
+    pub pos: [f32; 2],
+    /// Only parameters that differ from the schema default are stored, so
+    /// project files and diffs show what the user actually changed.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub params: BTreeMap<String, Param>,
+}
+
+impl Node {
+    pub fn new(id: NodeId, type_id: impl Into<String>, name: impl Into<String>) -> Self {
+        Self {
+            id,
+            type_id: type_id.into(),
+            name: name.into(),
+            pos: [0.0, 0.0],
+            params: BTreeMap::new(),
+        }
+    }
+}
+
+/// One end of a wire: a node and the name of one of its sockets.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct Endpoint {
+    pub node: NodeId,
+    pub socket: String,
+}
+
+impl Endpoint {
+    pub fn new(node: NodeId, socket: impl Into<String>) -> Self {
+        Self {
+            node,
+            socket: socket.into(),
+        }
+    }
+}
+
+/// A connection from an output to an input.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct Wire {
+    pub from: Endpoint,
+    pub to: Endpoint,
+}
+
+impl Wire {
+    pub fn new(from: Endpoint, to: Endpoint) -> Self {
+        Self { from, to }
+    }
+}
+
+/// Errors from graph edits.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum GraphError {
+    #[error("unknown operator type `{0}`")]
+    UnknownType(String),
+    #[error("no node {0}")]
+    NoNode(NodeId),
+    #[error("node {0} already exists")]
+    DuplicateId(NodeId),
+    #[error("no comment {0}")]
+    NoComment(CommentId),
+    #[error("ID {0} is already in use")]
+    CommentIdInUse(CommentId),
+    #[error("a node named `{0}` already exists")]
+    DuplicateName(String),
+    #[error("invalid node name `{0}`: use letters, digits and `_`, starting with a letter or `_`")]
+    InvalidName(String),
+    #[error("`{type_id}` has no parameter `{param}`")]
+    NoParam { type_id: String, param: String },
+    #[error("{0}")]
+    InvalidValue(String),
+    #[error("`{type_id}` has no {kind} socket `{socket}`")]
+    NoSocket {
+        type_id: String,
+        kind: &'static str,
+        socket: String,
+    },
+    #[error("cannot connect {from:?} output to {to:?} input")]
+    WireTypeMismatch { from: WireType, to: WireType },
+    #[error("connecting {0} would create a cycle (only feedback inputs may close a loop)")]
+    Cycle(String),
+    #[error("wire {0} does not exist")]
+    NoWire(String),
+    #[error("invalid channel binding: {0}")]
+    InvalidBinding(String),
+}
+
+/// A single, invertible change to a network.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "edit", rename_all = "snake_case")]
+pub enum Edit {
+    /// Adds a node (with no wires). Its ID must not exist yet.
+    AddNode {
+        node: Node,
+    },
+    /// Removes a node and every wire attached to it.
+    RemoveNode {
+        id: NodeId,
+    },
+    /// Re-inserts a removed node with its wires (inverse of `RemoveNode`).
+    RestoreNode {
+        node: Node,
+        wires: Vec<Wire>,
+    },
+    /// Connects an output to an input, replacing any wire on that input.
+    Connect {
+        wire: Wire,
+    },
+    /// Removes an existing wire.
+    Disconnect {
+        wire: Wire,
+    },
+    /// Sets (`Some`) or resets to default (`None`) a parameter.
+    SetParam {
+        node: NodeId,
+        param: String,
+        value: Option<Param>,
+    },
+    Rename {
+        node: NodeId,
+        name: String,
+    },
+    Move {
+        node: NodeId,
+        pos: [f32; 2],
+    },
+    /// Adds a comment box. Its ID must not be in use.
+    AddComment {
+        comment: Comment,
+    },
+    RemoveComment {
+        id: CommentId,
+    },
+    /// Replaces a comment's text, position and size.
+    UpdateComment {
+        comment: Comment,
+    },
+}
+
+/// Result of applying one edit.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Applied {
+    /// Edits that undo this one, to be applied in order.
+    pub inverse: Vec<Edit>,
+    /// Nodes whose cook results this edit invalidates (before downstream
+    /// propagation, which the scheduler does).
+    pub dirty: Vec<NodeId>,
+}
+
+fn valid_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// A network of nodes and wires.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "NetworkRepr", into = "NetworkRepr")]
+pub struct Network {
+    nodes: BTreeMap<NodeId, Node>,
+    /// Wires keyed by their input (each input has at most one wire), ordered
+    /// by input node so a node's inputs are one range lookup.
+    inputs: BTreeMap<Endpoint, Endpoint>,
+    comments: BTreeMap<CommentId, Comment>,
+    next_id: u64,
+}
+
+/// Serialised form: nodes, wires and comments as sorted lists, which read
+/// and diff well in text files. `comments` is omitted when empty, so files
+/// without comments are unchanged.
+#[derive(Serialize, Deserialize)]
+struct NetworkRepr {
+    next_id: u64,
+    nodes: Vec<Node>,
+    wires: Vec<Wire>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    comments: Vec<Comment>,
+}
+
+impl From<Network> for NetworkRepr {
+    fn from(net: Network) -> Self {
+        let wires = net.wires().collect();
+        Self {
+            next_id: net.next_id,
+            nodes: net.nodes.into_values().collect(),
+            wires,
+            comments: net.comments.into_values().collect(),
+        }
+    }
+}
+
+impl TryFrom<NetworkRepr> for Network {
+    type Error = String;
+
+    /// Structural checks only; schema checks need a [`Registry`].
+    fn try_from(repr: NetworkRepr) -> Result<Self, String> {
+        let mut net = Network {
+            next_id: repr.next_id,
+            ..Default::default()
+        };
+        for node in repr.nodes {
+            if node.id.0 >= net.next_id {
+                return Err(format!(
+                    "node {} is not below next_id {}",
+                    node.id, net.next_id
+                ));
+            }
+            if let Some(old) = net.nodes.insert(node.id, node) {
+                return Err(format!("duplicate node {}", old.id));
+            }
+        }
+        for wire in repr.wires {
+            for end in [&wire.from, &wire.to] {
+                if !net.nodes.contains_key(&end.node) {
+                    return Err(format!("wire references missing node {}", end.node));
+                }
+            }
+            if net.inputs.insert(wire.to.clone(), wire.from).is_some() {
+                return Err(format!(
+                    "input {}.{} has two wires",
+                    wire.to.node, wire.to.socket
+                ));
+            }
+        }
+        for comment in repr.comments {
+            let id = comment.id;
+            if id.0 >= net.next_id || net.nodes.contains_key(&NodeId(id.0)) {
+                return Err(format!("comment {id} is not a fresh ID below next_id"));
+            }
+            if net.comments.insert(id, comment).is_some() {
+                return Err(format!("duplicate comment {id}"));
+            }
+        }
+        Ok(net)
+    }
+}
+
+impl Network {
+    /// Checks a network that came from outside (a file, the clipboard, an
+    /// agent) against `registry`: every node, parameter, wire and binding
+    /// goes through the same validation as an edit. Returns the network
+    /// unchanged if it is valid.
+    pub fn validated(self, registry: &Registry) -> Result<Network, GraphError> {
+        let mut net = Network::default();
+        let mut bound = Vec::new();
+        for node in self.nodes.values() {
+            let mut node = node.clone();
+            for (name, param) in &mut node.params {
+                if param.bind.is_some() {
+                    bound.push((node.id, name.clone(), param.clone()));
+                    param.bind = None;
+                }
+            }
+            net.apply(registry, Edit::AddNode { node })?;
+        }
+        for wire in self.wires() {
+            net.apply(registry, Edit::Connect { wire })?;
+        }
+        for (node, param, value) in bound {
+            net.apply(
+                registry,
+                Edit::SetParam {
+                    node,
+                    param,
+                    value: Some(value),
+                },
+            )?;
+        }
+        for comment in self.comments.values() {
+            net.apply(
+                registry,
+                Edit::AddComment {
+                    comment: comment.clone(),
+                },
+            )?;
+        }
+        net.next_id = net.next_id.max(self.next_id);
+        debug_assert_eq!(net, self, "validation rebuilds the same network");
+        Ok(self)
+    }
+
+    /// Reserves a fresh comment ID (from the node ID counter).
+    pub fn alloc_comment_id(&mut self) -> CommentId {
+        CommentId(self.alloc_id().0)
+    }
+
+    pub fn comment(&self, id: CommentId) -> Option<&Comment> {
+        self.comments.get(&id)
+    }
+
+    /// Comments in ID order.
+    pub fn comments(&self) -> impl Iterator<Item = &Comment> {
+        self.comments.values()
+    }
+
+    /// Reserves a fresh node ID. IDs are never reused, even after removal.
+    pub fn alloc_id(&mut self) -> NodeId {
+        let id = NodeId(self.next_id);
+        self.next_id += 1;
+        id
+    }
+
+    /// `base` followed by the smallest number that makes it unique (`noise1`).
+    pub fn unique_name(&self, base: &str) -> String {
+        (1..)
+            .map(|n| format!("{base}{n}"))
+            .find(|name| self.node_by_name(name).is_none())
+            .expect("an unused name exists")
+    }
+
+    pub fn node(&self, id: NodeId) -> Option<&Node> {
+        self.nodes.get(&id)
+    }
+
+    pub fn node_by_name(&self, name: &str) -> Option<&Node> {
+        self.nodes.values().find(|n| n.name == name)
+    }
+
+    /// Nodes in ID order.
+    pub fn nodes(&self) -> impl Iterator<Item = &Node> {
+        self.nodes.values()
+    }
+
+    pub fn len(&self) -> usize {
+        self.nodes.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
+
+    /// All wires, ordered by input node and input name.
+    pub fn wires(&self) -> impl Iterator<Item = Wire> + '_ {
+        self.inputs
+            .iter()
+            .map(|(to, from)| Wire::new(from.clone(), to.clone()))
+    }
+
+    /// The wires into `node` as `(input name, source)`, in input-name order.
+    /// Does not allocate.
+    pub fn inputs_of(&self, node: NodeId) -> impl Iterator<Item = (&str, &Endpoint)> {
+        let start = Endpoint {
+            node,
+            socket: String::new(),
+        };
+        self.inputs
+            .range(start..)
+            .take_while(move |(to, _)| to.node == node)
+            .map(|(to, from)| (to.socket.as_str(), from))
+    }
+
+    /// Channel bindings on `node`'s parameters. Does not allocate.
+    pub fn bindings_of(&self, node: NodeId) -> impl Iterator<Item = &ChannelRef> {
+        self.nodes
+            .get(&node)
+            .into_iter()
+            .flat_map(|n| n.params.values().filter_map(|p| p.bind.as_ref()))
+    }
+
+    /// Nodes that depend on `node` through a wire or a channel binding, in ID
+    /// order, without duplicates.
+    pub fn downstream_of(&self, node: NodeId) -> BTreeSet<NodeId> {
+        self.downstream_iter(node).collect()
+    }
+
+    /// The nodes of [`Self::downstream_of`], possibly repeated and in no
+    /// set order. Does not allocate.
+    pub fn downstream_iter(&self, node: NodeId) -> impl Iterator<Item = NodeId> + '_ {
+        let wired = self
+            .inputs
+            .iter()
+            .filter(move |(_, from)| from.node == node)
+            .map(|(to, _)| to.node);
+        let bound = self
+            .nodes
+            .values()
+            .filter(move |n| {
+                n.params
+                    .values()
+                    .any(|p| p.bind.as_ref().is_some_and(|b| b.node == node))
+            })
+            .map(|n| n.id);
+        wired.chain(bound)
+    }
+
+    /// The parameter value of a node, falling back to the schema default.
+    pub fn param_value<'a>(
+        &'a self,
+        registry: &'a Registry,
+        node: NodeId,
+        param: &str,
+    ) -> Option<&'a Value> {
+        let n = self.nodes.get(&node)?;
+        if let Some(p) = n.params.get(param) {
+            return Some(&p.value);
+        }
+        let schema = registry.get(&n.type_id)?;
+        schema
+            .params
+            .iter()
+            .find(|p| p.name == param)
+            .map(|p| &p.default)
+    }
+
+    fn schema<'r>(
+        &self,
+        registry: &'r Registry,
+        id: NodeId,
+    ) -> Result<&'r OperatorSchema, GraphError> {
+        let node = self.nodes.get(&id).ok_or(GraphError::NoNode(id))?;
+        registry
+            .get(&node.type_id)
+            .ok_or_else(|| GraphError::UnknownType(node.type_id.clone()))
+    }
+
+    fn socket<'r>(
+        schema: &'r OperatorSchema,
+        output: bool,
+        name: &str,
+    ) -> Result<&'r SocketSchema, GraphError> {
+        let list = if output {
+            &schema.outputs
+        } else {
+            &schema.inputs
+        };
+        list.iter()
+            .find(|s| s.name == name)
+            .ok_or_else(|| GraphError::NoSocket {
+                type_id: schema.type_id.clone(),
+                kind: if output { "output" } else { "input" },
+                socket: name.to_owned(),
+            })
+    }
+
+    /// True if `to` is reachable from `from` following wires and channel
+    /// bindings forward, ignoring wires into feedback inputs.
+    fn reaches(&self, registry: &Registry, from: NodeId, to: NodeId) -> bool {
+        let mut stack = vec![from];
+        let mut seen = BTreeSet::new();
+        while let Some(n) = stack.pop() {
+            if n == to {
+                return true;
+            }
+            if !seen.insert(n) {
+                continue;
+            }
+            for (input, src) in &self.inputs {
+                if src.node != n {
+                    continue;
+                }
+                let is_feedback = self
+                    .schema(registry, input.node)
+                    .ok()
+                    .and_then(|s| Self::socket(s, false, &input.socket).ok())
+                    .is_some_and(|s| s.feedback);
+                if !is_feedback {
+                    stack.push(input.node);
+                }
+            }
+            for other in self.nodes.values() {
+                if other
+                    .params
+                    .values()
+                    .any(|p| p.bind.as_ref().is_some_and(|b| b.node == n))
+                {
+                    stack.push(other.id);
+                }
+            }
+        }
+        false
+    }
+
+    fn validate_binding(
+        &self,
+        registry: &Registry,
+        node: NodeId,
+        param: &crate::registry::ParamSchema,
+        bind: &ChannelRef,
+    ) -> Result<(), GraphError> {
+        if !param.kind.can_follow() {
+            return Err(GraphError::InvalidBinding(format!(
+                "parameter `{}` is not a number, toggle, vector or colour and cannot follow a channel",
+                param.name
+            )));
+        }
+        let source = self.schema(registry, bind.node)?;
+        if !source.outputs.iter().any(|o| o.wire == WireType::Sig) {
+            return Err(GraphError::InvalidBinding(format!(
+                "{} (`{}`) has no SIG output",
+                bind.node, source.type_id
+            )));
+        }
+        if bind.node == node || self.reaches(registry, node, bind.node) {
+            return Err(GraphError::Cycle(format!("binding {} → {node}", bind.node)));
+        }
+        Ok(())
+    }
+
+    fn validate_node(&self, registry: &Registry, node: &Node) -> Result<(), GraphError> {
+        let schema = registry
+            .get(&node.type_id)
+            .ok_or_else(|| GraphError::UnknownType(node.type_id.clone()))?;
+        if !valid_name(&node.name) {
+            return Err(GraphError::InvalidName(node.name.clone()));
+        }
+        if self
+            .nodes
+            .values()
+            .any(|n| n.name == node.name && n.id != node.id)
+        {
+            return Err(GraphError::DuplicateName(node.name.clone()));
+        }
+        for (name, param) in &node.params {
+            let ps = schema
+                .params
+                .iter()
+                .find(|p| &p.name == name)
+                .ok_or_else(|| GraphError::NoParam {
+                    type_id: node.type_id.clone(),
+                    param: name.clone(),
+                })?;
+            ps.validate(&param.value)
+                .map_err(GraphError::InvalidValue)?;
+        }
+        Ok(())
+    }
+
+    fn validate_wire(&self, registry: &Registry, wire: &Wire) -> Result<(), GraphError> {
+        let from_schema = self.schema(registry, wire.from.node)?;
+        let to_schema = self.schema(registry, wire.to.node)?;
+        let out = Self::socket(from_schema, true, &wire.from.socket)?;
+        let inp = Self::socket(to_schema, false, &wire.to.socket)?;
+        if out.wire != inp.wire {
+            return Err(GraphError::WireTypeMismatch {
+                from: out.wire,
+                to: inp.wire,
+            });
+        }
+        let describe = || {
+            format!(
+                "{}.{} → {}.{}",
+                wire.from.node, wire.from.socket, wire.to.node, wire.to.socket
+            )
+        };
+        if !inp.feedback
+            && (wire.from.node == wire.to.node
+                || self.reaches(registry, wire.to.node, wire.from.node))
+        {
+            return Err(GraphError::Cycle(describe()));
+        }
+        Ok(())
+    }
+
+    /// Validates and applies one edit, returning its inverse.
+    pub fn apply(&mut self, registry: &Registry, edit: Edit) -> Result<Applied, GraphError> {
+        match edit {
+            Edit::AddNode { node } => {
+                if self.nodes.contains_key(&node.id)
+                    || self.comments.contains_key(&CommentId(node.id.0))
+                {
+                    return Err(GraphError::DuplicateId(node.id));
+                }
+                self.validate_node(registry, &node)?;
+                let id = node.id;
+                self.next_id = self.next_id.max(id.0 + 1);
+                self.nodes.insert(id, node);
+                Ok(Applied {
+                    inverse: vec![Edit::RemoveNode { id }],
+                    dirty: vec![id],
+                })
+            }
+            Edit::RemoveNode { id } => {
+                if !self.nodes.contains_key(&id) {
+                    return Err(GraphError::NoNode(id));
+                }
+                let wires: Vec<Wire> = self
+                    .wires()
+                    .filter(|w| w.from.node == id || w.to.node == id)
+                    .collect();
+                let mut dirty: Vec<NodeId> = self
+                    .downstream_of(id)
+                    .into_iter()
+                    .filter(|&n| n != id)
+                    .collect();
+                for w in &wires {
+                    self.inputs.remove(&w.to);
+                }
+                let node = self.nodes.remove(&id).expect("checked above");
+                let mut inverse = vec![Edit::RestoreNode { node, wires }];
+                // Parameters bound to the removed node keep their value but
+                // lose the binding (no dangling references); undo rebinds.
+                for other in self.nodes.values_mut() {
+                    let schema = registry.get(&other.type_id);
+                    let mut emptied = Vec::new();
+                    for (name, param) in &mut other.params {
+                        if param.bind.as_ref().is_some_and(|b| b.node == id) {
+                            inverse.push(Edit::SetParam {
+                                node: other.id,
+                                param: name.clone(),
+                                value: Some(param.clone()),
+                            });
+                            param.bind = None;
+                            dirty.push(other.id);
+                            // Same rule as SetParam: a constant equal to
+                            // the default is stored as no override.
+                            let default = schema
+                                .and_then(|s| s.params.iter().find(|p| p.name == *name))
+                                .map(|p| &p.default);
+                            if param.expr.is_none() && default == Some(&param.value) {
+                                emptied.push(name.clone());
+                            }
+                        }
+                    }
+                    for name in emptied {
+                        other.params.remove(&name);
+                    }
+                }
+                Ok(Applied { inverse, dirty })
+            }
+            Edit::RestoreNode { node, wires } => {
+                if self.nodes.contains_key(&node.id) {
+                    return Err(GraphError::DuplicateId(node.id));
+                }
+                self.validate_node(registry, &node)?;
+                let id = node.id;
+                self.next_id = self.next_id.max(id.0 + 1);
+                self.nodes.insert(id, node);
+                for w in &wires {
+                    if let Err(e) = self.validate_wire(registry, w).and_then(|()| {
+                        if self.inputs.contains_key(&w.to) {
+                            Err(GraphError::Cycle(format!(
+                                "input {}.{} is occupied",
+                                w.to.node, w.to.socket
+                            )))
+                        } else {
+                            Ok(())
+                        }
+                    }) {
+                        // Undo the partial restore before reporting.
+                        for done in wires.iter().take_while(|d| *d != w) {
+                            self.inputs.remove(&done.to);
+                        }
+                        self.nodes.remove(&id);
+                        return Err(e);
+                    }
+                    self.inputs.insert(w.to.clone(), w.from.clone());
+                }
+                let mut dirty: Vec<NodeId> = vec![id];
+                dirty.extend(wires.iter().map(|w| w.to.node).filter(|&n| n != id));
+                Ok(Applied {
+                    inverse: vec![Edit::RemoveNode { id }],
+                    dirty,
+                })
+            }
+            Edit::Connect { wire } => {
+                self.validate_wire(registry, &wire)?;
+                let old = self.inputs.insert(wire.to.clone(), wire.from.clone());
+                let mut inverse = vec![Edit::Disconnect { wire: wire.clone() }];
+                if let Some(from) = old {
+                    inverse.push(Edit::Connect {
+                        wire: Wire::new(from, wire.to.clone()),
+                    });
+                }
+                Ok(Applied {
+                    inverse,
+                    dirty: vec![wire.to.node],
+                })
+            }
+            Edit::Disconnect { wire } => {
+                if self.inputs.get(&wire.to) != Some(&wire.from) {
+                    return Err(GraphError::NoWire(format!(
+                        "{}.{} → {}.{}",
+                        wire.from.node, wire.from.socket, wire.to.node, wire.to.socket
+                    )));
+                }
+                self.inputs.remove(&wire.to);
+                let node = wire.to.node;
+                Ok(Applied {
+                    inverse: vec![Edit::Connect { wire }],
+                    dirty: vec![node],
+                })
+            }
+            Edit::SetParam { node, param, value } => {
+                let schema = self.schema(registry, node)?;
+                let ps = schema
+                    .params
+                    .iter()
+                    .find(|p| p.name == param)
+                    .ok_or_else(|| GraphError::NoParam {
+                        type_id: schema.type_id.clone(),
+                        param: param.clone(),
+                    })?;
+                // An empty expression is no expression.
+                let value = value.map(|mut v| {
+                    if v.expr.as_deref().is_some_and(|e| e.trim().is_empty()) {
+                        v.expr = None;
+                    }
+                    v
+                });
+                if let Some(v) = &value {
+                    ps.validate(&v.value).map_err(GraphError::InvalidValue)?;
+                    if let Some(bind) = &v.bind {
+                        self.validate_binding(registry, node, ps, bind)?;
+                    }
+                    if v.expr.is_some() {
+                        if !ps.kind.can_follow() {
+                            return Err(GraphError::InvalidValue(format!(
+                                "`{param}`: expressions drive number, toggle, vector and colour parameters"
+                            )));
+                        }
+                        if v.bind.is_some() {
+                            return Err(GraphError::InvalidValue(format!(
+                                "`{param}`: a parameter follows a channel or an expression, not both"
+                            )));
+                        }
+                    }
+                }
+                // A constant equal to the default is stored as "no override".
+                let value =
+                    value.filter(|v| v.expr.is_some() || v.bind.is_some() || v.value != ps.default);
+                let n = self
+                    .nodes
+                    .get_mut(&node)
+                    .expect("schema lookup checked the node");
+                let old = match value {
+                    Some(v) => n.params.insert(param.clone(), v),
+                    None => n.params.remove(&param),
+                };
+                Ok(Applied {
+                    inverse: vec![Edit::SetParam {
+                        node,
+                        param,
+                        value: old,
+                    }],
+                    dirty: vec![node],
+                })
+            }
+            Edit::Rename { node, name } => {
+                if !valid_name(&name) {
+                    return Err(GraphError::InvalidName(name));
+                }
+                if self.nodes.values().any(|n| n.name == name && n.id != node) {
+                    return Err(GraphError::DuplicateName(name));
+                }
+                let n = self.nodes.get_mut(&node).ok_or(GraphError::NoNode(node))?;
+                let old = std::mem::replace(&mut n.name, name);
+                Ok(Applied {
+                    inverse: vec![Edit::Rename { node, name: old }],
+                    dirty: vec![],
+                })
+            }
+            Edit::Move { node, pos } => {
+                let n = self.nodes.get_mut(&node).ok_or(GraphError::NoNode(node))?;
+                let old = std::mem::replace(&mut n.pos, pos);
+                Ok(Applied {
+                    inverse: vec![Edit::Move { node, pos: old }],
+                    dirty: vec![],
+                })
+            }
+            Edit::AddComment { comment } => {
+                let id = comment.id;
+                if self.comments.contains_key(&id) || self.nodes.contains_key(&NodeId(id.0)) {
+                    return Err(GraphError::CommentIdInUse(id));
+                }
+                self.next_id = self.next_id.max(id.0 + 1);
+                self.comments.insert(id, comment);
+                Ok(Applied {
+                    inverse: vec![Edit::RemoveComment { id }],
+                    dirty: vec![],
+                })
+            }
+            Edit::RemoveComment { id } => {
+                let comment = self.comments.remove(&id).ok_or(GraphError::NoComment(id))?;
+                Ok(Applied {
+                    inverse: vec![Edit::AddComment { comment }],
+                    dirty: vec![],
+                })
+            }
+            Edit::UpdateComment { comment } => {
+                let slot = self
+                    .comments
+                    .get_mut(&comment.id)
+                    .ok_or(GraphError::NoComment(comment.id))?;
+                let old = std::mem::replace(slot, comment);
+                Ok(Applied {
+                    inverse: vec![Edit::UpdateComment { comment: old }],
+                    dirty: vec![],
+                })
+            }
+        }
+    }
+}
+
+/// After a hot reload changed the schemas of the operators a project
+/// defines with `provenance` (Python operators, kernel files): edits that
+/// drop what their nodes hold but the new schema no longer has (parameter
+/// values that no longer exist or fit, wires into removed inputs), as one
+/// undo step, and a note for each. Values whose name and kind still fit are
+/// kept. Empty when every node still fits.
+pub fn stale_edits(
+    net: &Network,
+    registry: &Registry,
+    provenance: &str,
+) -> (Vec<Edit>, Vec<String>) {
+    let mut edits = Vec::new();
+    let mut notes = Vec::new();
+    for node in net.nodes() {
+        if registry.provenance(&node.type_id) != Some(provenance) {
+            continue;
+        }
+        let Some(schema) = registry.get(&node.type_id) else {
+            continue;
+        };
+        let mut clean = node.clone();
+        let mut dropped = false;
+        clean.params.retain(|name, p| {
+            let keep = schema
+                .params
+                .iter()
+                .find(|s| &s.name == name)
+                .is_some_and(|s| s.validate(&p.value).is_ok());
+            if !keep {
+                notes.push(format!("{}: dropped the value of `{name}`", node.name));
+                dropped = true;
+            }
+            keep
+        });
+        let socket_ok = |wire: &Wire| {
+            let input_ok = |w: &Wire| {
+                schema
+                    .inputs
+                    .iter()
+                    .any(|s| s.name == w.to.socket && Some(s.wire) == output_wire(net, registry, w))
+            };
+            let output_ok = |w: &Wire| schema.outputs.iter().any(|s| s.name == w.from.socket);
+            (wire.to.node != node.id || input_ok(wire))
+                && (wire.from.node != node.id || output_ok(wire))
+        };
+        let wires: Vec<Wire> = net
+            .wires()
+            .filter(|w| w.from.node == node.id || w.to.node == node.id)
+            .collect();
+        let kept: Vec<Wire> = wires.iter().filter(|w| socket_ok(w)).cloned().collect();
+        if kept.len() != wires.len() {
+            for w in wires.iter().filter(|w| !socket_ok(w)) {
+                notes.push(format!(
+                    "{}: removed the wire into `{}`",
+                    node.name, w.to.socket
+                ));
+            }
+            dropped = true;
+        }
+        if !dropped {
+            continue;
+        }
+        // Remove and restore the node as it fits now; parameters of other
+        // nodes bound to its channels are bound again.
+        let rebind: Vec<Edit> = net
+            .nodes()
+            .flat_map(|other| {
+                other
+                    .params
+                    .iter()
+                    .filter(|(_, p)| p.bind.as_ref().is_some_and(|b| b.node == node.id))
+                    .map(move |(name, p)| Edit::SetParam {
+                        node: other.id,
+                        param: name.clone(),
+                        value: Some(Param::clone(p)),
+                    })
+            })
+            .collect();
+        edits.push(Edit::RemoveNode { id: node.id });
+        edits.push(Edit::RestoreNode {
+            node: clean,
+            wires: kept,
+        });
+        edits.extend(rebind);
+    }
+    (edits, notes)
+}
+
+/// The wire type of the output a wire comes from.
+fn output_wire(net: &Network, registry: &Registry, w: &Wire) -> Option<WireType> {
+    let src = net.node(w.from.node)?;
+    registry
+        .get(&src.type_id)?
+        .outputs
+        .iter()
+        .find(|s| s.name == w.from.socket)
+        .map(|s| s.wire)
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use crate::registry::{OpFamily, ParamKind, ParamSchema};
+    use serde_json::json;
+
+    fn socket(name: &str, wire: WireType, feedback: bool) -> SocketSchema {
+        SocketSchema {
+            name: name.into(),
+            wire,
+            optional: true,
+            feedback,
+        }
+    }
+
+    fn op(
+        type_id: &str,
+        family: OpFamily,
+        inputs: Vec<SocketSchema>,
+        outputs: Vec<SocketSchema>,
+    ) -> OperatorSchema {
+        OperatorSchema {
+            type_id: type_id.into(),
+            family,
+            label: type_id.into(),
+            summary: "test operator".into(),
+            version: 1,
+            params: vec![ParamSchema {
+                name: "gain".into(),
+                label: "Gain".into(),
+                kind: ParamKind::Float {
+                    min: Some(0.0),
+                    max: Some(10.0),
+                },
+                default: json!(1.0),
+                help: String::new(),
+                suggest: None,
+                multiline: false,
+            }],
+            inputs,
+            outputs,
+            capabilities: vec![],
+            cook_budget_us: 100,
+            time_dependent: false,
+            sink: false,
+        }
+    }
+
+    /// A small registry of test-only operators.
+    pub(crate) fn test_registry() -> Registry {
+        let mut r = Registry::default();
+        let img = WireType::Img;
+        r.register(op(
+            "img.gen",
+            OpFamily::Img,
+            vec![],
+            vec![socket("out", img, false)],
+        ))
+        .unwrap();
+        r.register(op(
+            "img.mix",
+            OpFamily::Img,
+            vec![socket("a", img, false), socket("b", img, false)],
+            vec![socket("out", img, false)],
+        ))
+        .unwrap();
+        r.register(op(
+            "img.feedback",
+            OpFamily::Img,
+            vec![socket("in", img, false), socket("prev", img, true)],
+            vec![socket("out", img, false)],
+        ))
+        .unwrap();
+        let mut lfo = op(
+            "sig.lfo",
+            OpFamily::Sig,
+            vec![],
+            vec![socket("out", WireType::Sig, false)],
+        );
+        lfo.time_dependent = true;
+        r.register(lfo).unwrap();
+        r
+    }
+
+    pub(crate) fn add(net: &mut Network, reg: &Registry, type_id: &str) -> NodeId {
+        let id = net.alloc_id();
+        let base = type_id.split('.').nth(1).unwrap();
+        let name = net.unique_name(base);
+        net.apply(
+            reg,
+            Edit::AddNode {
+                node: Node::new(id, type_id, name),
+            },
+        )
+        .unwrap();
+        id
+    }
+
+    pub(crate) fn connect(
+        net: &mut Network,
+        reg: &Registry,
+        from: NodeId,
+        to: NodeId,
+        input: &str,
+    ) -> Applied {
+        net.apply(
+            reg,
+            Edit::Connect {
+                wire: Wire::new(Endpoint::new(from, "out"), Endpoint::new(to, input)),
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn ids_are_stable_and_never_reused() {
+        let reg = test_registry();
+        let mut net = Network::default();
+        let a = add(&mut net, &reg, "img.gen");
+        let b = add(&mut net, &reg, "img.gen");
+        assert_eq!((a, b), (NodeId(0), NodeId(1)));
+        assert_eq!(net.node(b).unwrap().name, "gen2");
+        net.apply(&reg, Edit::RemoveNode { id: b }).unwrap();
+        assert_eq!(add(&mut net, &reg, "img.gen"), NodeId(2));
+    }
+
+    #[test]
+    fn names_are_validated_and_unique() {
+        let reg = test_registry();
+        let mut net = Network::default();
+        let a = add(&mut net, &reg, "img.gen");
+        let id = net.alloc_id();
+        let dup = Node::new(id, "img.gen", "gen1");
+        assert_eq!(
+            net.apply(&reg, Edit::AddNode { node: dup }),
+            Err(GraphError::DuplicateName("gen1".into()))
+        );
+        for bad in ["", "1abc", "a b", "a/b"] {
+            assert!(matches!(
+                net.apply(
+                    &reg,
+                    Edit::Rename {
+                        node: a,
+                        name: bad.into()
+                    }
+                ),
+                Err(GraphError::InvalidName(_))
+            ));
+        }
+        let unknown = Node::new(net.alloc_id(), "img.nope", "x");
+        assert!(matches!(
+            net.apply(&reg, Edit::AddNode { node: unknown }),
+            Err(GraphError::UnknownType(_))
+        ));
+    }
+
+    #[test]
+    fn wires_are_typed_and_inputs_single() {
+        let reg = test_registry();
+        let mut net = Network::default();
+        let g1 = add(&mut net, &reg, "img.gen");
+        let g2 = add(&mut net, &reg, "img.gen");
+        let mix = add(&mut net, &reg, "img.mix");
+        let lfo = add(&mut net, &reg, "sig.lfo");
+
+        connect(&mut net, &reg, g1, mix, "a");
+        let replaced = connect(&mut net, &reg, g2, mix, "a");
+        assert_eq!(net.inputs_of(mix).count(), 1, "an input holds one wire");
+        assert_eq!(
+            replaced.inverse.len(),
+            2,
+            "inverse restores the replaced wire"
+        );
+
+        let err = net
+            .apply(
+                &reg,
+                Edit::Connect {
+                    wire: Wire::new(Endpoint::new(lfo, "out"), Endpoint::new(mix, "b")),
+                },
+            )
+            .unwrap_err();
+        assert_eq!(
+            err,
+            GraphError::WireTypeMismatch {
+                from: WireType::Sig,
+                to: WireType::Img
+            }
+        );
+
+        let err = net
+            .apply(
+                &reg,
+                Edit::Connect {
+                    wire: Wire::new(Endpoint::new(g1, "out"), Endpoint::new(mix, "zz")),
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(err, GraphError::NoSocket { kind: "input", .. }));
+    }
+
+    #[test]
+    fn cycles_need_a_feedback_input() {
+        let reg = test_registry();
+        let mut net = Network::default();
+        let g = add(&mut net, &reg, "img.gen");
+        let fb = add(&mut net, &reg, "img.feedback");
+        let mix = add(&mut net, &reg, "img.mix");
+        connect(&mut net, &reg, g, fb, "in");
+        connect(&mut net, &reg, fb, mix, "a");
+        // mix → fb.in would loop.
+        let err = net
+            .apply(
+                &reg,
+                Edit::Connect {
+                    wire: Wire::new(Endpoint::new(mix, "out"), Endpoint::new(fb, "in")),
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(err, GraphError::Cycle(_)));
+        // mix → fb.prev is a feedback loop and allowed.
+        connect(&mut net, &reg, mix, fb, "prev");
+        // A self-loop through a normal input is rejected.
+        let err = net
+            .apply(
+                &reg,
+                Edit::Connect {
+                    wire: Wire::new(Endpoint::new(mix, "out"), Endpoint::new(mix, "b")),
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(err, GraphError::Cycle(_)));
+    }
+
+    #[test]
+    fn params_store_only_overrides() {
+        let reg = test_registry();
+        let mut net = Network::default();
+        let g = add(&mut net, &reg, "img.gen");
+        assert_eq!(net.param_value(&reg, g, "gain"), Some(&json!(1.0)));
+        net.apply(
+            &reg,
+            Edit::SetParam {
+                node: g,
+                param: "gain".into(),
+                value: Some(Param::constant(json!(2.5))),
+            },
+        )
+        .unwrap();
+        assert_eq!(net.param_value(&reg, g, "gain"), Some(&json!(2.5)));
+        // Setting the default removes the override.
+        net.apply(
+            &reg,
+            Edit::SetParam {
+                node: g,
+                param: "gain".into(),
+                value: Some(Param::constant(json!(1.0))),
+            },
+        )
+        .unwrap();
+        assert!(net.node(g).unwrap().params.is_empty());
+        let err = net
+            .apply(
+                &reg,
+                Edit::SetParam {
+                    node: g,
+                    param: "gain".into(),
+                    value: Some(Param::constant(json!(99))),
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(err, GraphError::InvalidValue(_)));
+        let err = net
+            .apply(
+                &reg,
+                Edit::SetParam {
+                    node: g,
+                    param: "nope".into(),
+                    value: Some(Param::constant(json!(1))),
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(err, GraphError::NoParam { .. }));
+    }
+
+    #[test]
+    fn every_edit_inverts_exactly() {
+        let reg = test_registry();
+        let mut net = Network::default();
+        let g = add(&mut net, &reg, "img.gen");
+        let fb = add(&mut net, &reg, "img.feedback");
+        let mix = add(&mut net, &reg, "img.mix");
+        connect(&mut net, &reg, g, fb, "in");
+        connect(&mut net, &reg, fb, mix, "a");
+        connect(&mut net, &reg, g, mix, "b");
+        connect(&mut net, &reg, mix, fb, "prev");
+        let note = net.alloc_comment_id();
+        net.apply(
+            &reg,
+            Edit::AddComment {
+                comment: Comment {
+                    id: note,
+                    text: "feedback loop".into(),
+                    pos: [-20.0, -20.0],
+                    size: [400.0, 200.0],
+                },
+            },
+        )
+        .unwrap();
+        // IDs are allocated before use (and never reused, even on undo).
+        let fresh = net.alloc_comment_id();
+
+        let edits = vec![
+            Edit::RemoveNode { id: fb },
+            Edit::Connect {
+                wire: Wire::new(Endpoint::new(fb, "out"), Endpoint::new(mix, "b")),
+            },
+            Edit::Disconnect {
+                wire: Wire::new(Endpoint::new(g, "out"), Endpoint::new(mix, "b")),
+            },
+            Edit::SetParam {
+                node: mix,
+                param: "gain".into(),
+                value: Some(Param::constant(json!(3.0))),
+            },
+            Edit::Rename {
+                node: g,
+                name: "source".into(),
+            },
+            Edit::Move {
+                node: g,
+                pos: [10.0, -4.0],
+            },
+            Edit::AddComment {
+                comment: Comment {
+                    id: fresh,
+                    text: "new".into(),
+                    pos: [0.0, 0.0],
+                    size: [100.0, 50.0],
+                },
+            },
+            Edit::RemoveComment { id: note },
+            Edit::UpdateComment {
+                comment: Comment {
+                    id: note,
+                    text: "edited".into(),
+                    pos: [5.0, 6.0],
+                    size: [300.0, 200.0],
+                },
+            },
+        ];
+        for edit in edits {
+            let before = net.clone();
+            let applied = net
+                .apply(&reg, edit.clone())
+                .unwrap_or_else(|e| panic!("{edit:?}: {e}"));
+            assert_ne!(net, before, "{edit:?} changed nothing");
+            for inv in applied.inverse {
+                net.apply(&reg, inv).unwrap();
+            }
+            assert_eq!(net, before, "inverse of {edit:?} restores the network");
+        }
+    }
+
+    #[test]
+    fn remove_node_dirties_downstream_and_restores_wires() {
+        let reg = test_registry();
+        let mut net = Network::default();
+        let g = add(&mut net, &reg, "img.gen");
+        let mix = add(&mut net, &reg, "img.mix");
+        connect(&mut net, &reg, g, mix, "a");
+        let applied = net.apply(&reg, Edit::RemoveNode { id: g }).unwrap();
+        assert_eq!(applied.dirty, vec![mix]);
+        assert_eq!(net.wires().count(), 0);
+        net.apply(&reg, applied.inverse[0].clone()).unwrap();
+        assert_eq!(
+            net.inputs_of(mix)
+                .map(|(i, s)| (i.to_owned(), s.node))
+                .collect::<Vec<_>>(),
+            [("a".into(), g)]
+        );
+    }
+
+    #[test]
+    fn bindings_validate_and_count_as_dependencies() {
+        let reg = test_registry();
+        let mut net = Network::default();
+        let lfo = add(&mut net, &reg, "sig.lfo");
+        let g = add(&mut net, &reg, "img.gen");
+        let mix = add(&mut net, &reg, "img.mix");
+        connect(&mut net, &reg, g, mix, "a");
+        let bind = |src: NodeId| Param::bound(json!(1.0), src, "");
+
+        net.apply(
+            &reg,
+            Edit::SetParam {
+                node: g,
+                param: "gain".into(),
+                value: Some(bind(lfo)),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            net.bindings_of(g).map(|b| b.node).collect::<Vec<_>>(),
+            [lfo]
+        );
+        assert!(
+            net.downstream_of(lfo).contains(&g),
+            "bound nodes are downstream"
+        );
+
+        // Binding to a node without a SIG output is rejected.
+        let err = net
+            .apply(
+                &reg,
+                Edit::SetParam {
+                    node: mix,
+                    param: "gain".into(),
+                    value: Some(bind(g)),
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(err, GraphError::InvalidBinding(_)), "{err:?}");
+
+        // A binding may not close a loop: lfo's own parameter cannot follow lfo.
+        let err = net
+            .apply(
+                &reg,
+                Edit::SetParam {
+                    node: lfo,
+                    param: "gain".into(),
+                    value: Some(bind(lfo)),
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(err, GraphError::Cycle(_)));
+
+        // A bound parameter is kept even when its fallback equals the default.
+        assert!(net.node(g).unwrap().params.contains_key("gain"));
+    }
+
+    /// Vectors and colours follow channels and expressions (A66); menus,
+    /// text and paths still do not.
+    #[test]
+    fn vectors_and_colours_follow_channels_and_expressions() {
+        let mut reg = test_registry();
+        let mut shape = op(
+            "img.shape",
+            OpFamily::Img,
+            vec![],
+            vec![socket("out", WireType::Img, false)],
+        );
+        shape.params = vec![
+            ParamSchema::vec("scale", "Scale", &[1.0, 1.0]),
+            ParamSchema::colour("fill", "Fill", [1.0, 0.5, 0.0, 1.0]),
+            ParamSchema::menu("mode", "Mode", &["a", "b"], "a"),
+            ParamSchema::string("text", "Text", ""),
+            ParamSchema::path("file", "File"),
+        ];
+        reg.register(shape).unwrap();
+        let mut net = Network::default();
+        let lfo = add(&mut net, &reg, "sig.lfo");
+        let s = add(&mut net, &reg, "img.shape");
+        let set = |net: &mut Network, param: &str, value: Param| {
+            net.apply(
+                &reg,
+                Edit::SetParam {
+                    node: s,
+                    param: param.into(),
+                    value: Some(value),
+                },
+            )
+        };
+        let expr = |value: serde_json::Value, source: &str| Param {
+            value,
+            expr: Some(source.into()),
+            bind: None,
+        };
+        set(&mut net, "scale", Param::bound(json!([1.0, 1.0]), lfo, "")).unwrap();
+        set(&mut net, "fill", expr(json!([1.0, 0.5, 0.0, 1.0]), "0.5")).unwrap();
+        assert_eq!(
+            net.bindings_of(s).map(|b| b.node).collect::<Vec<_>>(),
+            [lfo]
+        );
+        set(&mut net, "scale", expr(json!([1.0, 1.0]), "1 + time")).unwrap();
+        set(
+            &mut net,
+            "fill",
+            Param::bound(json!([0.0, 0.0, 0.0, 1.0]), lfo, "lfo"),
+        )
+        .unwrap();
+        // The fallback must still be a valid vector.
+        let err = set(&mut net, "scale", expr(json!(1.0), "time")).unwrap_err();
+        assert!(matches!(err, GraphError::InvalidValue(_)), "{err:?}");
+        for (param, value) in [
+            ("mode", json!("a")),
+            ("text", json!("x")),
+            ("file", json!("")),
+        ] {
+            let err = set(&mut net, param, Param::bound(value.clone(), lfo, "")).unwrap_err();
+            assert!(
+                matches!(err, GraphError::InvalidBinding(_)),
+                "{param}: {err:?}"
+            );
+            let err = set(&mut net, param, expr(value, "1")).unwrap_err();
+            assert!(
+                matches!(&err, GraphError::InvalidValue(m) if m.contains("expressions drive")),
+                "{param}: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn serialisation_is_deterministic() {
+        let reg = test_registry();
+        let mut net = Network::default();
+        let g = add(&mut net, &reg, "img.gen");
+        let mix = add(&mut net, &reg, "img.mix");
+        connect(&mut net, &reg, g, mix, "b");
+        connect(&mut net, &reg, g, mix, "a");
+        let a = serde_json::to_string(&net).unwrap();
+        let back: Network = serde_json::from_str(&a).unwrap();
+        assert_eq!(back, net);
+        assert_eq!(serde_json::to_string(&back).unwrap(), a);
+        assert!(
+            a.contains("\"wires\":[{\"from\""),
+            "wires serialise as a list: {a}"
+        );
+    }
+
+    #[test]
+    fn comments_round_trip_and_old_files_still_load() {
+        let reg = test_registry();
+        let mut net = Network::default();
+        let g = add(&mut net, &reg, "img.gen");
+        let c = net.alloc_comment_id();
+        assert_ne!(c.0, g.0, "comments and nodes share one ID space");
+        let comment = Comment {
+            id: c,
+            text: "Sources\nlive inputs".into(),
+            pos: [-10.0, -10.0],
+            size: [200.0, 120.0],
+        };
+        net.apply(
+            &reg,
+            Edit::AddComment {
+                comment: comment.clone(),
+            },
+        )
+        .unwrap();
+        let text = serde_json::to_string(&net).unwrap();
+        assert!(text.contains("\"comments\":[{\"id\":"), "{text}");
+        let back: Network = serde_json::from_str(&text).unwrap();
+        assert_eq!(back, net);
+        assert_eq!(back.comment(c), Some(&comment));
+        assert_eq!(serde_json::to_string(&back).unwrap(), text);
+
+        // A comment cannot take a node's ID and vice versa.
+        let clash = Comment {
+            id: CommentId(g.0),
+            ..comment
+        };
+        assert_eq!(
+            net.apply(&reg, Edit::AddComment { comment: clash }),
+            Err(GraphError::CommentIdInUse(CommentId(g.0)))
+        );
+        assert!(
+            net.apply(
+                &reg,
+                Edit::AddNode {
+                    node: Node::new(NodeId(c.0), "img.gen", "x")
+                }
+            )
+            .is_err()
+        );
+
+        // Files without comments (written before they existed) load, and
+        // empty comment lists are not written.
+        let old = r#"{"next_id":1,"nodes":[{"id":0,"type_id":"img.gen","name":"a","pos":[0,0]}],"wires":[]}"#;
+        let net: Network = serde_json::from_str(old).unwrap();
+        assert_eq!(
+            serde_json::to_string(&net).unwrap(),
+            old.replace("[0,0]", "[0.0,0.0]")
+        );
+    }
+
+    #[test]
+    fn validation_accepts_valid_networks_and_rejects_schema_errors() {
+        let reg = test_registry();
+        let mut net = Network::default();
+        let g = add(&mut net, &reg, "img.gen");
+        let mix = add(&mut net, &reg, "img.mix");
+        connect(&mut net, &reg, g, mix, "a");
+        let note = net.alloc_comment_id();
+        net.apply(
+            &reg,
+            Edit::AddComment {
+                comment: Comment {
+                    id: note,
+                    text: "n".into(),
+                    pos: [0.0, 0.0],
+                    size: [10.0, 10.0],
+                },
+            },
+        )
+        .unwrap();
+        let text = serde_json::to_string(&net).unwrap();
+        let back: Network = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.validated(&reg).unwrap(), net);
+
+        // Structurally fine JSON that the registry rejects.
+        let unknown = text.replace("img.gen", "img.nope");
+        let parsed: Network = serde_json::from_str(&unknown).unwrap();
+        assert!(matches!(
+            parsed.validated(&reg),
+            Err(GraphError::UnknownType(_))
+        ));
+        let bad_param = text.replace(
+            r#""name":"mix1","pos":[0.0,0.0]"#,
+            r#""name":"mix1","pos":[0.0,0.0],"params":{"nope":{"value":1}}"#,
+        );
+        assert_ne!(bad_param, text);
+        let parsed: Network = serde_json::from_str(&bad_param).unwrap();
+        assert!(matches!(
+            parsed.validated(&reg),
+            Err(GraphError::NoParam { .. })
+        ));
+    }
+
+    #[test]
+    fn removing_a_bound_source_unbinds_and_undo_rebinds() {
+        let reg = test_registry();
+        let mut net = Network::default();
+        let lfo = add(&mut net, &reg, "sig.lfo");
+        let mix = add(&mut net, &reg, "img.mix");
+        let bound = Param::bound(json!(2.5), lfo, "lfo");
+        net.apply(
+            &reg,
+            Edit::SetParam {
+                node: mix,
+                param: "gain".into(),
+                value: Some(bound.clone()),
+            },
+        )
+        .unwrap();
+        let before = net.clone();
+        let applied = net.apply(&reg, Edit::RemoveNode { id: lfo }).unwrap();
+        // The value stays, the binding goes; the file still validates.
+        let p = &net.node(mix).unwrap().params["gain"];
+        assert_eq!((p.value.clone(), p.bind.clone()), (json!(2.5), None));
+        assert!(applied.dirty.contains(&mix));
+        let text = serde_json::to_string(&net).unwrap();
+        serde_json::from_str::<Network>(&text)
+            .unwrap()
+            .validated(&reg)
+            .unwrap();
+        for inv in applied.inverse {
+            net.apply(&reg, inv).unwrap();
+        }
+        assert_eq!(net, before);
+    }
+
+    /// Deterministic fuzzing: thousands of random edits, valid and not.
+    /// Every accepted edit's inverse restores the network exactly; every
+    /// rejected edit leaves it untouched; and the network always survives
+    /// a JSON round trip through validation (rule 8).
+    #[test]
+    fn random_edits_invert_reject_atomically_and_round_trip() {
+        let reg = test_registry();
+        let mut state = 0x2545_F491_4F6C_DD1Du64;
+        let mut rng = move |n: u64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state % n.max(1)
+        };
+        let types = ["img.gen", "img.mix", "img.feedback", "sig.lfo"];
+        let sockets = ["a", "b", "in", "prev", "nope"];
+        let names = ["gen1", "mix1", "x", "1bad", "lfo_2", "a b"];
+        let mut net = Network::default();
+        let (mut accepted, mut rejected) = (0, 0);
+        for step in 0..4000 {
+            let ids: Vec<NodeId> = net.nodes().map(|n| n.id).collect();
+            let comments: Vec<CommentId> = net.comments().map(|c| c.id).collect();
+            let any_node = |rng: &mut dyn FnMut(u64) -> u64| {
+                if ids.is_empty() || rng(10) == 0 {
+                    NodeId(rng(net.next_id + 3))
+                } else {
+                    ids[rng(ids.len() as u64) as usize]
+                }
+            };
+            let edit = match rng(12) {
+                0..=2 => {
+                    let id = if rng(8) == 0 {
+                        NodeId(rng(net.next_id + 1))
+                    } else {
+                        net.alloc_id()
+                    };
+                    let ty = types[rng(types.len() as u64) as usize];
+                    let name = if rng(4) == 0 {
+                        names[rng(names.len() as u64) as usize].to_owned()
+                    } else {
+                        net.unique_name("n")
+                    };
+                    Edit::AddNode {
+                        node: Node::new(id, ty, name),
+                    }
+                }
+                3 => Edit::RemoveNode {
+                    id: any_node(&mut rng),
+                },
+                4 | 5 => Edit::Connect {
+                    wire: Wire::new(
+                        Endpoint::new(any_node(&mut rng), "out"),
+                        Endpoint::new(
+                            any_node(&mut rng),
+                            sockets[rng(sockets.len() as u64) as usize],
+                        ),
+                    ),
+                },
+                6 => match net.wires().nth(rng(8) as usize) {
+                    Some(wire) => Edit::Disconnect { wire },
+                    None => Edit::Disconnect {
+                        wire: Wire::new(
+                            Endpoint::new(any_node(&mut rng), "out"),
+                            Endpoint::new(any_node(&mut rng), "a"),
+                        ),
+                    },
+                },
+                7 => {
+                    let node = any_node(&mut rng);
+                    let value = match rng(4) {
+                        0 => None,
+                        1 => Some(Param::bound(json!(1.0), any_node(&mut rng), "lfo")),
+                        // Out of range (−5…15 against 0…10) half the time.
+                        _ => Some(Param::constant(json!(rng(21) as f64 - 5.0))),
+                    };
+                    let param = if rng(6) == 0 { "nope" } else { "gain" };
+                    Edit::SetParam {
+                        node,
+                        param: param.into(),
+                        value,
+                    }
+                }
+                8 => Edit::Rename {
+                    node: any_node(&mut rng),
+                    name: names[rng(names.len() as u64) as usize].into(),
+                },
+                9 => Edit::Move {
+                    node: any_node(&mut rng),
+                    pos: [rng(1000) as f32, rng(1000) as f32],
+                },
+                10 => {
+                    let id = if rng(5) == 0 && !ids.is_empty() {
+                        CommentId(ids[0].0)
+                    } else {
+                        net.alloc_comment_id()
+                    };
+                    Edit::AddComment {
+                        comment: Comment {
+                            id,
+                            text: format!("c{step}"),
+                            pos: [0.0, 0.0],
+                            size: [10.0, 10.0],
+                        },
+                    }
+                }
+                _ => match comments.first() {
+                    Some(&id) if rng(2) == 0 => Edit::RemoveComment { id },
+                    Some(&id) => Edit::UpdateComment {
+                        comment: Comment {
+                            id,
+                            text: "u".into(),
+                            pos: [1.0, 2.0],
+                            size: [3.0, 4.0],
+                        },
+                    },
+                    None => Edit::RemoveComment {
+                        id: CommentId(rng(50)),
+                    },
+                },
+            };
+            let before = net.clone();
+            match net.apply(&reg, edit.clone()) {
+                Ok(applied) => {
+                    accepted += 1;
+                    let mut undone = net.clone();
+                    for inv in applied.inverse {
+                        undone
+                            .apply(&reg, inv)
+                            .unwrap_or_else(|e| panic!("inverse of {edit:?}: {e}"));
+                    }
+                    // Allocated IDs are never reused, so compare without them.
+                    undone.next_id = before.next_id;
+                    assert_eq!(undone, before, "step {step}: inverse of {edit:?}");
+                }
+                Err(_) => {
+                    rejected += 1;
+                    let mut unchanged = net.clone();
+                    unchanged.next_id = before.next_id;
+                    assert_eq!(
+                        unchanged, before,
+                        "step {step}: rejected {edit:?} changed the network"
+                    );
+                }
+            }
+            if step % 200 == 0 {
+                let text = serde_json::to_string(&net).unwrap();
+                let back: Network = serde_json::from_str(&text).unwrap();
+                assert_eq!(
+                    back.validated(&reg).unwrap(),
+                    net,
+                    "step {step}: round trip"
+                );
+            }
+        }
+        assert!(
+            accepted > 1000 && rejected > 500,
+            "{accepted} accepted, {rejected} rejected"
+        );
+    }
+
+    /// Project files are untrusted: mutated network JSON must load and
+    /// validate, or fail, without panicking.
+    #[test]
+    fn mutated_network_files_never_panic() {
+        let reg = test_registry();
+        let mut net = Network::default();
+        let g = add(&mut net, &reg, "img.gen");
+        let fb = add(&mut net, &reg, "img.feedback");
+        let mix = add(&mut net, &reg, "img.mix");
+        let lfo = add(&mut net, &reg, "sig.lfo");
+        connect(&mut net, &reg, g, fb, "in");
+        connect(&mut net, &reg, fb, mix, "a");
+        connect(&mut net, &reg, mix, fb, "prev");
+        net.apply(
+            &reg,
+            Edit::SetParam {
+                node: mix,
+                param: "gain".into(),
+                value: Some(Param::bound(json!(2.0), lfo, "lfo")),
+            },
+        )
+        .unwrap();
+        let note = net.alloc_comment_id();
+        net.apply(
+            &reg,
+            Edit::AddComment {
+                comment: Comment {
+                    id: note,
+                    text: "n".into(),
+                    pos: [0.0, 0.0],
+                    size: [1.0, 1.0],
+                },
+            },
+        )
+        .unwrap();
+        let text = serde_json::to_string_pretty(&net).unwrap();
+        let mut state = 0x0BAD_C0DE_0000_0001u64;
+        let mut rng = move |n: usize| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % n.max(1) as u64) as usize
+        };
+        let noise = [
+            "{",
+            "}",
+            "[",
+            "]",
+            "\"",
+            ",",
+            ":",
+            "0",
+            "3",
+            "-1",
+            "1e30",
+            "null",
+            "18446744073709551615",
+        ];
+        let (mut loaded, mut rejected) = (0, 0);
+        for _ in 0..5000 {
+            let mut s = text.clone();
+            for _ in 0..1 + rng(3) {
+                let a = rng(s.len() + 1);
+                let b = (a + rng(10)).min(s.len());
+                match rng(3) {
+                    0 => s.replace_range(a..b, ""),
+                    1 => s.insert_str(a, noise[rng(noise.len())]),
+                    _ => s.replace_range(a..b, noise[rng(noise.len())]),
+                }
+            }
+            match serde_json::from_str::<Network>(&s).map(|n| n.validated(&reg)) {
+                Ok(Ok(_)) => loaded += 1,
+                _ => rejected += 1,
+            }
+        }
+        assert!(
+            loaded > 0 && rejected > 0,
+            "{loaded} loaded, {rejected} rejected"
+        );
+    }
+
+    #[test]
+    fn deserialisation_rejects_broken_structure() {
+        let bad = [
+            r#"{"next_id":1,"nodes":[{"id":0,"type_id":"img.gen","name":"a","pos":[0,0]},{"id":0,"type_id":"img.gen","name":"b","pos":[0,0]}],"wires":[]}"#,
+            r#"{"next_id":0,"nodes":[{"id":0,"type_id":"img.gen","name":"a","pos":[0,0]}],"wires":[]}"#,
+            r#"{"next_id":1,"nodes":[],"wires":[{"from":{"node":0,"socket":"out"},"to":{"node":1,"socket":"a"}}]}"#,
+            r#"{"next_id":1,"nodes":[{"id":0,"type_id":"img.gen","name":"a","pos":[0,0]}],"wires":[],"comments":[{"id":0,"text":"","pos":[0,0],"size":[1,1]}]}"#,
+            r#"{"next_id":1,"nodes":[],"wires":[],"comments":[{"id":5,"text":"","pos":[0,0],"size":[1,1]}]}"#,
+        ];
+        for json in bad {
+            assert!(serde_json::from_str::<Network>(json).is_err(), "{json}");
+        }
+    }
+}

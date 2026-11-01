@@ -31,13 +31,13 @@ jobs:
           - { name: macos-arm64, os: macos-latest, optional: false, python: python3, gpu: "1", tests: "4" }
           - { name: linux, os: ubuntu-latest, optional: true, python: python3, gpu: "", tests: "4" }
     env:
-      ATD_PYTHON: ${{ matrix.python }}
+      LSR_PYTHON: ${{ matrix.python }}
       # The Windows runner draws with WARP, which crashes (access violation) or
       # stalls when two devices run in parallel: one test at a time there.
       RUST_TEST_THREADS: ${{ matrix.tests }}
       # GPU tests must run, not skip, where the runner has a GPU device
       # (WARP on Windows, the paravirtual Metal device on macOS).
-      ATD_REQUIRE_GPU: ${{ matrix.gpu }}
+      LSR_REQUIRE_GPU: ${{ matrix.gpu }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -58,9 +58,9 @@ jobs:
       - name: Test
         run: cargo test --workspace
       - name: Operator docs are current
-        run: cargo run -p atd-cli -- docs --check
+        run: cargo run -p lsr-cli -- docs --check
       - name: Bench (start-up cases)
-        run: cargo run -p atd-cli --release -- bench --out bench-${{ matrix.name }}.json
+        run: cargo run -p lsr-cli --release -- bench --out bench-${{ matrix.name }}.json
       - name: Show bench JSON
         shell: bash
         run: cat bench-${{ matrix.name }}.json
@@ -71,12 +71,12 @@ jobs:
         # examples' own Python operators (ops/*.py) run too: they are ours
         # (docs/python-ops.md, the trust gate).
         shell: bash
-        run: cargo run -p atd-cli --release -- check ${{ matrix.gpu == '1' && '--gpu' || '' }} --allow-python-ops examples/*.atidarla
+        run: cargo run -p lsr-cli --release -- check ${{ matrix.gpu == '1' && '--gpu' || '' }} --allow-python-ops examples/*.lasair
       - name: Shipped Packs (FR-P4)
         # Every Pack in packs/ is valid and canonical; with a GPU, one
         # instance of each cooks with nothing connected.
         shell: bash
-        run: cargo run -p atd-cli --release -- check ${{ matrix.gpu == '1' && '--gpu' || '' }} packs/*/
+        run: cargo run -p lsr-cli --release -- check ${{ matrix.gpu == '1' && '--gpu' || '' }} packs/*/
       - name: Deterministic render (M2 AC4, FR-H1)
         # Two offline renders of the AC1 example (audio decoded on a worker
         # thread, spectrum, feedback) give byte-identical PNG frames.
@@ -84,7 +84,7 @@ jobs:
         shell: bash
         run: |
           for run in 1 2; do
-            cargo run -p atd-cli --release -- render examples/audio-reactive-feedback.atidarla --out render-$run --range 0-30 --fixed-step
+            cargo run -p lsr-cli --release -- render examples/audio-reactive-feedback.lasair --out render-$run --range 0-30 --fixed-step
           done
           n=0
           for f in render-1/*.png; do
@@ -105,7 +105,7 @@ jobs:
         run: |
           git clone -q https://github.com/Vidvox/ISF-Files.git isf-corpus
           git -C isf-corpus checkout -q 395072d48b3ce7351ccb20a5fda54470591324df
-          cargo run -p atd-cli --release -- isf-import isf-corpus/ISF --report --gpu --min-pass 90 --json isf-${{ matrix.name }}.json
+          cargo run -p lsr-cli --release -- isf-import isf-corpus/ISF --report --gpu --min-pass 90 --json isf-${{ matrix.name }}.json
       - uses: actions/upload-artifact@v4
         with:
           name: bench-${{ matrix.name }}
@@ -130,11 +130,11 @@ jobs:
           - { name: macos-arm64, os: macos-latest, optional: false, python: python3, gpu: "1", tests: "4" }
           - { name: linux, os: ubuntu-latest, optional: true, python: python3, gpu: "", tests: "4" }
     env:
-      ATD_PYTHON: ${{ matrix.python }}
+      LSR_PYTHON: ${{ matrix.python }}
       # The Windows runner draws with WARP, which crashes (access violation) or
       # stalls when two devices run in parallel: one test at a time there.
       RUST_TEST_THREADS: ${{ matrix.tests }}
-      ATD_REQUIRE_GPU: ${{ matrix.gpu }}
+      LSR_REQUIRE_GPU: ${{ matrix.gpu }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -166,11 +166,11 @@ jobs:
           echo "FFMPEG_DIR=$dir" >> "$GITHUB_ENV"
           echo "$dir\bin" >> "$GITHUB_PATH"
       - name: Clippy
-        run: cargo clippy -p atd-io -p atd-ops-img --all-targets --features atd-io/ffmpeg -- -D warnings
+        run: cargo clippy -p lsr-io -p lsr-ops-img --all-targets --features lsr-io/ffmpeg -- -D warnings
       - name: Test
-        run: cargo test -p atd-io -p atd-ops-img --features atd-io/ffmpeg
+        run: cargo test -p lsr-io -p lsr-ops-img --features lsr-io/ffmpeg
       - name: Decoder in use (software or hardware)
-        run: cargo test -p atd-io --features ffmpeg --test ffmpeg -- --nocapture
+        run: cargo test -p lsr-io --features ffmpeg --test ffmpeg -- --nocapture
 
   app-smoke:
     # M0 AC2: the shell starts, renders frames and screenshots on each OS.
@@ -200,13 +200,13 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb libxkbcommon-x11-0 mesa-vulkan-drivers libasound2-dev libudev-dev
       - name: Build
-        run: cargo build -p atd-app --release
+        run: cargo build -p lsr-app --release
       - name: Smoke run
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then RUN="xvfb-run -a -s '-screen 0 1440x900x24'"; else RUN=""; fi
           # Opens the AC1 example project, so the shell is shown with a real patch.
-          eval $RUN ./target/release/atidarla-app examples/audio-reactive-feedback.atidarla --smoke 120 --screenshot shell-${{ matrix.name }}.png
+          eval $RUN ./target/release/lasair-app examples/audio-reactive-feedback.lasair --smoke 120 --screenshot shell-${{ matrix.name }}.png
       - uses: actions/upload-artifact@v4
         if: always()
         with:

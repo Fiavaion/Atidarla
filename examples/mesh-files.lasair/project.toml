@@ -1,0 +1,18 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Mesh Files"
+description = '''
+Mesh File In and Out (M2), and Skin. Left: media/vase.obj (an open vase with a base, its
+texture coordinates split at the seam) read by Mesh File In, given sharp-edged normals
+(Normals with a cusp angle), coloured from them and written back out as PLY to
+.cache/vase.ply. Right: four circles at different heights merged and lofted into a closed
+shape (Skin), smoothed (Subdivide), texture coordinates projected around it (UV Project,
+cylindrical) and coloured from them. Both drawn as points.
+
+The vase file is made for this example (a revolved profile), so it carries no third-party
+content.
+
+Try: switch Mesh File In's OBJ points to position (one point per position, welded); write
+.cache/vase.gltf instead; turn Skin's caps off; open the written file in another tool.
+'''
+resolution = [1280, 720]

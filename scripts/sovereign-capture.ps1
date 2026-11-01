@@ -1,43 +1,43 @@
 <#
 Sovereign mode packet-capture hand check on Windows (PRD FR-A8, M4 AC5).
 
-Captures every packet with pktmon while `atidarla render` runs a project with
+Captures every packet with pktmon while `lasair render` runs a project with
 Sovereign mode on (the default), then lists every remote address seen and
 fails if any is outside loopback, private (RFC 1918 / ULA), link-local or
 CGNAT ranges. pktmon cannot tell which process sent a packet, so every packet
 is judged: run it on a quiet machine.
 
-    cargo build -p atd-cli --release
+    cargo build -p lsr-cli --release
     # from an elevated PowerShell:
-    scripts\sovereign-capture.ps1 [-Project examples\ai-live.atidarla] [-Frames 0-300]
+    scripts\sovereign-capture.ps1 [-Project examples\ai-live.lasair] [-Frames 0-300]
 #>
 [CmdletBinding()]
 param(
     [string]$Project,
     [string]$Frames = "0-300",
-    [string]$Atidarla = $env:ATIDARLA
+    [string]$Lasair = $env:LASAIR
 )
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
-if (-not $Project) { $Project = Join-Path $root "examples\ai-live.atidarla" }
+if (-not $Project) { $Project = Join-Path $root "examples\ai-live.lasair" }
 
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $admin) { Write-Error "run from an elevated PowerShell: pktmon needs administrator rights"; exit 2 }
 if (-not (Get-Command pktmon -ErrorAction SilentlyContinue)) { Write-Error "pktmon not found (Windows 10 2004 or later)"; exit 2 }
 
-if (-not $Atidarla) {
-    foreach ($b in @("target\release\atidarla.exe", "target\debug\atidarla.exe")) {
+if (-not $Lasair) {
+    foreach ($b in @("target\release\lasair.exe", "target\debug\lasair.exe")) {
         $p = Join-Path $root $b
-        if (Test-Path $p) { $Atidarla = $p; break }
+        if (Test-Path $p) { $Lasair = $p; break }
     }
 }
-if (-not $Atidarla -or -not (Test-Path $Atidarla)) {
-    Write-Error "no atidarla binary: run 'cargo build -p atd-cli --release' or set ATIDARLA"; exit 2
+if (-not $Lasair -or -not (Test-Path $Lasair)) {
+    Write-Error "no lasair binary: run 'cargo build -p lsr-cli --release' or set LASAIR"; exit 2
 }
 
-$work = Join-Path ([IO.Path]::GetTempPath()) ("atd-sovereign-" + [Guid]::NewGuid().ToString("N").Substring(0, 8))
+$work = Join-Path ([IO.Path]::GetTempPath()) ("lsr-sovereign-" + [Guid]::NewGuid().ToString("N").Substring(0, 8))
 New-Item -ItemType Directory -Path $work | Out-Null
 $etl = Join-Path $work "capture.etl"
 $txt = Join-Path $work "capture.txt"
@@ -47,8 +47,8 @@ pktmon start --capture --comp nics --pkt-size 128 --file-name $etl | Out-Null
 $status = 0
 try {
     Start-Sleep -Seconds 2
-    Write-Host "capturing while: $Atidarla render $Project --range $Frames (Sovereign mode on)"
-    & $Atidarla render $Project --out (Join-Path $work "frames") --range $Frames
+    Write-Host "capturing while: $Lasair render $Project --range $Frames (Sovereign mode on)"
+    & $Lasair render $Project --out (Join-Path $work "frames") --range $Frames
     $status = $LASTEXITCODE
     Start-Sleep -Seconds 2
 } finally {

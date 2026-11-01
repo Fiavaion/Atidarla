@@ -1,0 +1,27 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 3
+
+[[node]]
+id = 0
+name = "command"
+type = "dat.text"
+pos = [0.0, 0.0]
+params.text = "LED ON"
+
+[[node]]
+id = 1
+name = "board"
+type = "dat.serial"
+pos = [220.0, 0.0]
+inputs.send = { node = 0, output = "out" }
+params.baud = 115200
+
+[[node]]
+id = 2
+name = "readings"
+type = "dat.select"
+pos = [440.0, 0.0]
+inputs.in = { node = 1, output = "out" }
+params.match = "temp*"
+params.match_col = "line"

@@ -2,8 +2,8 @@ import io
 
 import pytest
 
-from atd_ai_host.framing import MAX_LINE, FramingError, encode_message, read_message
-from atd_ai_host.ring import FrameRing
+from lsr_ai_host.framing import MAX_LINE, FramingError, encode_message, read_message
+from lsr_ai_host.ring import FrameRing
 
 
 def wire(*messages) -> io.BufferedReader:

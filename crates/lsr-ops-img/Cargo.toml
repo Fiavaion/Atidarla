@@ -1,0 +1,41 @@
+[package]
+name = "lsr-ops-img"
+description = "Lasair: IMG operator family"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+lsr-core.workspace = true
+lsr-gpu.workspace = true
+lsr-io.workspace = true
+lsr-interop.workspace = true
+lsr-kernel.workspace = true
+ab_glyph_rasterizer.workspace = true
+skrifa.workspace = true
+epaint_default_fonts.workspace = true
+wgpu.workspace = true
+pollster.workspace = true
+log.workspace = true
+# Compute: naga validation with line/col errors; Neural CA: weights files.
+naga.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+png.workspace = true
+hound.workspace = true
+lsr-ops-sig.workspace = true
+lsr-ops-dat.workspace = true
+pollster.workspace = true
+lsr-format.workspace = true
+
+[features]
+# Movie In plays non-HAP video through FFmpeg (PRD A23).
+ffmpeg = ["lsr-io/ffmpeg"]
+
+[lints]
+workspace = true

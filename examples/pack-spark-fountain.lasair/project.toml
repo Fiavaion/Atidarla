@@ -1,0 +1,11 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Pack: Spark Fountain"
+description = '''
+The Spark Fountain Pack on its own: sparks shooting up, swirling and bouncing off the floor. An
+LFO bound to the promoted Spread makes the jet breathe from a tight column to a wide spray every
+four seconds.
+
+Try: Palette ice or rainbow; Gravity [0.8, -2.4, 0] to lean it over; Bounce 0 so the sparks pool.
+'''
+resolution = [1280, 720]

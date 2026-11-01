@@ -1,0 +1,89 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 10
+
+[[node]]
+id = 0
+name = "rate"
+type = "sig.constant"
+pos = [0.0, 0.0]
+params.name1 = "rate"
+params.value1 = 0.3
+
+[[node]]
+id = 1
+name = "drift"
+type = "sig.speed"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+
+[[node]]
+id = 2
+name = "clock"
+type = "sig.timer"
+pos = [0.0, 140.0]
+params.length = 60.0
+
+[[node]]
+id = 3
+name = "hue_swing"
+type = "sig.lfo"
+pos = [0.0, 280.0]
+params.amplitude = 180.0
+params.frequency = 0.05
+params.waveform = "triangle"
+
+[[node]]
+id = 4
+name = "clouds"
+type = "img.noise"
+pos = [0.0, 420.0]
+params.monochrome = false
+params.octaves = 5
+params.scale = 2.5
+params.z = { value = 0.0, bind = { node = 1, channel = "rate" } }
+
+[[node]]
+id = 5
+name = "kaleidoscope1"
+type = "img.kaleidoscope"
+pos = [220.0, 420.0]
+inputs.in = { node = 4, output = "out" }
+params.rotation = { value = 0.0, bind = { node = 2, channel = "seconds" } }
+params.segments = { value = 8, expr = "6 + 2 * floor(time / 4 % 3)" }
+
+[[node]]
+id = 6
+name = "mirror1"
+type = "img.mirror"
+pos = [440.0, 420.0]
+inputs.in = { node = 5, output = "out" }
+params.axis = "both"
+
+[[node]]
+id = 7
+name = "tile1"
+type = "img.tile"
+pos = [660.0, 420.0]
+inputs.in = { node = 6, output = "out" }
+params.mirror = true
+params.repeat = [2.0, 2.0]
+
+[[node]]
+id = 8
+name = "colour"
+type = "img.hsv_adjust"
+pos = [880.0, 420.0]
+inputs.in = { node = 7, output = "out" }
+params.hue = { value = 0.0, bind = { node = 3, channel = "lfo" } }
+params.saturation = 1.3
+
+[[node]]
+id = 9
+name = "glow"
+type = "img.bloom"
+pos = [1100.0, 420.0]
+inputs.in = { node = 8, output = "out" }
+params.intensity = 0.8
+params.size = 16.0
+params.threshold = 0.6

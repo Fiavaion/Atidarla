@@ -1,0 +1,43 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 5
+
+[[node]]
+id = 0
+name = "feedback1"
+type = "img.feedback"
+pos = [0.0, 0.0]
+inputs.loop = { node = 4, output = "out" }
+
+[[node]]
+id = 1
+name = "zoom"
+type = "img.transform"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+params.rotate = 0.5
+params.scale = [1.02, 1.02]
+
+[[node]]
+id = 2
+name = "fade"
+type = "img.level"
+pos = [440.0, 0.0]
+inputs.in = { node = 1, output = "out" }
+params.brightness = 0.95
+
+[[node]]
+id = 3
+name = "hue"
+type = "img.hsv_adjust"
+pos = [660.0, 0.0]
+inputs.in = { node = 2, output = "out" }
+params.hue = 3.0
+
+[[node]]
+id = 4
+name = "mix"
+type = "img.composite"
+pos = [880.0, 0.0]
+inputs.b = { node = 3, output = "out" }
+params.operation = "maximum"

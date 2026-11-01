@@ -1,0 +1,50 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 5
+
+[[node]]
+id = 0
+name = "sky"
+type = "img.ramp"
+pos = [0.0, 0.0]
+params.colour_a = [0.95, 0.55, 0.3, 1.0]
+params.colour_b = [0.15, 0.25, 0.45, 1.0]
+params.type = "vertical"
+
+[[node]]
+id = 1
+name = "sun"
+type = "img.shape"
+pos = [0.0, 160.0]
+params.background = [1.0, 0.85, 0.55, 0.0]
+params.centre = [0.5, 0.42]
+params.fill = [1.0, 0.85, 0.55, 1.0]
+params.size = [0.35, 0.35]
+params.softness = 0.02
+
+[[node]]
+id = 2
+name = "scene"
+type = "img.composite"
+pos = [240.0, 80.0]
+inputs.a = { node = 1, output = "out" }
+inputs.b = { node = 0, output = "out" }
+
+[[node]]
+id = 3
+name = "title"
+type = "img.text"
+pos = [480.0, 80.0]
+inputs.in = { node = 2, output = "out" }
+params.colour = [1.0, 0.97, 0.9, 1.0]
+params.position = [0.5, 0.15]
+params.size = 0.09
+params.text = "THE LONG SUMMER"
+
+[[node]]
+id = 4
+name = "grain1"
+type = "cmp.pack_film_grain"
+pos = [720.0, 80.0]
+inputs.in = { node = 3, output = "out" }
+params.amount = 0.2

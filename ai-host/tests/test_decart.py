@@ -8,11 +8,11 @@ from typing import ClassVar
 import pytest
 from conftest import Client, RpcFailure, open_inline, pixels
 
-from atd_ai_host import capabilities
-from atd_ai_host.adapters import video
-from atd_ai_host.cloud import decart
-from atd_ai_host.errors import MODEL_LOAD_FAILED
-from atd_ai_host.frames import Frame
+from lsr_ai_host import capabilities
+from lsr_ai_host.adapters import video
+from lsr_ai_host.cloud import decart
+from lsr_ai_host.errors import MODEL_LOAD_FAILED
+from lsr_ai_host.frames import Frame
 
 
 class FakeStream:

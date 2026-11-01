@@ -1,0 +1,29 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 3
+
+[[node]]
+id = 0
+name = "tunnel_a"
+type = "cmp.pack_kaleido_tunnel"
+pos = [0.0, 0.0]
+
+[[node]]
+id = 1
+name = "tunnel_b"
+type = "cmp.pack_kaleido_tunnel"
+pos = [0.0, 160.0]
+params.glow = 0.3
+params.hue_speed = 0.2
+params.repeat = [1.0, 1.0]
+params.segments = 5
+params.speed = -0.2
+
+[[node]]
+id = 2
+name = "together"
+type = "img.composite"
+pos = [240.0, 80.0]
+inputs.a = { node = 0, output = "out" }
+inputs.b = { node = 1, output = "out" }
+params.operation = "screen"

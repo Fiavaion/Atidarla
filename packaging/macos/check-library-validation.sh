@@ -7,8 +7,8 @@
 # Python program carries com.apple.security.cs.disable-library-validation
 # (packaging/macos/entitlements.plist). See docs/install.md.
 #
-#   packaging/macos/check-library-validation.sh dist/Atidarla-<v>-macos-<arch>.dmg
-#   packaging/macos/check-library-validation.sh path/to/Atidarla.app
+#   packaging/macos/check-library-validation.sh dist/Lasair-<v>-macos-<arch>.dmg
+#   packaging/macos/check-library-validation.sh path/to/Lasair.app
 #
 # Works on a copy in a temporary folder; the input is never changed.
 # - A Developer ID build is tested as signed.
@@ -24,10 +24,10 @@
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-INPUT=${1:?usage: check-library-validation.sh <Atidarla.dmg | Atidarla.app>}
+INPUT=${1:?usage: check-library-validation.sh <Lasair.dmg | Lasair.app>}
 ENTITLEMENTS="$ROOT/packaging/macos/entitlements.plist"
 
-WORK=$(mktemp -d "${TMPDIR:-/tmp}/atd-lv.XXXXXX")
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/lsr-lv.XXXXXX")
 MNT=""
 cleanup() {
     if [ -n "$MNT" ]; then hdiutil detach -quiet "$MNT" || true; fi
@@ -40,18 +40,18 @@ case "$INPUT" in
         MNT="$WORK/mnt"
         mkdir -p "$MNT"
         hdiutil attach -quiet -nobrowse -readonly -mountpoint "$MNT" "$INPUT"
-        cp -R "$MNT/Atidarla.app" "$WORK/"
+        cp -R "$MNT/Lasair.app" "$WORK/"
         hdiutil detach -quiet "$MNT"
         MNT=""
         ;;
-    *.app) cp -R "$INPUT" "$WORK/Atidarla.app" ;;
+    *.app) cp -R "$INPUT" "$WORK/Lasair.app" ;;
     *)
         echo "error: $INPUT is neither a .dmg nor a .app" >&2
         exit 2
         ;;
 esac
 
-PYHOME="$WORK/Atidarla.app/Contents/Resources/python"
+PYHOME="$WORK/Lasair.app/Contents/Resources/python"
 PROGRAM=$(cd "$PYHOME/bin" && pwd -P)/$(readlink "$PYHOME/bin/python3" || echo python3)
 LIBPYTHON=$(ls "$PYHOME"/lib/libpython3.*.dylib)
 INCLUDE=$(ls -d "$PYHOME"/include/python3.*)

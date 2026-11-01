@@ -1,0 +1,21 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "ComfyUI Invert"
+description = '''
+A ComfyUI workflow as an operator (docs/comfy.md). comfy/invert.json is a weight-free
+workflow in ComfyUI's API format: Load Image, Invert Image, Save Image. Next to it,
+comfy/invert.info.json caches the server's node descriptions, so the project opens
+without a server and the operator comfy.invert always has the same controls. The
+ramp feeds the workflow's Load Image node; the inverted image comes back as the
+node's output.
+
+Lasair does not include or start ComfyUI (it is GPL software): run a ComfyUI server
+yourself on this machine or the LAN, set Server on the invert node to it (default
+127.0.0.1:8188), and the node runs the workflow whenever its inputs or controls change
+(Auto Run). Without a server the node says so in its status line and its output stays
+empty.
+
+Try: change the ramp's colours, or import your own workflow with
+`lasair comfy import my-workflow.json --project <this folder>`.
+'''
+resolution = [1280, 720]

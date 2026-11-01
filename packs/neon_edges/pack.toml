@@ -1,4 +1,4 @@
-# Atidarla Pack. Its network is network.toml; its help page is help.md.
+# Lasair Pack. Its network is network.toml; its help page is help.md.
 format = 1
 name = "neon_edges"
 version = "1.1.0"

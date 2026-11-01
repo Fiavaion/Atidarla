@@ -2,10 +2,10 @@
   "version": "2.0.0",
   "tasks": [
     { "label": "check: fmt + clippy + test", "type": "shell", "command": "cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace", "group": { "kind": "test", "isDefault": true }, "problemMatcher": ["$rustc"] },
-    { "label": "run: app", "type": "shell", "command": "cargo run -p atd-app", "problemMatcher": ["$rustc"] },
-    { "label": "run: bench", "type": "shell", "command": "cargo run -p atd-cli --release -- bench", "problemMatcher": ["$rustc"] },
+    { "label": "run: app", "type": "shell", "command": "cargo run -p lsr-app", "problemMatcher": ["$rustc"] },
+    { "label": "run: bench", "type": "shell", "command": "cargo run -p lsr-cli --release -- bench", "problemMatcher": ["$rustc"] },
     { "label": "licences: cargo deny", "type": "shell", "command": "cargo deny check", "problemMatcher": [] },
     { "label": "ai-host: pytest", "type": "shell", "command": "uv sync && uv run pytest -q", "options": { "cwd": "${workspaceFolder}/ai-host" }, "problemMatcher": [] },
-    { "label": "spike d: latency", "type": "shell", "command": "cargo run -p atd-ai --release --example spike_d", "problemMatcher": ["$rustc"] }
+    { "label": "spike d: latency", "type": "shell", "command": "cargo run -p lsr-ai --release --example spike_d", "problemMatcher": ["$rustc"] }
   ]
 }

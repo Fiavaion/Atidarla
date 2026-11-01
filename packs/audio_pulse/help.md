@@ -27,7 +27,7 @@ smoothed level is also an output, so other parameters can follow the same pulse.
 - Bind any number parameter to this node's `level` channel to move it with the music: the
   example binds a hue rotation to it.
 - With live input, pick the device on an Audio In node and wire it to `audio`.
-- Offline renders (`atidarla render`) read audio files exactly; live inputs are idle there.
+- Offline renders (`lasair render`) read audio files exactly; live inputs are idle there.
 
 ## Inside
 

@@ -1,0 +1,54 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 6
+
+[[node]]
+id = 0
+name = "spectrum1"
+type = "sig.spectrum"
+pos = [0.0, 0.0]
+params.gain = 4.0
+params.smoothing = 0.6
+
+[[node]]
+id = 1
+name = "loudness"
+type = "sig.select"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+params.channels = "level"
+
+[[node]]
+id = 2
+name = "smooth"
+type = "sig.lag"
+pos = [440.0, 0.0]
+inputs.in = { node = 1, output = "out" }
+params.lag_down = 0.25
+params.lag_up = 0.02
+
+[[node]]
+id = 3
+name = "pulse"
+type = "sig.math"
+pos = [660.0, 0.0]
+inputs.a = { node = 2, output = "out" }
+params.from_max = 0.6
+params.to_max = 1.6
+params.to_min = 0.4
+
+[[node]]
+id = 4
+name = "brighten"
+type = "img.level"
+pos = [660.0, 160.0]
+params.brightness = { value = 1.0, bind = { node = 3, channel = "level" } }
+
+[[node]]
+id = 5
+name = "glow"
+type = "img.bloom"
+pos = [880.0, 160.0]
+inputs.in = { node = 4, output = "out" }
+params.intensity = { value = 0.5, bind = { node = 3, channel = "level" } }
+params.threshold = 0.6

@@ -1,0 +1,43 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 4
+
+[[node]]
+id = 0
+name = "cast"
+type = "dat.table"
+pos = [0.0, 0.0]
+params.rows = '''
+name	role
+Ada	lights
+Bo	sound'''
+
+[[node]]
+id = 1
+name = "shout"
+type = "dat.script"
+pos = [220.0, 0.0]
+inputs.in0 = { node = 0, output = "out" }
+
+[[node]]
+id = 2
+name = "lyrics"
+type = "dat.text"
+pos = [0.0, 160.0]
+params.text = '''
+the night market hums
+lanterns sway over the old hall'''
+
+[[node]]
+id = 3
+name = "stats"
+type = "dat.script"
+pos = [220.0, 160.0]
+inputs.in0 = { node = 2, output = "out" }
+params.code = '''
+def cook(inputs):
+    text = inputs[0] or ""
+    words = text.split()
+    return {"lines": len(text.splitlines()), "words": len(words), "longest": max(words, key=len, default="")}
+'''
+params.timeout_s = 2.0

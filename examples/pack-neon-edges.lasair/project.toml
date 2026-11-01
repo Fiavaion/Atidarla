@@ -1,0 +1,10 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Pack: Neon Edges"
+description = '''
+A turning pentagon with text, outlined by the Neon Edges Pack; an LFO bound to the Pack's Hue
+cycles the outline colours.
+
+Try: set Mix to 0.5, or Width to 10 for a softer glow.
+'''
+resolution = [1280, 720]

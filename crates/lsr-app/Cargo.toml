@@ -1,0 +1,52 @@
+[package]
+name = "lsr-app"
+description = "Lasair application shell: Patch, Stage and Timeline views over one graph"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "lasair-app"
+path = "src/main.rs"
+
+[dependencies]
+lsr-core.workspace = true
+lsr-gpu.workspace = true
+lsr-io.workspace = true
+lsr-interop.workspace = true
+lsr-ops-img.workspace = true
+lsr-ops-sig.workspace = true
+lsr-ops-pnt.workspace = true
+lsr-ops-msh.workspace = true
+lsr-ops-mat.workspace = true
+lsr-ops-dat.workspace = true
+lsr-ops-cmp.workspace = true
+lsr-ops-ai.workspace = true
+lsr-stage.workspace = true
+lsr-kernel.workspace = true
+egui.workspace = true
+eframe = { workspace = true, features = ["wgpu", "default_fonts", "x11", "wayland"] }
+wgpu.workspace = true
+env_logger.workspace = true
+log.workspace = true
+serde_json.workspace = true
+toml_edit.workspace = true
+png.workspace = true
+lsr-format.workspace = true
+lsr-ai.workspace = true
+lsr-agent.workspace = true
+lsr-timeline.workspace = true
+lsr-py.workspace = true
+rfd.workspace = true
+pollster.workspace = true
+
+[features]
+# Non-HAP video through FFmpeg (PRD A23); needs FFmpeg development files.
+ffmpeg = ["lsr-ops-img/ffmpeg"]
+
+[lints]
+workspace = true

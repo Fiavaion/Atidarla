@@ -1,0 +1,36 @@
+[package]
+name = "lsr-ops-pnt"
+description = "Lasair: PNT operator family"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+lsr-core.workspace = true
+lsr-gpu.workspace = true
+# Pixel Out: fixture types, the patch layout and the DMX senders.
+lsr-io.workspace = true
+lsr-kernel.workspace = true
+lsr-ops-img.workspace = true
+flate2.workspace = true
+image-webp.workspace = true
+log.workspace = true
+pollster.workspace = true
+ruzstd.workspace = true
+serde_json.workspace = true
+wgpu.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+lsr-format.workspace = true
+lsr-interop.workspace = true
+lsr-ops-msh.workspace = true
+lsr-ops-sig.workspace = true
+naga.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,24 @@
+[package]
+name = "lsr-ops-sig"
+description = "Lasair: SIG operator family"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+lsr-core.workspace = true
+lsr-gpu.workspace = true
+lsr-io.workspace = true
+hound.workspace = true
+rustfft.workspace = true
+
+[dev-dependencies]
+hound.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

@@ -91,7 +91,7 @@ ctranslate2==4.8.4 \
     # via faster-whisper
 faster-whisper==1.2.1 \
     --hash=sha256:79a66ad50688c0b794dd501dc340a736992a6342f7f95e5811be60b5224a26a7
-    # via atd-ai-host
+    # via lsr-ai-host
 filelock==4.2.4 \
     --hash=sha256:301241438c57936ef93f4243a94f2559022268bfcf9b375a9a72eb0f8db8358e \
     --hash=sha256:c6d8663535e1650ee430507b4ffbac7b464dd64b7647ea0112a9f406499d163d
@@ -224,8 +224,8 @@ numpy==2.4.6 ; python_full_version < '3.12' \
     --hash=sha256:f407cb6b8e9d6d8c626bc73c945db1706035af8fd632295547bf1c9e46d092d6 \
     --hash=sha256:f74a575920ab21fe304421a3fc28793d82e299cae9eccb37084e9fc7f3617c20
     # via
-    #   atd-ai-host
     #   ctranslate2
+    #   lsr-ai-host
     #   onnxruntime
 numpy==2.5.4 ; python_full_version >= '3.12' \
     --hash=sha256:067374eb538c34c745436365cf7b0112595c1d326f21ce4ff340f61230239fbb \
@@ -295,8 +295,8 @@ numpy==2.5.4 ; python_full_version >= '3.12' \
     --hash=sha256:fe4d21ab149f15e4e6043dfb0de87e6e5f34ac176cde83060e9802981fca2ac2 \
     --hash=sha256:ffa6ce09a1c6a08e9667dd9c97aa0b14184e8d18f2a14b78b2a2328c9147f076
     # via
-    #   atd-ai-host
     #   ctranslate2
+    #   lsr-ai-host
     #   onnxruntime
 onnxruntime==1.31.1 \
     --hash=sha256:0558f29d5f6ac09957390c9c5495931485ee8ae7f0ce781ccee86a0ae5c2348b \

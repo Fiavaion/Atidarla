@@ -1,0 +1,12 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Signal scope"
+description = '''
+Watching signals: the built-in test tone (Audio In device `test-tone`; pick your microphone
+instead) drawn as a waveform, its spectrum as bars, and its loudness through an envelope,
+filter, lag and limit as a scrolling trail. Onset and a Pattern are merged into one more
+trace. Analyze measures the result, and its luma (average luminance) drives a meter.
+
+Try: choose a microphone in Audio In's Device menu and clap.
+'''
+resolution = [1280, 720]

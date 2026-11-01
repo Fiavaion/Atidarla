@@ -1,0 +1,17 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Mesh Shaping"
+description = '''
+MSH shaping and repair (M6), each step on a worker thread. Left: a torus cut by a tilted plane
+with the cut capped (Clip; the cap is a ring with a hole), measured (Measure writes `area` per
+polygon and `curvature` per point) and given a crisp rim (Normals with a cusp angle). Middle: a
+sphere roughened by curl noise on the GPU, smoothed back without shrinking (Smooth, Taubin),
+then rebuilt as even triangles (Remesh). Right: half a block, mirrored into a whole one with a
+welded seam (Clip, Mirror), tidied (Clean) and its sharp edges rounded (Bevel). Merged and
+rendered with a wireframe.
+
+Try: set Smooth's method to laplacian and watch the ball shrink; change Remesh's edge length;
+set Bevel's segments to 1 for a chamfer; turn Clip's cap off to look inside the torus; set the
+mirror's keep original off.
+'''
+resolution = [1280, 720]

@@ -11,12 +11,12 @@ from typing import ClassVar
 
 import pytest
 
-from atd_ai_host import PROTOCOL_VERSION
-from atd_ai_host.adapters import Adapter, register
-from atd_ai_host.frames import Frame
-from atd_ai_host.framing import encode_message, read_message
-from atd_ai_host.ring import FrameRing, remove_quietly
-from atd_ai_host.session import HostContext, Session
+from lsr_ai_host import PROTOCOL_VERSION
+from lsr_ai_host.adapters import Adapter, register
+from lsr_ai_host.frames import Frame
+from lsr_ai_host.framing import encode_message, read_message
+from lsr_ai_host.ring import FrameRing, remove_quietly
+from lsr_ai_host.session import HostContext, Session
 
 
 class SlowAdapter(Adapter):
@@ -135,7 +135,7 @@ def host():
 
 @pytest.fixture
 def ring_path():
-    fd, path = tempfile.mkstemp(prefix="atd-test-ring-")
+    fd, path = tempfile.mkstemp(prefix="lsr-test-ring-")
     os.close(fd)
     yield path
     remove_quietly(path)

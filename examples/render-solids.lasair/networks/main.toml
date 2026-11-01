@@ -1,0 +1,60 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 6
+
+[[node]]
+id = 0
+name = "dodeca"
+type = "msh.platonic"
+pos = [0.0, 0.0]
+params.centre = [-0.9, 0.0, 0.0]
+params.face_colours = true
+params.radius = 0.8
+params.shape = "dodecahedron"
+
+[[node]]
+id = 1
+name = "glossy"
+type = "mat.pbr"
+pos = [0.0, 140.0]
+params.roughness = 0.25
+
+[[node]]
+id = 2
+name = "ico"
+type = "msh.platonic"
+pos = [0.0, 280.0]
+params.centre = [0.9, 0.0, 0.0]
+params.radius = 0.7
+
+[[node]]
+id = 3
+name = "glow"
+type = "mat.pbr"
+pos = [0.0, 420.0]
+params.albedo = [0.45, 0.2, 0.1, 1.0]
+params.emission = [1.0, 0.45, 0.15, 1.0]
+params.emission_strength = { value = 1.0, expr = "0.5 + 0.3 * sin(time * 2)" }
+params.roughness = 0.6
+
+[[node]]
+id = 4
+name = "render"
+type = "img.render"
+pos = [240.0, 200.0]
+inputs.geo = { node = 0, output = "out" }
+inputs.geo2 = { node = 2, output = "out" }
+inputs.mat = { node = 1, output = "out" }
+inputs.mat2 = { node = 3, output = "out" }
+params.azimuth = { value = 0.0, expr = "time * 30" }
+params.background = [0.02, 0.02, 0.04, 1.0]
+params.distance = 4.2
+params.elevation = { value = 20.0, expr = "20 + 15 * sin(time * 0.5)" }
+
+[[node]]
+id = 5
+name = "bloom"
+type = "img.bloom"
+pos = [460.0, 200.0]
+inputs.in = { node = 4, output = "out" }
+params.threshold = 0.6

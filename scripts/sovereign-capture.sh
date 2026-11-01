@@ -1,25 +1,25 @@
 #!/usr/bin/env bash
 # Sovereign mode packet-capture hand check (PRD FR-A8, M4 AC5).
 #
-# Captures every packet while `atidarla render` runs a project with Sovereign
+# Captures every packet while `lasair render` runs a project with Sovereign
 # mode on (the default), then lists every remote address seen and fails if any
 # is outside loopback, private (RFC 1918 / ULA), link-local or CGNAT ranges.
 #
-#   cargo build -p atd-cli --release        # as yourself, first
+#   cargo build -p lsr-cli --release        # as yourself, first
 #   sudo scripts/sovereign-capture.sh [project] [frames]
 #
-# project defaults to examples/ai-live.atidarla, frames to 0-300. Set ATIDARLA
+# project defaults to examples/ai-live.lasair, frames to 0-300. Set LASAIR
 # to use another binary. The render runs as the user who called sudo.
 #
 # macOS captures on the PKTAP pseudo-interface, which tags each packet with
-# the process that sent it: only Atidarla's processes (atidarla, atd-*, the
+# the process that sent it: only Lasair's processes (lasair, lsr-*, the
 # Python AI Host) are judged and other processes' traffic is listed as
 # ignored. Linux cannot attribute packets, so every packet is judged: run it
 # on a quiet machine.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-project="${1:-$root/examples/ai-live.atidarla}"
+project="${1:-$root/examples/ai-live.lasair}"
 frames="${2:-0-300}"
 
 if [[ "$(id -u)" -ne 0 ]]; then
@@ -29,19 +29,19 @@ fi
 command -v tcpdump >/dev/null || { echo "tcpdump not found" >&2; exit 2; }
 command -v python3 >/dev/null || { echo "python3 not found (used to classify addresses)" >&2; exit 2; }
 
-bin="${ATIDARLA:-}"
+bin="${LASAIR:-}"
 if [[ -z "$bin" ]]; then
-    for b in "$root/target/release/atidarla" "$root/target/debug/atidarla"; do
+    for b in "$root/target/release/lasair" "$root/target/debug/lasair"; do
         if [[ -x "$b" ]]; then bin="$b"; break; fi
     done
 fi
 if [[ -z "$bin" || ! -x "$bin" ]]; then
-    echo "no atidarla binary: run 'cargo build -p atd-cli --release' (not as root) or set ATIDARLA" >&2
+    echo "no lasair binary: run 'cargo build -p lsr-cli --release' (not as root) or set LASAIR" >&2
     exit 2
 fi
 
 user="${SUDO_USER:-$(id -un)}"
-work="$(mktemp -d "${TMPDIR:-/tmp}/atd-sovereign.XXXXXX")"
+work="$(mktemp -d "${TMPDIR:-/tmp}/lsr-sovereign.XXXXXX")"
 chown "$user" "$work"
 log="$work/packets.txt"
 
@@ -63,7 +63,7 @@ fi
 
 echo "capturing while: $bin render $project --range $frames (Sovereign mode on)"
 status=0
-sudo -u "$user" env -u ATD_SOVEREIGN "$bin" render "$project" --out "$work/frames" --range "$frames" || status=$?
+sudo -u "$user" env -u LSR_SOVEREIGN "$bin" render "$project" --out "$work/frames" --range "$frames" || status=$?
 sleep 2
 cleanup
 wait "$tcpdump_pid" 2>/dev/null || true
@@ -77,11 +77,11 @@ import re
 import sys
 
 path, attributed = sys.argv[1], sys.argv[2] == "1"
-ours = re.compile(r"^(atidarla|atd-.*|python.*)$", re.IGNORECASE)
+ours = re.compile(r"^(lasair|lsr-.*|python.*)$", re.IGNORECASE)
 proc_re = re.compile(r"proc ([^:,()]+)")
 # "IP 10.0.0.2.52000 > 1.2.3.4.443:" and "IP6 fe80::1.546 > ff02::1:2.547:"
 flow_re = re.compile(r"\bIP6? (\S+) > (\S+?):? ")
-# The ranges atd_ai::egress counts as LAN. Not `is_private`: Python counts
+# The ranges lsr_ai::egress counts as LAN. Not `is_private`: Python counts
 # documentation ranges such as 203.0.113.0/24 as private.
 lan = [
     ipaddress.ip_network(n)
@@ -123,7 +123,7 @@ with open(path, errors="replace") as f:
             (seen if judged else ignored).setdefault(str(ip), set()).add(proc)
 
 bad = sorted(a for a in seen if not local(ipaddress.ip_address(a)))
-print(f"remote addresses seen from {'Atidarla processes' if attributed else 'this machine'}:")
+print(f"remote addresses seen from {'Lasair processes' if attributed else 'this machine'}:")
 for a in sorted(seen, key=lambda s: (ipaddress.ip_address(s).version, ipaddress.ip_address(s))):
     mark = "FAIL" if a in bad else "ok  "
     procs = ", ".join(sorted(seen[a]))

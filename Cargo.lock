@@ -254,402 +254,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "atd-agent"
-version = "0.0.1"
-dependencies = [
- "atd-ai",
- "atd-core",
- "atd-format",
- "atd-kernel",
- "atd-ops-dat",
- "atd-ops-img",
- "atd-ops-sig",
- "atd-stage",
- "log",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "toml_edit",
- "ureq 3.5.0",
-]
-
-[[package]]
-name = "atd-ai"
-version = "0.0.1"
-dependencies = [
- "atd-core",
- "atd-format",
- "log",
- "memmap2",
- "png",
- "rustls",
- "serde",
- "serde_json",
- "sha2",
- "thiserror 2.0.21",
- "toml_edit",
- "tungstenite",
- "ureq 2.12.1",
- "ureq 3.5.0",
-]
-
-[[package]]
-name = "atd-app"
-version = "0.0.1"
-dependencies = [
- "atd-agent",
- "atd-ai",
- "atd-core",
- "atd-format",
- "atd-gpu",
- "atd-interop",
- "atd-io",
- "atd-kernel",
- "atd-ops-ai",
- "atd-ops-cmp",
- "atd-ops-dat",
- "atd-ops-img",
- "atd-ops-mat",
- "atd-ops-msh",
- "atd-ops-pnt",
- "atd-ops-sig",
- "atd-py",
- "atd-stage",
- "atd-timeline",
- "eframe",
- "egui",
- "env_logger",
- "log",
- "png",
- "pollster 0.4.0",
- "rfd",
- "serde_json",
- "toml_edit",
- "wgpu",
-]
-
-[[package]]
-name = "atd-cli"
-version = "0.0.1"
-dependencies = [
- "anyhow",
- "atd-agent",
- "atd-ai",
- "atd-core",
- "atd-format",
- "atd-gpu",
- "atd-interop",
- "atd-io",
- "atd-kernel",
- "atd-ops-ai",
- "atd-ops-cmp",
- "atd-ops-dat",
- "atd-ops-img",
- "atd-ops-mat",
- "atd-ops-msh",
- "atd-ops-pnt",
- "atd-ops-sig",
- "atd-py",
- "atd-stage",
- "atd-timeline",
- "clap",
- "ctrlc",
- "env_logger",
- "log",
- "png",
- "pollster 0.4.0",
- "rosc",
- "serde",
- "serde_json",
- "sha2",
- "toml_edit",
- "tungstenite",
- "wgpu",
- "windows-sys 0.61.2",
- "zip",
-]
-
-[[package]]
-name = "atd-core"
-version = "0.0.1"
-dependencies = [
- "naga",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "atd-format"
-version = "0.0.1"
-dependencies = [
- "atd-core",
- "atd-ops-img",
- "atd-ops-sig",
- "serde_json",
- "thiserror 2.0.21",
- "toml_edit",
-]
-
-[[package]]
-name = "atd-gpu"
-version = "0.0.1"
-dependencies = [
- "atd-core",
- "atd-interop",
- "log",
- "naga",
- "pollster 0.4.0",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "wgpu",
-]
-
-[[package]]
-name = "atd-interop"
-version = "0.0.1"
-dependencies = [
- "block2 0.6.2",
- "objc2 0.6.5",
- "objc2-core-foundation",
- "objc2-foundation 0.3.2",
- "objc2-io-surface",
- "objc2-metal 0.3.2",
- "pollster 0.4.0",
- "thiserror 2.0.21",
- "wgpu",
- "windows",
-]
-
-[[package]]
-name = "atd-io"
-version = "0.0.1"
-dependencies = [
- "atd-core",
- "atd-format",
- "cc",
- "cpal",
- "gilrs",
- "log",
- "mdns-sd",
- "midir",
- "pkg-config",
- "png",
- "rosc",
- "serde_json",
- "snap",
- "thiserror 2.0.21",
- "toml_edit",
- "zune-jpeg 0.4.21",
-]
-
-[[package]]
-name = "atd-kernel"
-version = "0.0.1"
-dependencies = [
- "atd-core",
- "atd-gpu",
- "naga",
- "pollster 0.4.0",
- "wgpu",
-]
-
-[[package]]
-name = "atd-ops-ai"
-version = "0.0.1"
-dependencies = [
- "atd-ai",
- "atd-core",
- "atd-gpu",
- "atd-interop",
- "atd-io",
- "atd-ops-img",
- "atd-stage",
- "log",
- "png",
- "pollster 0.4.0",
- "serde_json",
- "tungstenite",
- "wgpu",
-]
-
-[[package]]
-name = "atd-ops-cmp"
-version = "0.0.1"
-dependencies = [
- "atd-core",
- "atd-gpu",
- "atd-interop",
- "atd-ops-img",
- "atd-ops-sig",
- "pollster 0.4.0",
- "serde_json",
- "wgpu",
-]
-
-[[package]]
-name = "atd-ops-dat"
-version = "0.0.1"
-dependencies = [
- "atd-ai",
- "atd-core",
- "atd-gpu",
- "libc",
- "rcgen",
- "rustls",
- "rustls-platform-verifier",
- "serde_json",
- "time",
- "tungstenite",
- "ureq 3.5.0",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "atd-ops-img"
-version = "0.0.1"
-dependencies = [
- "ab_glyph_rasterizer",
- "atd-core",
- "atd-format",
- "atd-gpu",
- "atd-interop",
- "atd-io",
- "atd-kernel",
- "atd-ops-dat",
- "atd-ops-sig",
- "epaint_default_fonts",
- "hound",
- "log",
- "naga",
- "png",
- "pollster 0.4.0",
- "serde_json",
- "skrifa",
- "wgpu",
-]
-
-[[package]]
-name = "atd-ops-mat"
-version = "0.0.1"
-dependencies = [
- "atd-core",
- "atd-gpu",
- "atd-interop",
- "atd-ops-img",
- "atd-ops-pnt",
- "pollster 0.4.0",
- "serde_json",
- "wgpu",
-]
-
-[[package]]
-name = "atd-ops-msh"
-version = "0.0.1"
-dependencies = [
- "atd-core",
- "atd-gpu",
- "atd-interop",
- "atd-ops-pnt",
- "epaint_default_fonts",
- "exr",
- "png",
- "pollster 0.4.0",
- "serde_json",
- "skrifa",
- "wgpu",
-]
-
-[[package]]
-name = "atd-ops-pnt"
-version = "0.0.1"
-dependencies = [
- "atd-core",
- "atd-format",
- "atd-gpu",
- "atd-interop",
- "atd-io",
- "atd-kernel",
- "atd-ops-img",
- "atd-ops-msh",
- "atd-ops-sig",
- "flate2",
- "image-webp",
- "log",
- "naga",
- "pollster 0.4.0",
- "ruzstd",
- "serde_json",
- "wgpu",
- "zip",
-]
-
-[[package]]
-name = "atd-ops-sig"
-version = "0.0.1"
-dependencies = [
- "atd-core",
- "atd-gpu",
- "atd-io",
- "hound",
- "rustfft",
- "serde_json",
-]
-
-[[package]]
-name = "atd-plugin-link"
-version = "0.0.1"
-
-[[package]]
-name = "atd-plugin-ndi"
-version = "0.0.1"
-
-[[package]]
-name = "atd-py"
-version = "0.0.1"
-dependencies = [
- "atd-core",
- "atd-format",
- "atd-gpu",
- "atd-interop",
- "atd-ops-dat",
- "atd-ops-img",
- "atd-ops-sig",
- "log",
- "pollster 0.4.0",
- "pyo3",
- "serde",
- "serde_json",
- "wgpu",
-]
-
-[[package]]
-name = "atd-stage"
-version = "0.0.1"
-dependencies = [
- "atd-core",
- "atd-ops-img",
- "atd-ops-sig",
- "serde_json",
-]
-
-[[package]]
-name = "atd-timeline"
-version = "0.0.1"
-dependencies = [
- "atd-core",
- "atd-format",
- "atd-gpu",
- "atd-io",
- "atd-ops-img",
- "atd-ops-sig",
- "pollster 0.4.0",
- "serde_json",
- "wgpu",
-]
-
-[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2518,6 +2122,402 @@ name = "log"
 version = "0.4.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
+
+[[package]]
+name = "lsr-agent"
+version = "0.0.1"
+dependencies = [
+ "log",
+ "lsr-ai",
+ "lsr-core",
+ "lsr-format",
+ "lsr-kernel",
+ "lsr-ops-dat",
+ "lsr-ops-img",
+ "lsr-ops-sig",
+ "lsr-stage",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "toml_edit",
+ "ureq 3.5.0",
+]
+
+[[package]]
+name = "lsr-ai"
+version = "0.0.1"
+dependencies = [
+ "log",
+ "lsr-core",
+ "lsr-format",
+ "memmap2",
+ "png",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.21",
+ "toml_edit",
+ "tungstenite",
+ "ureq 2.12.1",
+ "ureq 3.5.0",
+]
+
+[[package]]
+name = "lsr-app"
+version = "0.0.1"
+dependencies = [
+ "eframe",
+ "egui",
+ "env_logger",
+ "log",
+ "lsr-agent",
+ "lsr-ai",
+ "lsr-core",
+ "lsr-format",
+ "lsr-gpu",
+ "lsr-interop",
+ "lsr-io",
+ "lsr-kernel",
+ "lsr-ops-ai",
+ "lsr-ops-cmp",
+ "lsr-ops-dat",
+ "lsr-ops-img",
+ "lsr-ops-mat",
+ "lsr-ops-msh",
+ "lsr-ops-pnt",
+ "lsr-ops-sig",
+ "lsr-py",
+ "lsr-stage",
+ "lsr-timeline",
+ "png",
+ "pollster 0.4.0",
+ "rfd",
+ "serde_json",
+ "toml_edit",
+ "wgpu",
+]
+
+[[package]]
+name = "lsr-cli"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "clap",
+ "ctrlc",
+ "env_logger",
+ "log",
+ "lsr-agent",
+ "lsr-ai",
+ "lsr-core",
+ "lsr-format",
+ "lsr-gpu",
+ "lsr-interop",
+ "lsr-io",
+ "lsr-kernel",
+ "lsr-ops-ai",
+ "lsr-ops-cmp",
+ "lsr-ops-dat",
+ "lsr-ops-img",
+ "lsr-ops-mat",
+ "lsr-ops-msh",
+ "lsr-ops-pnt",
+ "lsr-ops-sig",
+ "lsr-py",
+ "lsr-stage",
+ "lsr-timeline",
+ "png",
+ "pollster 0.4.0",
+ "rosc",
+ "serde",
+ "serde_json",
+ "sha2",
+ "toml_edit",
+ "tungstenite",
+ "wgpu",
+ "windows-sys 0.61.2",
+ "zip",
+]
+
+[[package]]
+name = "lsr-core"
+version = "0.0.1"
+dependencies = [
+ "naga",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "lsr-format"
+version = "0.0.1"
+dependencies = [
+ "lsr-core",
+ "lsr-ops-img",
+ "lsr-ops-sig",
+ "serde_json",
+ "thiserror 2.0.21",
+ "toml_edit",
+]
+
+[[package]]
+name = "lsr-gpu"
+version = "0.0.1"
+dependencies = [
+ "log",
+ "lsr-core",
+ "lsr-interop",
+ "naga",
+ "pollster 0.4.0",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "wgpu",
+]
+
+[[package]]
+name = "lsr-interop"
+version = "0.0.1"
+dependencies = [
+ "block2 0.6.2",
+ "objc2 0.6.5",
+ "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
+ "objc2-io-surface",
+ "objc2-metal 0.3.2",
+ "pollster 0.4.0",
+ "thiserror 2.0.21",
+ "wgpu",
+ "windows",
+]
+
+[[package]]
+name = "lsr-io"
+version = "0.0.1"
+dependencies = [
+ "cc",
+ "cpal",
+ "gilrs",
+ "log",
+ "lsr-core",
+ "lsr-format",
+ "mdns-sd",
+ "midir",
+ "pkg-config",
+ "png",
+ "rosc",
+ "serde_json",
+ "snap",
+ "thiserror 2.0.21",
+ "toml_edit",
+ "zune-jpeg 0.4.21",
+]
+
+[[package]]
+name = "lsr-kernel"
+version = "0.0.1"
+dependencies = [
+ "lsr-core",
+ "lsr-gpu",
+ "naga",
+ "pollster 0.4.0",
+ "wgpu",
+]
+
+[[package]]
+name = "lsr-ops-ai"
+version = "0.0.1"
+dependencies = [
+ "log",
+ "lsr-ai",
+ "lsr-core",
+ "lsr-gpu",
+ "lsr-interop",
+ "lsr-io",
+ "lsr-ops-img",
+ "lsr-stage",
+ "png",
+ "pollster 0.4.0",
+ "serde_json",
+ "tungstenite",
+ "wgpu",
+]
+
+[[package]]
+name = "lsr-ops-cmp"
+version = "0.0.1"
+dependencies = [
+ "lsr-core",
+ "lsr-gpu",
+ "lsr-interop",
+ "lsr-ops-img",
+ "lsr-ops-sig",
+ "pollster 0.4.0",
+ "serde_json",
+ "wgpu",
+]
+
+[[package]]
+name = "lsr-ops-dat"
+version = "0.0.1"
+dependencies = [
+ "libc",
+ "lsr-ai",
+ "lsr-core",
+ "lsr-gpu",
+ "rcgen",
+ "rustls",
+ "rustls-platform-verifier",
+ "serde_json",
+ "time",
+ "tungstenite",
+ "ureq 3.5.0",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "lsr-ops-img"
+version = "0.0.1"
+dependencies = [
+ "ab_glyph_rasterizer",
+ "epaint_default_fonts",
+ "hound",
+ "log",
+ "lsr-core",
+ "lsr-format",
+ "lsr-gpu",
+ "lsr-interop",
+ "lsr-io",
+ "lsr-kernel",
+ "lsr-ops-dat",
+ "lsr-ops-sig",
+ "naga",
+ "png",
+ "pollster 0.4.0",
+ "serde_json",
+ "skrifa",
+ "wgpu",
+]
+
+[[package]]
+name = "lsr-ops-mat"
+version = "0.0.1"
+dependencies = [
+ "lsr-core",
+ "lsr-gpu",
+ "lsr-interop",
+ "lsr-ops-img",
+ "lsr-ops-pnt",
+ "pollster 0.4.0",
+ "serde_json",
+ "wgpu",
+]
+
+[[package]]
+name = "lsr-ops-msh"
+version = "0.0.1"
+dependencies = [
+ "epaint_default_fonts",
+ "exr",
+ "lsr-core",
+ "lsr-gpu",
+ "lsr-interop",
+ "lsr-ops-pnt",
+ "png",
+ "pollster 0.4.0",
+ "serde_json",
+ "skrifa",
+ "wgpu",
+]
+
+[[package]]
+name = "lsr-ops-pnt"
+version = "0.0.1"
+dependencies = [
+ "flate2",
+ "image-webp",
+ "log",
+ "lsr-core",
+ "lsr-format",
+ "lsr-gpu",
+ "lsr-interop",
+ "lsr-io",
+ "lsr-kernel",
+ "lsr-ops-img",
+ "lsr-ops-msh",
+ "lsr-ops-sig",
+ "naga",
+ "pollster 0.4.0",
+ "ruzstd",
+ "serde_json",
+ "wgpu",
+ "zip",
+]
+
+[[package]]
+name = "lsr-ops-sig"
+version = "0.0.1"
+dependencies = [
+ "hound",
+ "lsr-core",
+ "lsr-gpu",
+ "lsr-io",
+ "rustfft",
+ "serde_json",
+]
+
+[[package]]
+name = "lsr-plugin-link"
+version = "0.0.1"
+
+[[package]]
+name = "lsr-plugin-ndi"
+version = "0.0.1"
+
+[[package]]
+name = "lsr-py"
+version = "0.0.1"
+dependencies = [
+ "log",
+ "lsr-core",
+ "lsr-format",
+ "lsr-gpu",
+ "lsr-interop",
+ "lsr-ops-dat",
+ "lsr-ops-img",
+ "lsr-ops-sig",
+ "pollster 0.4.0",
+ "pyo3",
+ "serde",
+ "serde_json",
+ "wgpu",
+]
+
+[[package]]
+name = "lsr-stage"
+version = "0.0.1"
+dependencies = [
+ "lsr-core",
+ "lsr-ops-img",
+ "lsr-ops-sig",
+ "serde_json",
+]
+
+[[package]]
+name = "lsr-timeline"
+version = "0.0.1"
+dependencies = [
+ "lsr-core",
+ "lsr-format",
+ "lsr-gpu",
+ "lsr-io",
+ "lsr-ops-img",
+ "lsr-ops-sig",
+ "pollster 0.4.0",
+ "serde_json",
+ "wgpu",
+]
 
 [[package]]
 name = "mach2"

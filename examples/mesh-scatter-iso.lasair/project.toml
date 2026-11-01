@@ -1,0 +1,17 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Scatter to Iso Surface"
+description = '''
+The PNT↔MSH chain of M2 (acceptance criterion 5), with no conversion node: Scatter (MSH)
+puts seeded points on a sphere, Iso Surface (MSH) melts spheres around them into one closed
+blobby mesh, and Noise (PNT, on the GPU) deforms that mesh's points with curl noise drifting
+in time. The scattered points are drawn white over the blob; a ring swept from a square
+profile (Sweep) frames it.
+
+Every GEO wire here carries the same value type: the MSH results come back from worker
+threads already uploaded, so the GPU deformer reads them directly.
+
+Try: raise the scatter count; change Iso Surface's blend or radius; set its source to gyroid;
+give the sweep a twist.
+'''
+resolution = [1280, 720]

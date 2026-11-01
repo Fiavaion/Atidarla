@@ -1,0 +1,122 @@
+# Lasair timeline. Times are in seconds; tracks and cues refer to node IDs.
+format = 1
+length = 32.0
+fps = 60.0
+
+[[track]]
+node = 1
+param = "z"
+keys = [
+    { t = 0.0, v = 0.0 },
+    { t = 32.0, v = 6.0 },
+]
+
+[[track]]
+node = 2
+param = "rotation"
+keys = [
+    { t = 0.0, v = 0.0, interp = "bezier" },
+    { t = 8.0, v = 90.0, interp = "bezier", out = [2.0, 40.0] },
+    { t = 16.0, v = 360.0, interp = "bezier" },
+    { t = 32.0, v = 0.0 },
+]
+
+[[track]]
+node = 2
+param = "segments"
+keys = [
+    { t = 0.0, v = 4.0, interp = "step" },
+    { t = 8.0, v = 6.0, interp = "step" },
+    { t = 16.0, v = 10.0, interp = "step" },
+    { t = 24.0, v = 6.0, interp = "step" },
+]
+
+[[track]]
+node = 3
+param = "colour"
+component = 0
+keys = [
+    { t = 0.0, v = 0.9 },
+    { t = 16.0, v = 0.2 },
+    { t = 32.0, v = 0.9 },
+]
+
+[[track]]
+node = 3
+param = "colour"
+component = 2
+keys = [
+    { t = 0.0, v = 0.6 },
+    { t = 16.0, v = 1.0 },
+    { t = 32.0, v = 0.6 },
+]
+
+[[track]]
+node = 4
+param = "opacity"
+keys = [
+    { t = 0.0, v = 0.0 },
+    { t = 8.0, v = 1.0 },
+]
+
+[[track]]
+node = 5
+param = "brightness"
+keys = [
+    { t = 0.0, v = 0.0, interp = "bezier" },
+    { t = 2.0, v = 1.0 },
+    { t = 30.0, v = 1.0, interp = "bezier" },
+    { t = 32.0, v = 0.0 },
+]
+
+[[marker]]
+id = 1
+t = 0.0
+name = "Intro"
+
+[[marker]]
+id = 2
+t = 8.0
+name = "Build"
+
+[[marker]]
+id = 3
+t = 16.0
+name = "Drop"
+
+[[marker]]
+id = 4
+t = 24.0
+name = "Outro"
+
+[[cue]]
+id = 5
+name = "Colour"
+t = 8.0
+when = "op('pulse')['lfo'] > 0.9"
+actions = [
+    { node = 1, param = "monochrome", set = false },
+]
+
+[[cue]]
+id = 6
+name = "Invert"
+t = 16.0
+actions = [
+    { node = 5, param = "invert", live = true },
+]
+
+[[cue]]
+id = 7
+name = "Calm"
+t = 24.0
+actions = [
+    { node = 1, param = "octaves", set = 2 },
+]
+
+[[cue]]
+id = 8
+name = "Grey"
+actions = [
+    { node = 5, param = "contrast", live = 0.0 },
+]

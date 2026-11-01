@@ -51,7 +51,7 @@ if [ "$(cat "$OUT/.sha256" 2> /dev/null || true)" != "$SHA" ]; then
     mkdir -p "$OUT"
     tar -xzf "$ARCHIVE" -C "$OUT"
     # No Tk GUI toolkit (tkinter, IDLE, turtle and the Tcl/Tk libraries):
-    # nothing in Atidarla uses it (Mark, 2026-10-31). pip and the C headers
+    # nothing in Lasair uses it (Mark, 2026-10-31). pip and the C headers
     # stay so native packages can still be built against this Python.
     (
         cd "$OUT/python"

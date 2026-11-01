@@ -1,0 +1,18 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Live control"
+description = '''
+Devices and protocols. The mouse over the viewer turns the shape and dims the image, and
+its position is also sent out as OSC (to 127.0.0.1:9001), MIDI control changes and Art-Net
+DMX (to 127.0.0.1). OSC In listens on port 9000 and Timecode In reads LTC from the test tone.
+The drum loop plays to Audio Out.
+
+So that the example runs on any machine, Audio Out uses the `null` device and MIDI In and
+Out use `virtual` (no device): choose your own output and MIDI ports in their Device menus.
+
+level1's contrast follows a Python expression, `[1.0, 1.25, 1.5][int(time) % 3]`: a list is
+outside the native subset, so it runs on the Python worker and arrives a frame late.
+
+Try: send OSC to port 9000 (e.g. /fader 0.5) and watch osc1's channels in the viewer.
+'''
+resolution = [1280, 720]

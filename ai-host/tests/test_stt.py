@@ -12,10 +12,10 @@ from typing import ClassVar
 import pytest
 from conftest import Client, RpcFailure, open_inline, open_shm
 
-from atd_ai_host.adapters import Audio, available_kinds
-from atd_ai_host.errors import INVALID_PARAMS, MODEL_LOAD_FAILED, UNKNOWN_MODEL, UNSUPPORTED
-from atd_ai_host.models import CACHE
-from atd_ai_host.paths import models_dir
+from lsr_ai_host.adapters import Audio, available_kinds
+from lsr_ai_host.errors import INVALID_PARAMS, MODEL_LOAD_FAILED, UNKNOWN_MODEL, UNSUPPORTED
+from lsr_ai_host.models import CACHE
+from lsr_ai_host.paths import models_dir
 
 
 def pcm(samples) -> bytes:
@@ -94,7 +94,7 @@ def fake_whisper(monkeypatch):
 
 
 def test_whisper_adapter_loads_only_a_local_folder(fake_whisper, tmp_path):
-    from atd_ai_host.adapters.stt_whisper import WhisperAdapter
+    from lsr_ai_host.adapters.stt_whisper import WhisperAdapter
 
     assert WhisperAdapter.available()
     for path in (None, str(tmp_path / "missing")):
@@ -114,18 +114,18 @@ def test_whisper_adapter_loads_only_a_local_folder(fake_whisper, tmp_path):
 
 def test_whisper_adapter_joins_segments_and_passes_options(fake_whisper, tmp_path):
     np = fake_whisper
-    from atd_ai_host.adapters.stt_whisper import WhisperAdapter
+    from lsr_ai_host.adapters.stt_whisper import WhisperAdapter
 
     a = WhisperAdapter("whisper-base", str(tmp_path), {}, lambda *_: None)
     out = a.transcribe(
         None,
         Audio(16_000, pcm([0.1] * 160)),
-        {"language": "de", "task": "translate", "prompt": "Atidarla", "beam_size": 3, "vad": True},
+        {"language": "de", "task": "translate", "prompt": "Lasair", "beam_size": 3, "vad": True},
     )
     assert out == {"text": "hello world", "language": "de"}
     audio, kw = FakeWhisperModel.instances[-1].calls[-1]
     assert audio.dtype == np.float32 and audio.size == 160
-    assert kw["language"] == "de" and kw["task"] == "translate" and kw["initial_prompt"] == "Atidarla"
+    assert kw["language"] == "de" and kw["task"] == "translate" and kw["initial_prompt"] == "Lasair"
     assert kw["beam_size"] == 3 and kw["vad_filter"] is True
     # Other rates are resampled to 16 kHz; detection when no language is given.
     out = a.transcribe(None, Audio(48_000, pcm([0.0] * 4800)), {})
@@ -165,7 +165,7 @@ def _cached_whisper():
 @pytest.mark.skipif(_cached_whisper() is None, reason="whisper-base is not in the model cache")
 def test_real_whisper_base_hears_silence_as_nothing():
     pytest.importorskip("faster_whisper")
-    from atd_ai_host.adapters.stt_whisper import WhisperAdapter
+    from lsr_ai_host.adapters.stt_whisper import WhisperAdapter
 
     a = WhisperAdapter("whisper-base", str(_cached_whisper()), {"device": "cpu"}, lambda *_: None)
     out = a.transcribe(None, Audio(16_000, pcm([0.0] * 16_000)), {"language": "en", "vad": True})

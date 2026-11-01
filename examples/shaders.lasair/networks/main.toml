@@ -1,0 +1,34 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 3
+
+[[node]]
+id = 0
+name = "rings"
+type = "img.isf_glow_rings"
+pos = [0.0, 0.0]
+params.rings = 18.0
+
+[[node]]
+id = 1
+name = "fisheye"
+type = "img.projection"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+params.fov = 180.0
+params.from = "equirect"
+params.to = "fisheye"
+
+[[node]]
+id = 2
+name = "warp"
+type = "img.wgsl"
+pos = [440.0, 0.0]
+inputs.in0 = { node = 1, output = "out" }
+params.code = '''
+// Swirl around the centre by p1().x radians.
+let d = uv - vec2f(0.5);
+let a = p1().x * (0.5 - length(d));
+let r = mat2x2f(cos(a), sin(a), -sin(a), cos(a));
+return textureSample(in0, samp, r * d + vec2f(0.5));'''
+params.p1 = [2.0, 0.0, 0.0, 0.0]

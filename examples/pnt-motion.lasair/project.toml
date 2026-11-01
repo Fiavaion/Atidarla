@@ -1,0 +1,17 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "PNT Motion"
+description = '''
+Deformation, flocking and history (M6). Left: a ball of points squashed and stretched by a
+Lattice whose 3 × 3 × 3 control points drift on smooth noise; a second Lattice node shows the
+same cage (Output cage: the control points and the lattice's edges). Right: 1,500 boids in a
+Solver loop (Flock steers by separation, alignment and cohesion, Attract keeps them home,
+Integrate moves them), coloured by speed, kept centred on screen (Attribute Promote averages
+`P` into `centroid`, Attribute Math subtracts it) and drawn as Trails of their last 12
+positions. Below: points on a sphere cast rays toward its centre and land on an MSH ball (Ray
+Intersect, shrink-wrapping).
+
+Try: Lattice divisions 5 5 5 and amplitude 0.6; send the cage output through Twist into the
+first Lattice's cage input; Flock cohesion 3; Trail length 32 and fade off.
+'''
+resolution = [1280, 720]

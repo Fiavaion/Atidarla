@@ -4,10 +4,10 @@ import time
 import pytest
 from conftest import Client, InProcessHost, RpcFailure, SlowAdapter, open_inline, open_shm, pixels
 
-from atd_ai_host import PROTOCOL_VERSION
-from atd_ai_host.adapters import video
-from atd_ai_host.adapters.builtin import invert
-from atd_ai_host.errors import (
+from lsr_ai_host import PROTOCOL_VERSION
+from lsr_ai_host.adapters import video
+from lsr_ai_host.adapters.builtin import invert
+from lsr_ai_host.errors import (
     BAD_SLOT,
     BUSY,
     INVALID_PARAMS,
@@ -18,7 +18,7 @@ from atd_ai_host.errors import (
     UNSUPPORTED,
     VERSION_MISMATCH,
 )
-from atd_ai_host.models import CACHE, MAX_QUEUED
+from lsr_ai_host.models import CACHE, MAX_QUEUED
 
 
 def submit_shm(c: Client, ring, seq, model="builtin.invert", w=4, h=2, inp=0, out=1, params=None, data=None):

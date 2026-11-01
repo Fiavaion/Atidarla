@@ -1,0 +1,36 @@
+{
+  "1": {
+    "_meta": {
+      "title": "Load Image"
+    },
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "example.png"
+    }
+  },
+  "2": {
+    "_meta": {
+      "title": "Invert Image"
+    },
+    "class_type": "ImageInvert",
+    "inputs": {
+      "image": [
+        "1",
+        0
+      ]
+    }
+  },
+  "3": {
+    "_meta": {
+      "title": "Save Image"
+    },
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "lasair",
+      "images": [
+        "2",
+        0
+      ]
+    }
+  }
+}

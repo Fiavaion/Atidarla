@@ -1,0 +1,104 @@
+# Lasair Pack. Its network is network.toml; its help page is help.md.
+format = 1
+name = "curl_swarm"
+version = "1.0.0"
+label = "Curl Swarm"
+summary = "A self-running swarm of glowing particles flowing through swirling curl noise and pulled back to the centre."
+locked = true
+
+[[param]]
+name = "rate"
+label = "Rate"
+default = 50000.0
+min = 0.0
+max = 300000.0
+help = "Particles born per second (at most 300,000 are alive at once)."
+to = [{ node = 0, param = "rate" }]
+
+[[param]]
+name = "life"
+label = "Life"
+default = 5.0
+min = 0.1
+max = 20.0
+help = "Seconds a particle lives; it fades from Birth Colour to Death Colour as it ages."
+to = [{ node = 0, param = "life" }]
+
+[[param]]
+name = "swirl"
+label = "Swirl"
+default = 1.5
+min = 0.0
+max = 10.0
+help = "Strength of the swirling flow."
+to = [{ node = 0, param = "curl_amplitude" }]
+
+[[param]]
+name = "scale"
+label = "Scale"
+default = 1.2
+min = 0.05
+max = 8.0
+help = "Size of the swirls: higher makes more, smaller eddies."
+to = [{ node = 0, param = "curl_frequency" }]
+
+[[param]]
+name = "flow"
+label = "Flow"
+default = 0.2
+min = -4.0
+max = 4.0
+help = "How fast the swirls themselves change; 0 freezes the pattern."
+to = [{ node = 0, param = "curl_speed" }]
+
+[[param]]
+name = "pull"
+label = "Pull"
+default = 0.6
+min = -4.0
+max = 4.0
+help = "Pull back to the centre: 0 lets the swarm drift away, negative pushes it apart."
+to = [{ node = 0, param = "attract" }]
+
+[[param]]
+name = "birth_colour"
+label = "Birth Colour"
+default = [1.0, 0.8, 0.4, 1.0]
+help = "Colour of a new particle."
+to = [{ node = 0, param = "colour_birth" }]
+
+[[param]]
+name = "death_colour"
+label = "Death Colour"
+default = [0.2, 0.3, 1.0, 0.0]
+help = "Colour at the end of a particle's life; alpha 0 fades it out."
+to = [{ node = 0, param = "colour_death" }]
+
+[[param]]
+name = "brightness"
+label = "Brightness"
+default = 0.12
+min = 0.0
+max = 2.0
+help = "Brightness of each particle; they add up where they crowd, so lower it for a dense swarm."
+to = [{ node = 1, param = "intensity" }]
+
+[[param]]
+name = "glow"
+label = "Glow"
+default = 0.6
+min = 0.0
+max = 4.0
+help = "Bloom around the densest, brightest parts."
+to = [{ node = 2, param = "intensity" }]
+
+[[param]]
+name = "reset"
+label = "Reset"
+default = false
+help = "While on, restarts the swarm from its first burst."
+to = [{ node = 0, param = "reset" }]
+
+[[output]]
+name = "out"
+from = { node = 2, output = "out" }

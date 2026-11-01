@@ -1,6 +1,6 @@
 """The installers ship one hash-pinned requirements file per extra.
 
-`requirements/<extra>.txt` is what an installed app's `atidarla ai-host
+`requirements/<extra>.txt` is what an installed app's `lasair ai-host
 install <extra>` hands to pip (`--require-hashes --no-deps`), so each must
 be exactly `uv export` of `uv.lock` for that extra. Regenerate with:
 
@@ -40,7 +40,7 @@ def test_requirements_pin_every_package_by_hash(extra):
         assert "==" in line, line
     # Each pinned entry is followed by at least one hash.
     assert text.count("--hash=sha256:") >= len(entries)
-    assert not any(line.startswith("atd-ai-host") for line in entries), "the host ships as source"
+    assert not any(line.startswith("lsr-ai-host") for line in entries), "the host ships as source"
 
 
 def torch_pins(extra: str) -> dict[str, str]:
@@ -53,7 +53,7 @@ def torch_pins(extra: str) -> dict[str, str]:
 
 
 def test_the_cuda_extra_takes_torch_from_pytorchs_cuda_index_on_windows_and_linux_only():
-    # `atd_ai::hostenv::PYTORCH_INDEX` passes this index to pip.
+    # `lsr_ai::hostenv::PYTORCH_INDEX` passes this index to pip.
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
     (index,) = pyproject["tool"]["uv"]["index"]
     assert index["explicit"] is True

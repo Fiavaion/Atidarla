@@ -1,0 +1,16 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Particles"
+description = '''
+A GPU particle system (M2, PT-2's building blocks): 400,000 particles born in a ball, moved by
+curl noise and pulled back to the centre, coloured by age, drawn as additive sprites with
+bloom.
+
+The state lives on the wire: Particles reads its previous frame from the end of the force
+chain (Noise in velocity mode) through its feedback input prev, so the extra flow carries on.
+The live count never leaves the GPU.
+
+Try: capacity 2000000 and rate 400000 (PT-2's size); attract 0 and gravity [0, -0.5, 0];
+reset.
+'''
+resolution = [1280, 720]

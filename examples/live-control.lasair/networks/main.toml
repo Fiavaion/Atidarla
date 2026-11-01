@@ -1,0 +1,114 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 14
+
+[[node]]
+id = 0
+name = "mouse"
+type = "sig.input"
+pos = [0.0, 0.0]
+params.device = "mouse"
+
+[[node]]
+id = 1
+name = "x"
+type = "sig.select"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+params.channels = "x"
+
+[[node]]
+id = 2
+name = "degrees"
+type = "sig.math"
+pos = [440.0, 0.0]
+inputs.a = { node = 1, output = "out" }
+params.to_max = 360.0
+
+[[node]]
+id = 3
+name = "y"
+type = "sig.select"
+pos = [220.0, 140.0]
+inputs.in = { node = 0, output = "out" }
+params.channels = "y"
+
+[[node]]
+id = 4
+name = "osc_out1"
+type = "sig.osc_out"
+pos = [440.0, 280.0]
+inputs.in = { node = 0, output = "out" }
+params.prefix = "/lsr/mouse"
+
+[[node]]
+id = 5
+name = "midi_out1"
+type = "sig.midi_out"
+pos = [440.0, 420.0]
+inputs.in = { node = 0, output = "out" }
+params.device = "virtual"
+params.first_cc = 20
+
+[[node]]
+id = 6
+name = "dmx1"
+type = "sig.dmx_out"
+pos = [440.0, 560.0]
+inputs.in = { node = 0, output = "out" }
+params.host = "127.0.0.1"
+params.universe = 0
+
+[[node]]
+id = 7
+name = "osc1"
+type = "sig.osc_in"
+pos = [0.0, 700.0]
+
+[[node]]
+id = 8
+name = "midi_in1"
+type = "sig.midi_in"
+pos = [220.0, 700.0]
+params.device = "virtual"
+
+[[node]]
+id = 9
+name = "timecode1"
+type = "sig.timecode_in"
+pos = [440.0, 700.0]
+params.audio_device = "test-tone"
+params.source = "ltc"
+
+[[node]]
+id = 10
+name = "drums"
+type = "sig.audio_file_in"
+pos = [0.0, 840.0]
+params.file = "media/beat.wav"
+
+[[node]]
+id = 11
+name = "speaker"
+type = "sig.audio_out"
+pos = [220.0, 840.0]
+inputs.in = { node = 10, output = "out" }
+params.device = "null"
+
+[[node]]
+id = 12
+name = "shape1"
+type = "img.shape"
+pos = [660.0, 0.0]
+params.rotate = { value = 0.0, bind = { node = 2, channel = "x" } }
+params.shape = "rectangle"
+params.size = [0.5, 0.2]
+
+[[node]]
+id = 13
+name = "level1"
+type = "img.level"
+pos = [880.0, 0.0]
+inputs.in = { node = 12, output = "out" }
+params.brightness = { value = 1.0, bind = { node = 3, channel = "y" } }
+params.contrast = { value = 1.0, expr = "[1.0, 1.25, 1.5][int(time) % 3]" }

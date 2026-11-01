@@ -9,7 +9,7 @@ pytest.importorskip("onnxruntime")
 from conftest import Client, RpcFailure, open_inline
 from onnx import TensorProto, helper
 
-from atd_ai_host.errors import UNSUPPORTED
+from lsr_ai_host.errors import UNSUPPORTED
 
 
 def save_model(tmp_path, name, nodes, inputs, output, inits=()):

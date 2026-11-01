@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>Atidarla</string>
+	<string>Lasair</string>
 	<key>CFBundleDisplayName</key>
-	<string>Atidarla</string>
+	<string>Lasair</string>
 	<key>CFBundleIdentifier</key>
 	<string>@BUNDLE_ID@</string>
 	<key>CFBundleVersion</key>
@@ -15,23 +15,23 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleExecutable</key>
-	<string>atidarla-app</string>
+	<string>lasair-app</string>
 	<key>CFBundleIconFile</key>
-	<string>Atidarla</string>
+	<string>Lasair</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
 			<key>CFBundleTypeName</key>
-			<string>Atidarla Project</string>
+			<string>Lasair Project</string>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>LSTypeIsPackage</key>
 			<true/>
 			<key>CFBundleTypeExtensions</key>
 			<array>
-				<string>atidarla</string>
+				<string>lasair</string>
 			</array>
 		</dict>
 	</array>
@@ -50,6 +50,6 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>OSC, OSCQuery, Art-Net/sACN, Ableton Link and LAN AI Hosts talk to devices on your network.</string>
 	<key>NSHumanReadableCopyright</key>
-	<string>The Atidarla Contributors. MIT OR Apache-2.0.</string>
+	<string>The Lasair Contributors. MIT OR Apache-2.0.</string>
 </dict>
 </plist>

@@ -1,7 +1,7 @@
 /target
 **/*.rs.bk
 .cache/
-*.atidarla/.cache/
+*.lasair/.cache/
 bench/results/*.json
 !bench/results/.gitkeep
 

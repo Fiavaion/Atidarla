@@ -1,0 +1,14 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Points"
+description = '''
+Geometry on the GPU (M2): 200,000 random points swirled by curl noise and a grid rippled by
+it, drawn as 2-pixel additive sprites and composited.
+
+Points makes the points (P, Cd, id); Noise displaces P, its field drifting with time through
+its evolution expression; Render Points draws P coloured by Cd.
+
+Try: raise the cloud's count to 2,000,000; set the swirl's mode to velocity (it then writes v,
+which Render Points ignores); change the grid's shape to circle.
+'''
+resolution = [1280, 720]

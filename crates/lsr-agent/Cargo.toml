@@ -1,0 +1,31 @@
+[package]
+name = "lsr-agent"
+description = "Lasair: LLM assistant backend, typed MCP server (permissions, Show Lock) and diff/review engine (PRD §7"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+lsr-core.workspace = true
+lsr-ai.workspace = true
+ureq.workspace = true
+lsr-kernel.workspace = true
+lsr-stage.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+log.workspace = true
+toml_edit = { workspace = true, features = ["serde"] }
+
+[dev-dependencies]
+lsr-format.workspace = true
+lsr-ops-dat.workspace = true
+lsr-ops-img.workspace = true
+lsr-ops-sig.workspace = true
+
+[lints]
+workspace = true

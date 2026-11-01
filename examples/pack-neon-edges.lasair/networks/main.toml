@@ -1,0 +1,41 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 4
+
+[[node]]
+id = 0
+name = "colours"
+type = "sig.lfo"
+pos = [0.0, 0.0]
+params.amplitude = 180.0
+params.frequency = 0.1
+params.waveform = "ramp"
+
+[[node]]
+id = 1
+name = "pentagon"
+type = "img.shape"
+pos = [0.0, 160.0]
+params.fill = [0.2, 0.5, 1.0, 1.0]
+params.rotate = { value = 0.0, expr = "time * 30" }
+params.shape = "polygon"
+params.sides = 5
+params.size = [0.6, 0.6]
+
+[[node]]
+id = 2
+name = "label"
+type = "img.text"
+pos = [240.0, 160.0]
+inputs.in = { node = 1, output = "out" }
+params.colour = [1.0, 0.9, 0.3, 1.0]
+params.size = 0.12
+params.text = "NEON"
+
+[[node]]
+id = 3
+name = "neon1"
+type = "cmp.pack_neon_edges"
+pos = [480.0, 160.0]
+inputs.in = { node = 2, output = "out" }
+params.hue = { value = 0.0, bind = { node = 0, channel = "lfo" } }

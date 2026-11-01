@@ -58,13 +58,13 @@ jobs:
           rm "$RUNNER_TEMP/cert.p12"
       - name: Build the DMG
         env:
-          ATD_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
-          ATD_MACOS_SIGN_IDENTITY: ${{ github.event_name == 'push' && secrets.MACOS_SIGN_IDENTITY || '' }}
-          ATD_NOTARY_APPLE_ID: ${{ github.event_name == 'push' && secrets.MACOS_NOTARY_APPLE_ID || '' }}
-          ATD_NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
-          ATD_NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+          LSR_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          LSR_MACOS_SIGN_IDENTITY: ${{ github.event_name == 'push' && secrets.MACOS_SIGN_IDENTITY || '' }}
+          LSR_NOTARY_APPLE_ID: ${{ github.event_name == 'push' && secrets.MACOS_NOTARY_APPLE_ID || '' }}
+          LSR_NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+          LSR_NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
         run: |
-          export ATD_VERSION="${ATD_VERSION#v}"
+          export LSR_VERSION="${LSR_VERSION#v}"
           packaging/macos/build-dmg.sh
       - name: Check that the bundled Python loads user-installed extensions
         run: packaging/macos/check-library-validation.sh dist/*.dmg
@@ -92,14 +92,14 @@ jobs:
           PFX: ${{ secrets.WINDOWS_CERTIFICATE_PFX }}
         run: |
           [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\sign.pfx", [Convert]::FromBase64String($env:PFX))
-          "ATD_WIN_SIGN_PFX=$env:RUNNER_TEMP\sign.pfx" >> $env:GITHUB_ENV
+          "LSR_WIN_SIGN_PFX=$env:RUNNER_TEMP\sign.pfx" >> $env:GITHUB_ENV
       - name: Build the MSI
         shell: pwsh
         env:
-          ATD_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
-          ATD_WIN_SIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          LSR_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          LSR_WIN_SIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
-          if ($env:ATD_VERSION) { $env:ATD_VERSION = $env:ATD_VERSION.TrimStart('v') }
+          if ($env:LSR_VERSION) { $env:LSR_VERSION = $env:LSR_VERSION.TrimStart('v') }
           ./packaging/windows/build-msi.ps1
       - name: Remove the certificate
         if: always()
@@ -125,9 +125,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev librsvg2-bin
       - name: Build the AppImage
         env:
-          ATD_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          LSR_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         run: |
-          export ATD_VERSION="${ATD_VERSION#v}"
+          export LSR_VERSION="${LSR_VERSION#v}"
           packaging/linux/build-appimage.sh
       - uses: actions/upload-artifact@v4
         with:
@@ -154,5 +154,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ github.ref_name }}" dist/* \
-            --repo "${{ github.repository }}" --draft --title "Atidarla ${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" --draft --title "Lasair ${{ github.ref_name }}" \
             --notes "Installers for ${{ github.ref_name }}. See docs/install.md."

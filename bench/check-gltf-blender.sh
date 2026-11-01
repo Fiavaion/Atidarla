@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Opens a glTF/GLB written by Atidarla in Blender (headless) and prints what it found, then runs
+# Opens a glTF/GLB written by Lasair in Blender (headless) and prints what it found, then runs
 # the Khronos validator when npx is available. Manual check (M2 AC: "Boolean -> UV Project ->
 # Mesh File Out glTF opens in Blender"); CI does not depend on Blender.
 #
@@ -15,8 +15,8 @@ blender="${BLENDER:-/Applications/Blender.app/Contents/MacOS/Blender}"
 
 file="${1:-}"
 if [ -z "$file" ]; then
-  file="examples/mesh-boolean-gltf.atidarla/.cache/boolean.glb"
-  cargo run -q -p atd-cli --release -- render examples/mesh-boolean-gltf.atidarla \
+  file="examples/mesh-boolean-gltf.lasair/.cache/boolean.glb"
+  cargo run -q -p lsr-cli --release -- render examples/mesh-boolean-gltf.lasair \
     --out .scratch/mesh-boolean-gltf --range 0-1
 fi
 [ -f "$file" ] || { echo "no such file: $file" >&2; exit 1; }

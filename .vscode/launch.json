@@ -4,15 +4,15 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "Atidarla app",
-      "cargo": { "args": ["build", "-p", "atd-app"], "filter": { "name": "atidarla-app", "kind": "bin" } },
+      "name": "Lasair app",
+      "cargo": { "args": ["build", "-p", "lsr-app"], "filter": { "name": "lasair-app", "kind": "bin" } },
       "cwd": "${workspaceFolder}"
     },
     {
       "type": "lldb",
       "request": "launch",
-      "name": "atidarla bench",
-      "cargo": { "args": ["build", "-p", "atd-cli"], "filter": { "name": "atidarla", "kind": "bin" } },
+      "name": "lasair bench",
+      "cargo": { "args": ["build", "-p", "lsr-cli"], "filter": { "name": "lasair", "kind": "bin" } },
       "args": ["bench"],
       "cwd": "${workspaceFolder}"
     }

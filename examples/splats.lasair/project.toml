@@ -1,0 +1,22 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Gaussian Splats"
+description = '''
+Splat In and Splat MAT (FR-C1): three Gaussian-splat files, one per format, read on a
+worker thread and drawn by Render with GPU-sorted, back-to-front blending. Left:
+media/capture.ply (the standard 3DGS PLY layout, SH degree 1, stored Y down as trainers
+write it, so Splat In's Y Down Source turns it upright). Middle: media/capture.spz (SPZ
+version 4, SH degree 3, stored Y up). Right: media/capture.sog (a SOG v2 archive, SH
+degree 2, stored Y down like the PLY), drawn through an opaque ring so the splats blend
+over and behind solid geometry. The camera orbits, so the spherical harmonics shift each
+splat's colour with the view.
+
+The three files are synthetic (a noisy sphere shell made by the test helper in
+crates/lsr-ops-pnt/src/splat_file.rs: `cargo test -p lsr-ops-pnt --lib write_example_media
+-- --ignored`), so they carry no third-party capture.
+
+Try: set a Splat MAT's SH Degree to 0 (base colour only) and watch the view-dependent tint
+go; lower Size to see each splat's ellipsoid; turn Y Down Source off on the PLY; point
+Splat In at your own capture (.ply, .spz, .sog or a SOG folder's meta.json).
+'''
+resolution = [1280, 720]

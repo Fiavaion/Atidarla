@@ -1,0 +1,69 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 7
+
+[[node]]
+id = 0
+name = "ripple"
+type = "msh.vat_in"
+pos = [0.0, 0.0]
+params.data = "vat/ripple_data.json"
+params.frame = { value = 0.0, expr = "time * 24" }
+params.mesh = "vat/ripple_mesh.obj"
+params.position = "vat/ripple_pos.png"
+
+[[node]]
+id = 1
+name = "ripple_colour"
+type = "msh.colour"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+params.mode = "normal"
+
+[[node]]
+id = 2
+name = "lower"
+type = "msh.transform"
+pos = [440.0, 0.0]
+inputs.in = { node = 1, output = "out" }
+params.translate = [0.0, -0.45, 0.0]
+
+[[node]]
+id = 3
+name = "tumble"
+type = "msh.vat_in"
+pos = [0.0, 160.0]
+params.colour = "vat/tumble_col.png"
+params.data = "vat/tumble_data.json"
+params.frame = { value = 0.0, expr = "time * 24" }
+params.mesh = "vat/tumble_mesh.obj"
+params.mode = "rigid"
+params.position = "vat/tumble_pos.exr"
+params.rotation = "vat/tumble_rot.exr"
+
+[[node]]
+id = 4
+name = "flat"
+type = "msh.normals"
+pos = [220.0, 160.0]
+inputs.in = { node = 3, output = "out" }
+params.mode = "flat"
+
+[[node]]
+id = 5
+name = "raise"
+type = "msh.transform"
+pos = [440.0, 160.0]
+inputs.in = { node = 4, output = "out" }
+params.translate = [0.0, 0.55, 0.0]
+
+[[node]]
+id = 6
+name = "render"
+type = "img.render"
+pos = [680.0, 80.0]
+inputs.geo = { node = 2, output = "out" }
+inputs.geo2 = { node = 5, output = "out" }
+params.background = [0.03, 0.03, 0.05, 1.0]
+params.distance = 3.6
+params.elevation = 25.0

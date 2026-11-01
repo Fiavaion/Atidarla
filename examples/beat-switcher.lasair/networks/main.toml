@@ -1,0 +1,132 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 15
+
+[[node]]
+id = 0
+name = "clock"
+type = "sig.beat"
+pos = [0.0, 0.0]
+params.bpm = 120.0
+
+[[node]]
+id = 1
+name = "bar_phase"
+type = "sig.select"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+params.channels = "bar_phase"
+
+[[node]]
+id = 2
+name = "index"
+type = "sig.math"
+pos = [440.0, 0.0]
+inputs.a = { node = 1, output = "out" }
+params.to_max = 3.999
+
+[[node]]
+id = 3
+name = "beat_phase"
+type = "sig.select"
+pos = [220.0, 140.0]
+inputs.in = { node = 0, output = "out" }
+params.channels = "beat_phase"
+
+[[node]]
+id = 4
+name = "kick"
+type = "sig.trigger"
+pos = [440.0, 140.0]
+inputs.in = { node = 3, output = "out" }
+params.decay = 0.3
+params.threshold = 0.02
+
+[[node]]
+id = 5
+name = "flash"
+type = "sig.math"
+pos = [660.0, 140.0]
+inputs.a = { node = 4, output = "out" }
+params.to_max = 1.8
+params.to_min = 1.0
+
+[[node]]
+id = 6
+name = "beats"
+type = "sig.count"
+pos = [660.0, 280.0]
+inputs.in = { node = 4, output = "out" }
+
+[[node]]
+id = 7
+name = "step"
+type = "sig.constant"
+pos = [660.0, 420.0]
+params.name1 = "degrees"
+params.value1 = 15.0
+
+[[node]]
+id = 8
+name = "spin"
+type = "sig.math"
+pos = [880.0, 280.0]
+inputs.a = { node = 6, output = "out" }
+inputs.b = { node = 7, output = "out" }
+params.operation = "multiply"
+
+[[node]]
+id = 9
+name = "solid"
+type = "img.constant"
+pos = [0.0, 560.0]
+params.colour = [0.85, 0.2, 0.3, 1.0]
+
+[[node]]
+id = 10
+name = "gradient"
+type = "img.ramp"
+pos = [0.0, 680.0]
+params.colour_a = [1.0, 0.85, 0.3, 1.0]
+params.colour_b = [0.1, 0.05, 0.3, 1.0]
+params.type = "radial"
+
+[[node]]
+id = 11
+name = "star"
+type = "img.shape"
+pos = [0.0, 800.0]
+params.fill = [0.3, 0.9, 1.0, 1.0]
+params.rotate = { value = 0.0, bind = { node = 8, channel = "count" } }
+params.shape = "polygon"
+params.sides = 5
+params.size = [0.4, 0.4]
+
+[[node]]
+id = 12
+name = "title"
+type = "img.text"
+pos = [0.0, 920.0]
+params.size = 0.12
+params.text = '''
+Lasair
+beat switcher'''
+
+[[node]]
+id = 13
+name = "switch1"
+type = "img.switch"
+pos = [440.0, 680.0]
+inputs.in0 = { node = 9, output = "out" }
+inputs.in1 = { node = 10, output = "out" }
+inputs.in2 = { node = 11, output = "out" }
+inputs.in3 = { node = 12, output = "out" }
+params.index = { value = 0.0, bind = { node = 2, channel = "bar_phase" } }
+
+[[node]]
+id = 14
+name = "level1"
+type = "img.level"
+pos = [660.0, 680.0]
+inputs.in = { node = 13, output = "out" }
+params.brightness = { value = 1.0, bind = { node = 5, channel = "trigger" } }

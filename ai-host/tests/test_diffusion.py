@@ -7,10 +7,10 @@ pytest.importorskip("diffusers")
 pytest.importorskip("transformers")
 np = pytest.importorskip("numpy")
 
-from atd_ai_host.adapters.diffusion import DiffusionAdapter, Params, turbo_timesteps
-from atd_ai_host.errors import INVALID_PARAMS, UNSUPPORTED, RpcError
-from atd_ai_host.frames import Frame
-from atd_ai_host.paths import models_dir
+from lsr_ai_host.adapters.diffusion import DiffusionAdapter, Params, turbo_timesteps
+from lsr_ai_host.errors import INVALID_PARAMS, UNSUPPORTED, RpcError
+from lsr_ai_host.frames import Frame
+from lsr_ai_host.paths import models_dir
 
 MODEL = models_dir() / "sd-turbo"
 needs_weights = pytest.mark.skipif(not (MODEL / "unet").is_dir(), reason=f"SD-Turbo not in {MODEL}")

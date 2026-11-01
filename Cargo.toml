@@ -8,31 +8,31 @@ version = "0.0.1"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/fiavaion/atidarla"
-authors = ["The Atidarla Contributors"]
+repository = "https://github.com/fiavaion/lasair"
+authors = ["The Lasair Contributors"]
 publish = false
 
 [workspace.dependencies]
 # Internal crates
-atd-core = { path = "crates/atd-core" }
-atd-gpu = { path = "crates/atd-gpu" }
-atd-kernel = { path = "crates/atd-kernel" }
-atd-ai = { path = "crates/atd-ai" }
-atd-agent = { path = "crates/atd-agent" }
-atd-format = { path = "crates/atd-format" }
-atd-io = { path = "crates/atd-io" }
-atd-interop = { path = "crates/atd-interop" }
-atd-py = { path = "crates/atd-py" }
-atd-stage = { path = "crates/atd-stage" }
-atd-timeline = { path = "crates/atd-timeline" }
-atd-ops-img = { path = "crates/atd-ops-img" }
-atd-ops-sig = { path = "crates/atd-ops-sig" }
-atd-ops-pnt = { path = "crates/atd-ops-pnt" }
-atd-ops-msh = { path = "crates/atd-ops-msh" }
-atd-ops-mat = { path = "crates/atd-ops-mat" }
-atd-ops-dat = { path = "crates/atd-ops-dat" }
-atd-ops-cmp = { path = "crates/atd-ops-cmp" }
-atd-ops-ai = { path = "crates/atd-ops-ai" }
+lsr-core = { path = "crates/lsr-core" }
+lsr-gpu = { path = "crates/lsr-gpu" }
+lsr-kernel = { path = "crates/lsr-kernel" }
+lsr-ai = { path = "crates/lsr-ai" }
+lsr-agent = { path = "crates/lsr-agent" }
+lsr-format = { path = "crates/lsr-format" }
+lsr-io = { path = "crates/lsr-io" }
+lsr-interop = { path = "crates/lsr-interop" }
+lsr-py = { path = "crates/lsr-py" }
+lsr-stage = { path = "crates/lsr-stage" }
+lsr-timeline = { path = "crates/lsr-timeline" }
+lsr-ops-img = { path = "crates/lsr-ops-img" }
+lsr-ops-sig = { path = "crates/lsr-ops-sig" }
+lsr-ops-pnt = { path = "crates/lsr-ops-pnt" }
+lsr-ops-msh = { path = "crates/lsr-ops-msh" }
+lsr-ops-mat = { path = "crates/lsr-ops-mat" }
+lsr-ops-dat = { path = "crates/lsr-ops-dat" }
+lsr-ops-cmp = { path = "crates/lsr-ops-cmp" }
+lsr-ops-ai = { path = "crates/lsr-ops-ai" }
 
 # Pinned stack (PRD A5). wgpu is pinned to one major per release train.
 wgpu = "=30.0.1"
@@ -81,17 +81,17 @@ image-webp = "0.2"
 # store (platform verifier), so no bundled root list and no native-tls.
 ureq = { version = "3.5", default-features = false, features = ["rustls-no-provider", "platform-verifier"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
-# WebSocket `wss://` (atd-ops-dat): the same OS trust store as the downloads.
+# WebSocket `wss://` (lsr-ops-dat): the same OS trust store as the downloads.
 rustls-platform-verifier = "0.7"
 # Tests only: certificates for local TLS servers (MIT OR Apache-2.0).
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
 time = "0.3"
-# ComfyUI client (atd-ai::comfy): plain HTTP and WebSocket to a local or LAN
+# ComfyUI client (lsr-ai::comfy): plain HTTP and WebSocket to a local or LAN
 # server through the egress gate. ureq 2 for its resolver hook (the gate
 # pins the resolved address); to move to ureq 3 with the model downloads.
 ureq2 = { package = "ureq", version = "2.12", default-features = false }
 tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
-# Serial ports (atd-ops-dat `dat.serial`): termios on Unix, the comm API on
+# Serial ports (lsr-ops-dat `dat.serial`): termios on Unix, the comm API on
 # Windows.
 libc = "0.2"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Devices_Communication"] }

@@ -1,4 +1,4 @@
-"""The `atd-ai-host` command line, run as a real subprocess."""
+"""The `lsr-ai-host` command line, run as a real subprocess."""
 
 import os
 import re
@@ -10,15 +10,15 @@ import time
 import pytest
 from conftest import Client, RpcFailure, open_inline, open_shm, pixels
 
-from atd_ai_host.adapters.builtin import invert
-from atd_ai_host.errors import UNAUTHORIZED
+from lsr_ai_host.adapters.builtin import invert
+from lsr_ai_host.errors import UNAUTHORIZED
 
-LINE = re.compile(r"^atd-ai-host listening on 127\.0\.0\.1:(\d+)$")
+LINE = re.compile(r"^lsr-ai-host listening on 127\.0\.0\.1:(\d+)$")
 
 
 def spawn(*args, env=None):
     return subprocess.Popen(
-        [sys.executable, "-m", "atd_ai_host", *args],
+        [sys.executable, "-m", "lsr_ai_host", *args],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -64,13 +64,13 @@ def test_listen_announces_the_port_and_serves_inline_rgba8(listening):
 
 
 def test_listen_beyond_loopback_needs_a_token():
-    p = spawn("--listen", "0.0.0.0:0", env={"ATD_AI_HOST_TOKEN": ""})
+    p = spawn("--listen", "0.0.0.0:0", env={"LSR_AI_HOST_TOKEN": ""})
     out, err = p.communicate(timeout=30)
     assert p.returncode == 2 and "without --token" in err and out == ""
 
 
 def test_token_from_the_environment_is_enforced(listening):
-    addr = listening(env={"ATD_AI_HOST_TOKEN": "env-token"})
+    addr = listening(env={"LSR_AI_HOST_TOKEN": "env-token"})
     c = Client(addr)
     with pytest.raises(RpcFailure) as e:
         open_inline(c, token="wrong")

@@ -1,0 +1,3251 @@
+//! The engine: a network plus its undo history, scheduler, operator
+//! instances and the latest result of every cooked node (PRD §5.3).
+//!
+//! Each frame [`Engine::cook`] asks the scheduler which nodes must cook to
+//! produce the requested outputs. SIG operators cook on the CPU into reused
+//! channel buffers; IMG operators record into one command encoder, which is
+//! submitted once, after which replaced textures return to the pool.
+//! Feedback inputs see the source's result from the previous frame.
+//!
+//! Parameters bound to a channel (FR-P2 channel export) read that channel's
+//! current value when the node cooks; the scheduler orders and dirties
+//! through bindings, so a time-dependent LFO animates whatever it drives.
+//!
+//! GEO operators ([`GeoOp`]) cook on the GPU into the same encoder; their
+//! results are [`Geometry`] values whose attribute buffers come from the
+//! engine's [`BufferPool`] (design: `docs/design/geometry-attributes.md`).
+//! A GEO result moves to its consumer instead of being shared when nothing
+//! else can read it ([`GeoCtx::take_input`]).
+//!
+//! MAT operators ([`MatOp`]) cook on the CPU into a [`Material`], plain data
+//! a renderer reads through [`CookCtx::mat_inputs`] (contract in
+//! [`crate::mat`]).
+//!
+//! DAT operators ([`DatOp`]) cook on the CPU into a [`Dat`]: shared text
+//! or tables (contract in [`lsr_core::dat`]). A DAT node whose inputs are
+//! the same values as at its last cook, and that nothing else dirtied, is
+//! not cooked again (its consumers see the same value); I/O happens on the
+//! operators' worker threads, which the cook polls ([`DatCtx::cook_again`]).
+//! SIG operators may read DAT inputs and write a DAT output too
+//! ([`SigCtx::dat`]).
+//!
+//! **Status:** IMG, SIG, GEO, MAT and DAT wires. Operators are created per
+//! node from an [`OpLibrary`] of factories registered by the `lsr-ops-*`
+//! crates.
+
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::time::Instant;
+
+use lsr_core::cook::{CookStat, PlanError, Scheduler};
+pub use lsr_core::dat::{Dat, Table};
+use lsr_core::expr::{ExprValue, PyJob, PythonHost};
+use lsr_core::graph::{ChannelRef, Edit, GraphError, Network, NodeId, assign_value};
+use lsr_core::history::History;
+use lsr_core::registry::{Registry, WireType};
+use serde_json::Value;
+
+use crate::expr::ExprTable;
+
+use crate::geo::{AttrType, Attribute, BufferPool, Geometry};
+use crate::mat::Material;
+use crate::pool::{TexKey, TexturePool};
+
+/// Usage of every engine texture: render target, sampled, copyable.
+pub const ENGINE_USAGE: wgpu::TextureUsages = wgpu::TextureUsages::RENDER_ATTACHMENT
+    .union(wgpu::TextureUsages::TEXTURE_BINDING)
+    .union(wgpu::TextureUsages::COPY_SRC)
+    .union(wgpu::TextureUsages::COPY_DST);
+
+/// SIG data: named channels, each with `samples` values (1 at control rate).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Channels {
+    names: Vec<String>,
+    samples: usize,
+    /// Samples per second for audio-rate blocks; 0 at control rate.
+    rate: f32,
+    /// Channel-major: channel `c` is `data[c * samples..(c + 1) * samples]`.
+    data: Vec<f32>,
+}
+
+impl Channels {
+    /// Builds channels with one sample each.
+    pub fn single(names: &[&str], values: &[f32]) -> Self {
+        let mut c = Self::default();
+        c.set_single(names, values);
+        c
+    }
+
+    /// Replaces the contents with one sample per channel, reusing storage
+    /// (no allocation when the channel names are unchanged).
+    pub fn set_single(&mut self, names: &[&str], values: &[f32]) {
+        assert_eq!(names.len(), values.len(), "one value per channel");
+        if self.names.len() != names.len() || self.names.iter().zip(names).any(|(a, b)| a != b) {
+            self.names.clear();
+            self.names.extend(names.iter().map(|n| (*n).to_owned()));
+        }
+        self.samples = 1;
+        self.rate = 0.0;
+        self.data.clear();
+        self.data.extend_from_slice(values);
+    }
+
+    /// Shapes the buffer as an audio-rate block of `samples` per channel at
+    /// `rate` Hz (zeroed), reusing storage; fill it with [`Self::channel_mut`].
+    pub fn set_block(&mut self, names: &[&str], rate: f32, samples: usize) {
+        if self.names.len() != names.len() || self.names.iter().zip(names).any(|(a, b)| a != b) {
+            self.names.clear();
+            self.names.extend(names.iter().map(|n| (*n).to_owned()));
+        }
+        self.samples = samples;
+        self.rate = rate;
+        self.data.clear();
+        self.data.resize(names.len() * samples, 0.0);
+    }
+
+    /// Like [`Self::set_block`], taking the channel names from `like`
+    /// (no allocation when they already match).
+    pub fn set_block_like(&mut self, like: &Channels, rate: f32, samples: usize) {
+        if self.names != like.names {
+            self.names.clone_from(&like.names);
+        }
+        self.samples = samples;
+        self.rate = rate;
+        self.data.clear();
+        self.data.resize(self.names.len() * samples, 0.0);
+    }
+
+    /// Reserves room for `values` samples in total, so growing blocks up to
+    /// that size does not reallocate.
+    pub fn reserve(&mut self, values: usize) {
+        self.data.reserve(values.saturating_sub(self.data.len()));
+    }
+
+    /// Samples per second of an audio-rate block; 0 at control rate.
+    pub fn rate(&self) -> f32 {
+        self.rate
+    }
+
+    /// Rebuilds one-sample channels in place: [`ChannelWriter::push`] each
+    /// channel; the writer trims leftovers when dropped. Name strings are
+    /// reused, so a steady set of channels does not allocate.
+    pub fn writer(&mut self) -> ChannelWriter<'_> {
+        if self.samples != 1 {
+            // Previous contents were a block; shrink to one sample per channel.
+            self.data.truncate(self.names.len().min(self.data.len()));
+            self.samples = 1;
+        }
+        ChannelWriter { ch: self, n: 0 }
+    }
+
+    /// Replaces the contents with a copy of `other`, reusing storage.
+    pub fn copy_from(&mut self, other: &Channels) {
+        if self.names != other.names {
+            self.names.clone_from(&other.names);
+        }
+        self.samples = other.samples;
+        self.rate = other.rate;
+        self.data.clear();
+        self.data.extend_from_slice(&other.data);
+    }
+
+    pub fn len(&self) -> usize {
+        self.names.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.names.is_empty()
+    }
+
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.names.iter().map(String::as_str)
+    }
+
+    pub fn name(&self, c: usize) -> &str {
+        &self.names[c]
+    }
+
+    pub fn samples(&self) -> usize {
+        self.samples
+    }
+
+    /// All samples of channel `c`.
+    pub fn channel(&self, c: usize) -> &[f32] {
+        &self.data[c * self.samples..(c + 1) * self.samples]
+    }
+
+    /// Mutable samples of channel `c`.
+    pub fn channel_mut(&mut self, c: usize) -> &mut [f32] {
+        let s = self.samples;
+        &mut self.data[c * s..(c + 1) * s]
+    }
+
+    /// Index of a channel by name; an empty name means the first channel.
+    pub fn index(&self, name: &str) -> Option<usize> {
+        if name.is_empty() {
+            return (!self.names.is_empty()).then_some(0);
+        }
+        self.names.iter().position(|n| n == name)
+    }
+
+    /// The latest sample of channel `name` (empty: the first channel).
+    pub fn value(&self, name: &str) -> Option<f32> {
+        let c = self.index(name)?;
+        self.channel(c).last().copied()
+    }
+
+    /// The latest sample of channel `c`.
+    pub fn last(&self, c: usize) -> f32 {
+        self.channel(c).last().copied().unwrap_or(0.0)
+    }
+}
+
+/// Builds [`Channels`] in place; see [`Channels::writer`].
+#[derive(Debug)]
+pub struct ChannelWriter<'a> {
+    ch: &'a mut Channels,
+    n: usize,
+}
+
+impl ChannelWriter<'_> {
+    pub fn push(&mut self, name: &str, value: f32) {
+        let ch = &mut *self.ch;
+        if self.n < ch.names.len() {
+            if ch.names[self.n] != name {
+                ch.names[self.n].clear();
+                ch.names[self.n].push_str(name);
+            }
+        } else {
+            ch.names.push(name.to_owned());
+        }
+        if self.n < ch.data.len() {
+            ch.data[self.n] = value;
+        } else {
+            ch.data.push(value);
+        }
+        self.n += 1;
+    }
+}
+
+impl ChannelWriter<'_> {
+    /// Ends the writer without changing anything: the channels stay as the
+    /// last cook left them. Dropping a writer that pushed nothing would empty
+    /// them, so an operator that cannot read its source this frame calls this.
+    pub fn keep_previous(self) {
+        // Skips the truncating `Drop`; the writer owns nothing but a borrow.
+        std::mem::forget(self);
+    }
+}
+
+impl Drop for ChannelWriter<'_> {
+    fn drop(&mut self) {
+        self.ch.names.truncate(self.n);
+        self.ch.data.truncate(self.n);
+        self.ch.samples = 1;
+        self.ch.rate = 0.0;
+    }
+}
+
+/// How the engine runs (FR-H1, `docs/render.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum CookMode {
+    /// Real time, as the app runs: work on worker threads (decoding,
+    /// compiling, readbacks, Python) never blocks the cook (rule 1), and
+    /// its results arrive whenever they are ready.
+    #[default]
+    Live,
+    /// Offline render (`lasair render`): frame `i` is at `i / fps`
+    /// seconds, every frame advances exactly one step, and operators wait
+    /// for their workers so that each frame's result is a function of the
+    /// project and the frame alone. Live inputs output their idle value and
+    /// sinks do not emit.
+    Offline { fps: f64 },
+}
+
+impl CookMode {
+    pub fn is_offline(self) -> bool {
+        matches!(self, Self::Offline { .. })
+    }
+
+    /// Seconds per frame of an offline render; `None` live.
+    pub fn step(self) -> Option<f64> {
+        match self {
+            Self::Live => None,
+            Self::Offline { fps } => Some(1.0 / fps),
+        }
+    }
+
+    /// A worker's result. Live: whatever has arrived, never blocking.
+    /// Offline: waits for it.
+    pub fn receive<T>(
+        self,
+        rx: &std::sync::mpsc::Receiver<T>,
+    ) -> Result<T, std::sync::mpsc::TryRecvError> {
+        match self {
+            Self::Live => rx.try_recv(),
+            Self::Offline { .. } => rx
+                .recv()
+                .map_err(|_| std::sync::mpsc::TryRecvError::Disconnected),
+        }
+    }
+}
+
+/// Parameter values set from outside the graph each frame (MIDI/OSC
+/// mappings, timeline tracks): above bindings, expressions and stored
+/// values, never saved and never undone (M3, decision A54). Lookup
+/// allocates nothing.
+#[derive(Debug, Default, Clone)]
+pub struct LiveValues {
+    nodes: HashMap<NodeId, Vec<(String, Value)>>,
+}
+
+impl LiveValues {
+    /// The live value of `node`'s `param`.
+    pub fn get(&self, node: NodeId, param: &str) -> Option<&Value> {
+        self.nodes
+            .get(&node)?
+            .iter()
+            .find(|(name, _)| name == param)
+            .map(|(_, v)| v)
+    }
+
+    /// Sets or clears one value; whether anything changed. A value of the
+    /// same shape as the one set (a number, a colour) is overwritten in
+    /// place, so a value changing every frame allocates nothing.
+    pub fn set(&mut self, node: NodeId, param: &str, value: Option<&Value>) -> bool {
+        let list = self.nodes.entry(node).or_default();
+        let at = list.iter().position(|(name, _)| name == param);
+        let changed = match (at, value) {
+            (Some(i), Some(v)) if list[i].1 == *v => false,
+            (Some(i), Some(v)) => {
+                assign_value(&mut list[i].1, v);
+                true
+            }
+            (None, Some(v)) => {
+                list.push((param.to_owned(), v.clone()));
+                true
+            }
+            (Some(i), None) => {
+                list.remove(i);
+                true
+            }
+            (None, None) => false,
+        };
+        if list.is_empty() {
+            self.nodes.remove(&node);
+        }
+        changed
+    }
+
+    /// Clears everything; the nodes that had values.
+    pub fn clear(&mut self) -> Vec<NodeId> {
+        self.nodes.drain().map(|(n, _)| n).collect()
+    }
+
+    /// Every (node, parameter, value), in no particular order.
+    pub fn iter(&self) -> impl Iterator<Item = (NodeId, &str, &Value)> {
+        self.nodes
+            .iter()
+            .flat_map(|(n, list)| list.iter().map(move |(p, v)| (*n, p.as_str(), v)))
+    }
+}
+
+/// Read access to a node's parameters, with schema defaults and channel
+/// bindings resolved, and the engine settings they are read under (project
+/// folder, expressions, cook mode).
+#[derive(Debug, Clone, Copy)]
+pub struct Params<'a> {
+    net: &'a Network,
+    registry: &'a Registry,
+    sig: &'a HashMap<NodeId, Channels>,
+    node: NodeId,
+    /// Project folder that relative paths are relative to.
+    project_dir: Option<&'a Path>,
+    /// Expression values this frame (FR-P2).
+    exprs: Option<&'a ExprTable>,
+    /// Live values (MIDI/OSC mappings, timeline), above everything else.
+    live: Option<&'a LiveValues>,
+    mode: CookMode,
+}
+
+impl<'a> Params<'a> {
+    /// Parameters of `node`, resolving bindings against `sig` (for tests and
+    /// tools; the engine builds these itself when cooking).
+    pub fn new(
+        net: &'a Network,
+        registry: &'a Registry,
+        sig: &'a HashMap<NodeId, Channels>,
+        node: NodeId,
+    ) -> Self {
+        Self {
+            net,
+            registry,
+            sig,
+            node,
+            project_dir: None,
+            exprs: None,
+            live: None,
+            mode: CookMode::Live,
+        }
+    }
+
+    /// The same parameters with `live` values on top (for tests and tools).
+    pub fn with_live(mut self, live: &'a LiveValues) -> Self {
+        self.live = Some(live);
+        self
+    }
+
+    /// The parameter's live value, if one is set (see [`LiveValues`]).
+    pub fn live(&self, name: &str) -> Option<&'a Value> {
+        self.live?.get(self.node, name)
+    }
+
+    /// The same parameters with relative paths resolved against `dir`.
+    pub fn with_project_dir(mut self, dir: Option<&'a Path>) -> Self {
+        self.project_dir = dir;
+        self
+    }
+
+    /// The same parameters read under `mode` (for tests and tools).
+    pub fn with_mode(mut self, mode: CookMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    /// Whether the engine is cooking live or rendering offline.
+    pub fn mode(&self) -> CookMode {
+        self.mode
+    }
+
+    /// The node these are the parameters of.
+    pub fn node(&self) -> NodeId {
+        self.node
+    }
+
+    /// A path parameter's text as a file path: absolute paths as they are,
+    /// relative ones relative to the project folder (PRD §5.5). This
+    /// allocates, so operators call it when the text changes, not per frame.
+    pub fn resolve(&self, path: &str) -> PathBuf {
+        let p = Path::new(path);
+        match self.project_dir {
+            Some(dir) if p.is_relative() && !path.is_empty() => dir.join(p),
+            _ => p.to_owned(),
+        }
+    }
+
+    /// The live value if one is set, else the stored value (or schema
+    /// default), ignoring bindings.
+    pub fn value(&self, name: &str) -> Option<&'a Value> {
+        let stored = self.net.param_value(self.registry, self.node, name);
+        match (self.live(name), stored) {
+            // A live value of another JSON kind than the parameter's (a
+            // number for a vector, say) is ignored, not read as empty.
+            (Some(live), Some(s)) if std::mem::discriminant(live) != std::mem::discriminant(s) => {
+                stored
+            }
+            (Some(live), _) => Some(live),
+            (None, _) => stored,
+        }
+    }
+
+    /// The bound channel's current value, if the parameter is bound and the
+    /// channel exists.
+    pub fn bound(&self, name: &str) -> Option<f32> {
+        let bind = self.net.node(self.node)?.params.get(name)?.bind.as_ref()?;
+        self.sig.get(&bind.node)?.value(&bind.channel)
+    }
+
+    /// Whether the parameter follows a channel binding or an expression
+    /// and no live value overrides it. Such a value is only current once
+    /// its sources have cooked this frame, so before the plan (in
+    /// [`GpuOp::needed_inputs`]) it may still be last frame's. Live values
+    /// are set before the plan and are always current.
+    pub fn is_driven(&self, name: &str) -> bool {
+        if self.live(name).is_some() {
+            return false;
+        }
+        self.net
+            .node(self.node)
+            .and_then(|n| n.params.get(name))
+            .is_some_and(|p| p.bind.is_some() || p.expr.is_some())
+    }
+
+    /// The number the parameter's expression gave this frame, if it has
+    /// one that evaluated to a number.
+    pub fn expr(&self, name: &str) -> Option<f64> {
+        self.expr_value(name)?.number()
+    }
+
+    /// What the parameter's expression gave this frame: a number, or for a
+    /// vector or colour possibly a tuple (Python only).
+    pub fn expr_value(&self, name: &str) -> Option<ExprValue> {
+        self.exprs?.value(self.node, name)
+    }
+
+    /// What drives a vector or colour parameter this frame, with the number
+    /// of components it drives; `None` when it is not driven or a live
+    /// vector overrides it. Allocates nothing.
+    fn vector_drive(&self, name: &str) -> Option<(VectorDrive<'a>, usize)> {
+        if self.live(name).is_some_and(Value::is_array) {
+            return None;
+        }
+        let param = self.net.node(self.node)?.params.get(name)?;
+        if param.bind.is_none() && param.expr.is_none() {
+            return None;
+        }
+        let n = components(self.net, self.registry, self.node, name)?;
+        if let Some(bind) = &param.bind {
+            return Some((VectorDrive::Bound(self.sig, bind), n));
+        }
+        Some((VectorDrive::Expr(self.expr_value(name)?), n))
+    }
+
+    /// Component `i` of a vector or colour parameter as [`Self::vec4`]
+    /// reads it (live vector, else binding or expression, else the stored
+    /// value), at full precision; `None` past its last component.
+    pub fn component(&self, name: &str, i: usize) -> Option<f64> {
+        if let Some((drive, n)) = self.vector_drive(name)
+            && let Some(v) = drive.component(i, n)
+        {
+            return Some(v);
+        }
+        self.value(name)?.as_array()?.get(i)?.as_f64()
+    }
+
+    /// A number, integer or toggle parameter at full precision: a live
+    /// value, else its bound channel, else its expression, else its value
+    /// (a toggle as 0 or 1); `None` for other kinds.
+    pub fn number(&self, name: &str) -> Option<f64> {
+        let num = |v: &Value| {
+            v.as_f64()
+                .or_else(|| v.as_bool().map(|b| f64::from(u8::from(b))))
+        };
+        let stored = self.value(name).and_then(num)?;
+        if let Some(v) = self.live(name).and_then(num) {
+            return Some(v);
+        }
+        if let Some(v) = self.bound(name) {
+            return Some(f64::from(v));
+        }
+        Some(self.expr(name).unwrap_or(stored))
+    }
+
+    /// A number parameter: its bound channel, else its expression, else
+    /// its value.
+    pub fn f32(&self, name: &str) -> f32 {
+        if let Some(v) = self.live(name).and_then(Value::as_f64) {
+            return v as f32;
+        }
+        if let Some(v) = self.bound(name) {
+            return v;
+        }
+        if let Some(v) = self.expr(name) {
+            return v as f32;
+        }
+        self.value(name).and_then(Value::as_f64).unwrap_or(0.0) as f32
+    }
+
+    pub fn i64(&self, name: &str) -> i64 {
+        if let Some(v) = self.live(name).and_then(Value::as_f64) {
+            return v.round() as i64;
+        }
+        if let Some(v) = self.bound(name) {
+            return v.round() as i64;
+        }
+        if let Some(v) = self.expr(name) {
+            return v.round() as i64;
+        }
+        self.value(name).and_then(Value::as_i64).unwrap_or(0)
+    }
+
+    pub fn bool(&self, name: &str) -> bool {
+        if let Some(v) = self.live(name) {
+            return v
+                .as_bool()
+                .unwrap_or_else(|| v.as_f64().is_some_and(|x| x > 0.5));
+        }
+        if let Some(v) = self.bound(name) {
+            return v > 0.5;
+        }
+        // An expression is true when non-zero, as Python's `bool()`.
+        if let Some(v) = self.expr(name) {
+            return v != 0.0;
+        }
+        self.value(name).and_then(Value::as_bool).unwrap_or(false)
+    }
+
+    pub fn str(&self, name: &str) -> &'a str {
+        self.value(name).and_then(Value::as_str).unwrap_or("")
+    }
+
+    /// A `Vec`/`Colour` parameter as 4 floats (missing components are 0,
+    /// except alpha, which defaults to 1 for 3-component values). A live
+    /// vector wins; else a binding or expression drives the components
+    /// (PRD A66): one number every component (a colour's red, green and
+    /// blue), a Python tuple or a whole-node binding ([`bound_component`])
+    /// one each; the rest keep their stored values.
+    pub fn vec4(&self, name: &str) -> [f32; 4] {
+        let mut out = [0.0, 0.0, 0.0, 1.0];
+        if let Some(a) = self.value(name).and_then(Value::as_array) {
+            for (o, v) in out.iter_mut().zip(a) {
+                *o = v.as_f64().unwrap_or(0.0) as f32;
+            }
+        }
+        if let Some((drive, n)) = self.vector_drive(name) {
+            for (i, o) in out.iter_mut().enumerate().take(n) {
+                if let Some(v) = drive.component(i, n) {
+                    *o = v as f32;
+                }
+            }
+        }
+        out
+    }
+}
+
+/// What drives a vector or colour parameter (see [`Params::vec4`]).
+#[derive(Debug, Clone, Copy)]
+enum VectorDrive<'a> {
+    Bound(&'a HashMap<NodeId, Channels>, &'a ChannelRef),
+    Expr(ExprValue),
+}
+
+impl VectorDrive<'_> {
+    fn component(self, i: usize, n: usize) -> Option<f64> {
+        match self {
+            Self::Bound(sig, bind) => bound_component(sig, bind, i, n).map(f64::from),
+            Self::Expr(v) => (i < n).then(|| v.component(i)).flatten(),
+        }
+    }
+}
+
+/// How many components a binding or expression drives on `node`'s
+/// `param` ([`lsr_core::registry::ParamKind::components`]); `None` for a
+/// parameter that is not a vector or colour.
+pub(crate) fn components(
+    net: &Network,
+    registry: &Registry,
+    node: NodeId,
+    param: &str,
+) -> Option<usize> {
+    let schema = registry.get(&net.node(node)?.type_id)?;
+    schema
+        .params
+        .iter()
+        .find(|p| p.name == param)?
+        .kind
+        .components()
+}
+
+/// Component `i` of a vector or colour bound to `bind` that drives `n`
+/// components (PRD A66): bound to a whole SIG node (no channel name) with
+/// at least `n` channels, component `i` follows channel `i`; otherwise the
+/// one channel (the first, for a whole node) drives every component.
+pub(crate) fn bound_component(
+    sig: &HashMap<NodeId, Channels>,
+    bind: &ChannelRef,
+    i: usize,
+    n: usize,
+) -> Option<f32> {
+    if i >= n {
+        return None;
+    }
+    let ch = sig.get(&bind.node)?;
+    if bind.channel.is_empty() && n > 1 && ch.len() >= n {
+        // An empty channel falls back to the stored value, as the
+        // one-channel path does.
+        return ch.channel(i).last().copied();
+    }
+    ch.value(&bind.channel)
+}
+
+/// Everything an IMG operator needs to cook one frame.
+#[derive(Debug)]
+pub struct CookCtx<'a> {
+    pub device: &'a wgpu::Device,
+    pub queue: &'a wgpu::Queue,
+    pub encoder: &'a mut wgpu::CommandEncoder,
+    /// One entry per input socket in schema order; `None` if unconnected,
+    /// not an IMG input, or the source has no result.
+    pub inputs: &'a [Option<wgpu::Texture>],
+    /// An input's source was cooked earlier this frame (its result may have
+    /// changed). False when only this node's parameters changed or it is
+    /// cooking again to collect results ([`Self::cook_again`]).
+    pub inputs_cooked: bool,
+    /// SIG inputs by input index (`None` for IMG sockets), for operators
+    /// that turn channels into images.
+    pub sig_inputs: SigInputs<'a>,
+    /// GEO inputs by input index, for operators that render geometry.
+    pub geo_inputs: GeoInputs<'a>,
+    /// MAT inputs by input index, for operators that render geometry.
+    pub mat_inputs: MatInputs<'a>,
+    /// The engine's attribute buffer pool (for uploading CPU-only inputs).
+    pub buffers: &'a BufferPool,
+    /// A 1×1 transparent black texture, for unconnected inputs.
+    pub black: &'a wgpu::Texture,
+    pub output: &'a wgpu::Texture,
+    pub params: Params<'a>,
+    /// Seconds since the engine's time origin.
+    pub time: f64,
+    pub frame: u64,
+    /// Set by an operator whose result is provisional (e.g. a shader still
+    /// compiling on a worker thread): the engine cooks it again next frame
+    /// even if nothing upstream changed.
+    pub cook_again: bool,
+}
+
+impl CookCtx<'_> {
+    /// Input `i`, or the black texture when it is missing.
+    pub fn input_or_black(&self, i: usize) -> &wgpu::Texture {
+        self.inputs
+            .get(i)
+            .and_then(Option::as_ref)
+            .unwrap_or(self.black)
+    }
+}
+
+/// A live IMG operator instance (one per node).
+pub trait GpuOp: Send {
+    fn cook(&mut self, ctx: &mut CookCtx<'_>) -> Result<(), String>;
+
+    /// The output size this operator wants, given its first IMG input's
+    /// size (if connected) and the project size. `None` (the default)
+    /// follows the input, or the project size for generators.
+    fn output_size(
+        &self,
+        _params: &Params<'_>,
+        _input: Option<(u32, u32)>,
+        _project: (u32, u32),
+    ) -> Option<(u32, u32)> {
+        None
+    }
+
+    /// Runs once the frame's commands are submitted, for every node that
+    /// cooked this frame: work recorded in [`GpuOp::cook`] is now on the
+    /// queue, so textures it wrote may be handed to a worker thread.
+    fn after_submit(&mut self) {}
+
+    /// A short status line for the parameter panel (for example the name
+    /// a sender was published under), or `None`.
+    fn status(&self) -> Option<&str> {
+        None
+    }
+
+    /// The inputs this operator will read in the coming frame, a bit per
+    /// input in schema order; `None` (the default) reads them all. Sources
+    /// of the others are not cooked on its account this frame (a Stage
+    /// layer with 16 clips cooks only those it shows). Asked before every
+    /// plan, so it must be cheap and allocate nothing.
+    fn needed_inputs(&self, _params: &Params<'_>) -> Option<u64> {
+        None
+    }
+}
+
+/// SIG inputs of a node, by input index. Does not allocate.
+#[derive(Debug, Clone, Copy)]
+pub struct SigInputs<'a> {
+    sources: &'a [Option<NodeId>],
+    sig: &'a HashMap<NodeId, Channels>,
+}
+
+impl<'a> SigInputs<'a> {
+    /// Inputs given by source node per input index (for tests and tools).
+    pub fn new(sources: &'a [Option<NodeId>], sig: &'a HashMap<NodeId, Channels>) -> Self {
+        Self { sources, sig }
+    }
+
+    /// Channels on input `i`, if connected and cooked.
+    pub fn get(&self, i: usize) -> Option<&'a Channels> {
+        self.sources
+            .get(i)
+            .copied()
+            .flatten()
+            .and_then(|n| self.sig.get(&n))
+    }
+
+    pub fn len(&self) -> usize {
+        self.sources.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.sources.is_empty()
+    }
+}
+
+/// GEO inputs of a node, by input index. Does not allocate.
+#[derive(Debug, Clone, Copy)]
+pub struct GeoInputs<'a> {
+    sources: &'a [Option<NodeId>],
+    geo: &'a HashMap<NodeId, Geometry>,
+}
+
+impl<'a> GeoInputs<'a> {
+    /// Inputs given by source node per input index (for tests and tools).
+    pub fn new(sources: &'a [Option<NodeId>], geo: &'a HashMap<NodeId, Geometry>) -> Self {
+        Self { sources, geo }
+    }
+
+    /// Geometry on input `i`, if connected and cooked.
+    pub fn get(&self, i: usize) -> Option<&'a Geometry> {
+        self.sources
+            .get(i)
+            .copied()
+            .flatten()
+            .and_then(|n| self.geo.get(&n))
+    }
+
+    pub fn len(&self) -> usize {
+        self.sources.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.sources.is_empty()
+    }
+}
+
+/// MAT inputs of a node, by input index. Does not allocate.
+#[derive(Debug, Clone, Copy)]
+pub struct MatInputs<'a> {
+    sources: &'a [Option<NodeId>],
+    mat: &'a HashMap<NodeId, Material>,
+    images: &'a HashMap<NodeId, wgpu::Texture>,
+}
+
+impl<'a> MatInputs<'a> {
+    /// Inputs given by source node per input index (for tests and tools).
+    pub fn new(
+        sources: &'a [Option<NodeId>],
+        mat: &'a HashMap<NodeId, Material>,
+        images: &'a HashMap<NodeId, wgpu::Texture>,
+    ) -> Self {
+        Self {
+            sources,
+            mat,
+            images,
+        }
+    }
+
+    /// The material on input `i`, if connected and cooked.
+    pub fn get(&self, i: usize) -> Option<&'a Material> {
+        self.sources
+            .get(i)
+            .copied()
+            .flatten()
+            .and_then(|n| self.mat.get(&n))
+    }
+
+    /// A material's texture: the current image of its texture source, if
+    /// it has one that cooked (looked up now, so never a stale image).
+    pub fn texture(&self, material: &Material) -> Option<&'a wgpu::Texture> {
+        self.images.get(&material.texture_source?)
+    }
+
+    pub fn len(&self) -> usize {
+        self.sources.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.sources.is_empty()
+    }
+}
+
+/// Everything a MAT operator needs to cook one frame. Its texture (its
+/// first IMG input) is wired by the engine, not by the operator.
+#[derive(Debug)]
+pub struct MatCtx<'a> {
+    /// This node's material from its previous cook, to overwrite.
+    pub output: &'a mut Material,
+    pub params: Params<'a>,
+    /// Whether the texture input is connected to an image.
+    pub has_texture: bool,
+    /// Seconds since the engine's time origin.
+    pub time: f64,
+    pub frame: u64,
+}
+
+/// A live MAT operator instance (one per node): fills a [`Material`] from
+/// its parameters on the CPU.
+pub trait MatOp: Send {
+    fn cook(&mut self, ctx: &mut MatCtx<'_>) -> Result<(), String>;
+}
+
+/// Creates a MAT operator instance.
+pub type MatFactory = Box<dyn Fn() -> Box<dyn MatOp> + Send + Sync>;
+
+/// Everything a GEO operator needs to cook one frame. Work goes into the
+/// frame's command encoder; buffers come from [`GeoCtx::buffers`].
+///
+/// **Inputs are read-only.** To build on an input, take it with
+/// [`GeoCtx::take_input`]: you get the value itself when the engine can hand
+/// it over (nothing else reads it this frame or next), else a cheap clone
+/// sharing every attribute. Either way, write an attribute in place only
+/// when [`Attribute::unique_gpu`] gives you its buffer, else write a new one
+/// ([`GeoCtx::alloc`]) and set it on your output: copy on write.
+#[derive(Debug)]
+pub struct GeoCtx<'a> {
+    pub device: &'a wgpu::Device,
+    pub queue: &'a wgpu::Queue,
+    pub encoder: &'a mut wgpu::CommandEncoder,
+    /// The engine's attribute buffer pool.
+    pub buffers: &'a BufferPool,
+    /// IMG inputs by input index (`None` for other sockets).
+    pub images: &'a [Option<wgpu::Texture>],
+    /// SIG inputs by input index.
+    pub sig_inputs: SigInputs<'a>,
+    /// This node's result from its previous cook (empty on the first), to
+    /// overwrite or reuse. Replacing it releases its buffers to the pool
+    /// after the frame is submitted.
+    pub output: &'a mut Geometry,
+    pub params: Params<'a>,
+    /// Seconds since the engine's time origin.
+    pub time: f64,
+    /// Seconds since the previous frame (offline: exactly one step); in a
+    /// loop of [`Repeat::SubSteps`], that divided by the sub-step count.
+    pub dt: f64,
+    pub frame: u64,
+    /// Which pass of its loop this cook is (0 outside loops; see
+    /// [`GeoOp::repeat`]).
+    pub iteration: u32,
+    /// How many passes its loop makes this frame (1 outside loops).
+    pub iterations: u32,
+    /// Set when the result is provisional: the node cooks again next frame.
+    pub cook_again: bool,
+    node: NodeId,
+    sources: &'a [Option<NodeId>],
+    handover: &'a [bool],
+    geo: &'a mut HashMap<NodeId, Geometry>,
+}
+
+impl GeoCtx<'_> {
+    /// Geometry on input `i`, if connected and cooked (feedback inputs: the
+    /// source's result from the previous frame; a node wired into its own
+    /// feedback input reads [`Self::output`] as it was before this cook).
+    pub fn input(&self, i: usize) -> Option<&Geometry> {
+        let src = self.sources.get(i).copied().flatten()?;
+        if src == self.node {
+            return Some(&*self.output);
+        }
+        self.geo.get(&src)
+    }
+
+    /// Whether [`Self::take_input`] on input `i` would move the value rather
+    /// than share it: nothing else can read it (see `Engine::cook`), or it is
+    /// this node's own previous output (a feedback wire from itself).
+    pub fn can_take(&self, i: usize) -> bool {
+        let own = self.sources.get(i).copied().flatten() == Some(self.node);
+        (own || self.handover.get(i).copied().unwrap_or(false)) && self.input(i).is_some()
+    }
+
+    /// Input `i` to build on: moved out of the source's result when
+    /// [`Self::can_take`], else a clone sharing its attributes. Taking an
+    /// input that was moved gives an empty geometry (own output) or `None`.
+    pub fn take_input(&mut self, i: usize) -> Option<Geometry> {
+        let src = self.sources.get(i).copied().flatten()?;
+        if src == self.node {
+            Some(std::mem::take(self.output))
+        } else if self.handover.get(i).copied().unwrap_or(false) {
+            self.geo.remove(&src)
+        } else {
+            self.geo.get(&src).cloned()
+        }
+    }
+
+    /// A new GPU attribute of `len` elements from the pool. Its contents are
+    /// whatever the buffer last held (offline it is cleared to zero, so no
+    /// frame depends on the pool's history): write all of it.
+    pub fn alloc(
+        &mut self,
+        name: impl Into<std::sync::Arc<str>>,
+        ty: AttrType,
+        len: u32,
+    ) -> Attribute {
+        let buffer = self.buffers.attr(lsr_core::geo::buffer_bytes(len, ty));
+        if self.params.mode().is_offline() {
+            self.encoder.clear_buffer(&buffer, 0, None);
+        }
+        Attribute::gpu(name, ty, len, buffer)
+    }
+
+    /// A header for a count the CPU knows (written with `write_buffer`;
+    /// share it rather than writing one per frame).
+    pub fn cpu_header(&self, points: u32) -> std::sync::Arc<crate::geo::GeoBuffer> {
+        crate::geo::cpu_header(self.queue, self.buffers, points)
+    }
+}
+
+/// How many passes a loop makes in one frame (design:
+/// `docs/design/solver-foreach.md`). A loop is headed by a GEO node with a
+/// feedback GEO input; the source of that input is the loop's end, and the
+/// loop's body is every node on a path from the head to the end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Repeat {
+    /// One pass (the default: a feedback loop steps once per frame).
+    Once,
+    /// `n` passes, each a sub-step of the frame: the body's `dt` is the
+    /// frame's divided by `n`.
+    SubSteps(u32),
+    /// `n` passes with the frame's `dt` (For-Each iterations).
+    Iterations(u32),
+}
+
+/// Most passes a loop makes per frame ([`Repeat`] counts are clamped to it).
+pub const MAX_REPEAT: u32 = 256;
+
+/// Bytes of uniforms a [`PointStage`] carries.
+pub const STAGE_BYTES: usize = 128;
+
+/// Most stages the engine fuses into one pass.
+pub const MAX_FUSED: usize = 64;
+
+/// A per-point operator as a stage the engine may fuse with its neighbours
+/// (design: `docs/design/geometry-attributes.md` §3.2, deformer fusion). A
+/// stage reads and writes only the point's own `P` (and `v`, `N`), so a
+/// straight run of stages can run as one kernel that loads each point once.
+#[derive(Debug, Clone, Copy)]
+pub struct PointStage {
+    /// Which stage function: the [`PointFuser`] knows each kind's code.
+    pub kind: &'static str,
+    /// The stage's uniforms, as its unfused kernel gets them.
+    pub uniforms: [u8; STAGE_BYTES],
+    /// The stage writes `v`, creating it at zero when it is missing.
+    pub velocity: bool,
+}
+
+/// Runs a straight run of [`PointStage`]s as one pass (registered with
+/// [`OpLibrary::set_point_fuser`]; one instance per run, keyed by the run's
+/// last node).
+pub trait PointFuser: Send {
+    /// Cooks `stages` over input 0 of `ctx` into `ctx.output`, as the run's
+    /// nodes would one by one. Returns `false`, having taken nothing and
+    /// recorded nothing, when it cannot (its pipeline is still being built,
+    /// or the input lacks what the stages need): the engine then cooks the
+    /// run's nodes one by one.
+    fn cook(&mut self, ctx: &mut GeoCtx<'_>, stages: &[PointStage]) -> bool;
+
+    /// Whether a pipeline is being built (see [`Engine::pending`]).
+    fn busy(&self) -> bool {
+        false
+    }
+}
+
+/// Creates a [`PointFuser`].
+pub type FuserFactory = Box<dyn Fn(&wgpu::Device) -> Box<dyn PointFuser> + Send + Sync>;
+
+/// A live GEO operator instance (one per node).
+pub trait GeoOp: Send {
+    fn cook(&mut self, ctx: &mut GeoCtx<'_>) -> Result<(), String>;
+
+    /// When this node heads a loop (it has a feedback GEO input wired from a
+    /// node downstream of it), how many passes the loop makes this frame.
+    /// Passes after the first are submitted separately, so uniforms written
+    /// in one pass are not overwritten by the next before they are used.
+    fn repeat(&self, _params: &Params<'_>) -> Repeat {
+        Repeat::Once
+    }
+
+    /// This node as a fusable per-point stage with these parameters and
+    /// step, or `None` (the default) when it is not one.
+    fn point_stage(&self, _params: &Params<'_>, _dt: f64) -> Option<PointStage> {
+        None
+    }
+
+    /// Runs once the frame's commands are submitted (start readbacks here).
+    fn after_submit(&mut self) {}
+
+    /// A short status line for the parameter panel, or `None`.
+    fn status(&self) -> Option<&str> {
+        None
+    }
+
+    /// Whether the output stays valid when [`Self::cook`] returns an error
+    /// (the error is reported, the result kept): an operator that keeps
+    /// running its last good version while an edit fails, so a simulation
+    /// fed by it does not restart. Otherwise an error clears the output.
+    fn keeps_output_on_error(&self) -> bool {
+        false
+    }
+}
+
+/// Creates a GEO operator instance.
+pub type GeoFactory = Box<dyn Fn(&wgpu::Device) -> Box<dyn GeoOp> + Send + Sync>;
+
+/// DAT inputs of a node, by input index. Does not allocate.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DatInputs<'a> {
+    sources: &'a [Option<NodeId>],
+    dat: Option<&'a HashMap<NodeId, Dat>>,
+}
+
+impl<'a> DatInputs<'a> {
+    /// Inputs given by source node per input index (for tests and tools).
+    pub fn new(sources: &'a [Option<NodeId>], dat: &'a HashMap<NodeId, Dat>) -> Self {
+        Self {
+            sources,
+            dat: Some(dat),
+        }
+    }
+
+    /// No DAT inputs.
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    /// The value on input `i`, if connected and cooked.
+    pub fn get(&self, i: usize) -> Option<&'a Dat> {
+        let n = self.sources.get(i).copied().flatten()?;
+        self.dat?.get(&n)
+    }
+
+    pub fn len(&self) -> usize {
+        self.sources.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.sources.is_empty()
+    }
+}
+
+/// The DAT side of a SIG operator: its DAT inputs, and its DAT output when
+/// its schema declares one (Speech to Text's transcript).
+#[derive(Debug, Default)]
+pub struct DatIo<'a> {
+    pub inputs: DatInputs<'a>,
+    /// This node's DAT value from its previous cook; replace it only when
+    /// the content changes ([`Dat::replace`]).
+    pub output: Option<&'a mut Dat>,
+}
+
+impl DatIo<'_> {
+    /// No DAT inputs or output (SIG operators without DAT sockets, tests).
+    pub fn none() -> Self {
+        Self::default()
+    }
+}
+
+/// Everything a DAT operator needs to cook one frame.
+#[derive(Debug)]
+pub struct DatCtx<'a> {
+    pub inputs: DatInputs<'a>,
+    /// SIG inputs by input index (a trigger, values to format).
+    pub sig_inputs: SigInputs<'a>,
+    /// This node's value from its previous cook (empty text at first).
+    /// Replace it only when the content changes ([`Dat::replace`]): an
+    /// unchanged value is how consumers know not to cook again.
+    pub output: &'a mut Dat,
+    pub params: Params<'a>,
+    /// A DAT input is a different value than at this node's last cook (or
+    /// this is its first cook).
+    pub inputs_changed: bool,
+    /// Seconds since the engine's time origin.
+    pub time: f64,
+    pub dt: f64,
+    pub frame: u64,
+    /// Set while work is in flight on a worker thread (a file read, a
+    /// request): the engine cooks the node again next frame to collect it.
+    pub cook_again: bool,
+}
+
+/// A live DAT operator instance (one per node). Must not wait for I/O:
+/// files, sockets and devices are read on worker threads it starts.
+pub trait DatOp: Send {
+    fn cook(&mut self, ctx: &mut DatCtx<'_>) -> Result<(), String>;
+
+    /// A short status line for the parameter panel, or `None`.
+    fn status(&self) -> Option<&str> {
+        None
+    }
+}
+
+/// Creates a DAT operator instance.
+pub type DatFactory = Box<dyn Fn() -> Box<dyn DatOp> + Send + Sync>;
+
+/// Everything a SIG operator needs to cook one frame.
+#[derive(Debug)]
+pub struct SigCtx<'a> {
+    pub inputs: SigInputs<'a>,
+    /// DAT inputs and output, for SIG operators with DAT sockets.
+    pub dat: DatIo<'a>,
+    /// This node's channels from its previous cook, to overwrite in place.
+    pub output: &'a mut Channels,
+    pub params: Params<'a>,
+    /// Seconds since the engine's time origin.
+    pub time: f64,
+    /// Seconds since the previous engine frame (0 on the first).
+    pub dt: f64,
+    pub frame: u64,
+}
+
+/// A live SIG operator instance (one per node). May keep state between
+/// cooks (lag, integrators, history).
+pub trait SigOp: Send {
+    fn cook(&mut self, ctx: &mut SigCtx<'_>) -> Result<(), String>;
+}
+
+/// Context for a GPU→SIG operator: image analysis (IMG inputs) or point
+/// readback (GEO inputs, PRD A65). GPU access to its inputs, recording into
+/// the frame's command encoder, and channels out.
+#[derive(Debug)]
+pub struct GpuToSigCtx<'a> {
+    pub device: &'a wgpu::Device,
+    pub queue: &'a wgpu::Queue,
+    pub encoder: &'a mut wgpu::CommandEncoder,
+    /// One entry per input socket; `None` if unconnected or not IMG.
+    pub inputs: &'a [Option<wgpu::Texture>],
+    /// GEO inputs by input index (`None` if unconnected or not GEO).
+    pub geo_inputs: GeoInputs<'a>,
+    /// An IMG or GEO input's source was cooked earlier this frame (its
+    /// value may have changed). False when the node is only cooking again
+    /// to collect results.
+    pub inputs_cooked: bool,
+    pub output: &'a mut Channels,
+    pub params: Params<'a>,
+    pub time: f64,
+    pub frame: u64,
+    /// Set while results are still on their way back from the GPU: the
+    /// engine cooks the node again next frame.
+    pub cook_again: bool,
+}
+
+/// An operator that reads images or points on the GPU and outputs channels.
+/// Results come back asynchronously: [`Self::after_submit`] runs once the
+/// frame's commands are submitted, where readback buffers may be mapped.
+/// Live it never waits for them (rule 1); offline it may submit the encoder
+/// recorded so far and wait, so frame `i` reads frame `i`'s values.
+pub trait GpuToSigOp: Send {
+    fn cook(&mut self, ctx: &mut GpuToSigCtx<'_>) -> Result<(), String>;
+    fn after_submit(&mut self) {}
+}
+
+/// Creates a GPU→SIG operator instance (IMG or GEO inputs, SIG outputs).
+pub type GpuToSigFactory = Box<dyn Fn(&wgpu::Device) -> Box<dyn GpuToSigOp> + Send + Sync>;
+
+/// Creates an IMG operator instance for the engine's device and output format.
+pub type OpFactory =
+    Box<dyn Fn(&wgpu::Device, wgpu::TextureFormat) -> Box<dyn GpuOp> + Send + Sync>;
+
+/// Creates a SIG operator instance.
+pub type SigFactory = Box<dyn Fn() -> Box<dyn SigOp> + Send + Sync>;
+
+/// Factories for every operator type the engine can run.
+#[derive(Default)]
+pub struct OpLibrary {
+    factories: HashMap<String, OpFactory>,
+    sig_factories: HashMap<String, SigFactory>,
+    analysis_factories: HashMap<String, GpuToSigFactory>,
+    geo_factories: HashMap<String, GeoFactory>,
+    mat_factories: HashMap<String, MatFactory>,
+    dat_factories: HashMap<String, DatFactory>,
+    fuser: Option<FuserFactory>,
+}
+
+impl std::fmt::Debug for OpLibrary {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut ids: Vec<_> = self
+            .factories
+            .keys()
+            .chain(self.sig_factories.keys())
+            .chain(self.analysis_factories.keys())
+            .chain(self.geo_factories.keys())
+            .chain(self.mat_factories.keys())
+            .chain(self.dat_factories.keys())
+            .collect();
+        ids.sort();
+        f.debug_struct("OpLibrary").field("types", &ids).finish()
+    }
+}
+
+impl OpLibrary {
+    /// Registers an IMG (GPU) operator implementation.
+    pub fn add(
+        &mut self,
+        type_id: impl Into<String>,
+        factory: impl Fn(&wgpu::Device, wgpu::TextureFormat) -> Box<dyn GpuOp> + Send + Sync + 'static,
+    ) {
+        self.factories.insert(type_id.into(), Box::new(factory));
+    }
+
+    /// Registers a SIG (CPU channel) operator implementation.
+    pub fn add_sig(
+        &mut self,
+        type_id: impl Into<String>,
+        factory: impl Fn() -> Box<dyn SigOp> + Send + Sync + 'static,
+    ) {
+        self.sig_factories.insert(type_id.into(), Box::new(factory));
+    }
+
+    /// Registers a GPU→SIG operator implementation: image analysis (IMG
+    /// inputs) or point readback (GEO inputs).
+    pub fn add_gpu_to_sig(
+        &mut self,
+        type_id: impl Into<String>,
+        factory: impl Fn(&wgpu::Device) -> Box<dyn GpuToSigOp> + Send + Sync + 'static,
+    ) {
+        self.analysis_factories
+            .insert(type_id.into(), Box::new(factory));
+    }
+
+    /// Sets the implementation that fuses runs of per-point stages
+    /// ([`GeoOp::point_stage`]); without one nothing is fused.
+    pub fn set_point_fuser(
+        &mut self,
+        factory: impl Fn(&wgpu::Device) -> Box<dyn PointFuser> + Send + Sync + 'static,
+    ) {
+        self.fuser = Some(Box::new(factory));
+    }
+
+    /// Registers a GEO operator implementation (an operator whose first
+    /// output is a `GEO` socket).
+    pub fn add_geo(
+        &mut self,
+        type_id: impl Into<String>,
+        factory: impl Fn(&wgpu::Device) -> Box<dyn GeoOp> + Send + Sync + 'static,
+    ) {
+        self.geo_factories.insert(type_id.into(), Box::new(factory));
+    }
+
+    /// Registers a MAT operator implementation (an operator whose first
+    /// output is a `MAT` socket).
+    pub fn add_mat(
+        &mut self,
+        type_id: impl Into<String>,
+        factory: impl Fn() -> Box<dyn MatOp> + Send + Sync + 'static,
+    ) {
+        self.mat_factories.insert(type_id.into(), Box::new(factory));
+    }
+
+    /// Registers a DAT operator implementation (an operator whose first
+    /// output is a `DAT` socket).
+    pub fn add_dat(
+        &mut self,
+        type_id: impl Into<String>,
+        factory: impl Fn() -> Box<dyn DatOp> + Send + Sync + 'static,
+    ) {
+        self.dat_factories.insert(type_id.into(), Box::new(factory));
+    }
+
+    pub fn contains(&self, type_id: &str) -> bool {
+        self.dat_factories.contains_key(type_id)
+            || self.factories.contains_key(type_id)
+            || self.sig_factories.contains_key(type_id)
+            || self.analysis_factories.contains_key(type_id)
+            || self.geo_factories.contains_key(type_id)
+            || self.mat_factories.contains_key(type_id)
+    }
+}
+
+/// Output resolution and format of the engine's textures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EngineConfig {
+    pub width: u32,
+    pub height: u32,
+    pub format: wgpu::TextureFormat,
+}
+
+impl Default for EngineConfig {
+    fn default() -> Self {
+        Self {
+            width: 1280,
+            height: 720,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum EngineError {
+    #[error(transparent)]
+    Graph(#[from] GraphError),
+    #[error(transparent)]
+    Plan(#[from] PlanError),
+}
+
+pub struct Engine {
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    registry: Registry,
+    library: OpLibrary,
+    config: EngineConfig,
+    net: Network,
+    history: History,
+    scheduler: Scheduler,
+    gpu_ops: HashMap<NodeId, Box<dyn GpuOp>>,
+    sig_ops: HashMap<NodeId, Box<dyn SigOp>>,
+    analysis_ops: HashMap<NodeId, Box<dyn GpuToSigOp>>,
+    geo_ops: HashMap<NodeId, Box<dyn GeoOp>>,
+    mat_ops: HashMap<NodeId, Box<dyn MatOp>>,
+    dat_ops: HashMap<NodeId, Box<dyn DatOp>>,
+    /// Fusers of runs of per-point stages, by the run's last node.
+    fusers: HashMap<NodeId, Box<dyn PointFuser>>,
+    /// Whether straight runs of per-point stages are fused (on by default).
+    fusion: bool,
+    /// Nodes cooked inside fused runs in the last frame.
+    fused: usize,
+    stages: Vec<PointStage>,
+    results: HashMap<NodeId, wgpu::Texture>,
+    sig: HashMap<NodeId, Channels>,
+    geo: HashMap<NodeId, Geometry>,
+    mat: HashMap<NodeId, Material>,
+    dat: HashMap<NodeId, Dat>,
+    /// The DAT inputs each DAT node last cooked with (change detection).
+    dat_seen: HashMap<NodeId, Vec<Option<Dat>>>,
+    errors: HashMap<NodeId, String>,
+    pool: TexturePool,
+    buffers: BufferPool,
+    /// Wires leaving each node (feedback wires included), for the GEO
+    /// hand-over; rebuilt on every edit.
+    consumers: HashMap<NodeId, u32>,
+    black: wgpu::Texture,
+    frame: u64,
+    last_time: Option<f64>,
+    // Per-frame scratch, reused.
+    plan: Vec<NodeId>,
+    /// The plan with loops unrolled into their passes ([`Repeat`]).
+    steps: Vec<Step>,
+    loop_after: HashSet<NodeId>,
+    loop_body: HashSet<NodeId>,
+    requested: Vec<NodeId>,
+    inputs: Vec<Option<wgpu::Texture>>,
+    sig_sources: Vec<Option<NodeId>>,
+    geo_sources: Vec<Option<NodeId>>,
+    mat_sources: Vec<Option<NodeId>>,
+    dat_sources: Vec<Option<NodeId>>,
+    handover: Vec<bool>,
+    /// Nodes that asked to cook again next frame ([`CookCtx::cook_again`]).
+    again: Vec<NodeId>,
+    released: Vec<wgpu::Texture>,
+    /// Folder of the open project: relative paths are relative to it.
+    project_dir: Option<PathBuf>,
+    /// Compiled parameter expressions (FR-P2, A22).
+    exprs: ExprTable,
+    /// Live parameter values (see [`LiveValues`]).
+    live: LiveValues,
+    /// Bumped by every change to the network (see [`Engine::revision`]).
+    revision: u64,
+    /// The Python worker for expressions outside the native subset.
+    python: Option<Box<dyn PythonHost>>,
+    /// The allow-list generation the expressions were last checked against
+    /// (`None`: not since the table was rebuilt).
+    py_checked: Option<u64>,
+    py_jobs: Vec<PyJob>,
+    py_results: Vec<(u64, Result<ExprValue, String>)>,
+    mode: CookMode,
+}
+
+impl std::fmt::Debug for Engine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Engine")
+            .field("nodes", &self.net.len())
+            .field("frame", &self.frame)
+            .field("config", &self.config)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Engine {
+    pub fn new(
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        registry: Registry,
+        library: OpLibrary,
+        config: EngineConfig,
+    ) -> Self {
+        let black = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("lsr-black"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: config.format,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let pool = TexturePool::new(device.clone());
+        let buffers = BufferPool::new(device.clone());
+        Self {
+            device,
+            queue,
+            registry,
+            library,
+            config,
+            net: Network::default(),
+            history: History::default(),
+            scheduler: Scheduler::default(),
+            gpu_ops: HashMap::new(),
+            sig_ops: HashMap::new(),
+            analysis_ops: HashMap::new(),
+            geo_ops: HashMap::new(),
+            mat_ops: HashMap::new(),
+            dat_ops: HashMap::new(),
+            fusers: HashMap::new(),
+            fusion: true,
+            fused: 0,
+            stages: Vec::new(),
+            results: HashMap::new(),
+            sig: HashMap::new(),
+            geo: HashMap::new(),
+            mat: HashMap::new(),
+            dat: HashMap::new(),
+            dat_seen: HashMap::new(),
+            errors: HashMap::new(),
+            pool,
+            buffers,
+            consumers: HashMap::new(),
+            black,
+            frame: 0,
+            last_time: None,
+            plan: Vec::new(),
+            steps: Vec::new(),
+            loop_after: HashSet::new(),
+            loop_body: HashSet::new(),
+            requested: Vec::new(),
+            inputs: Vec::new(),
+            sig_sources: Vec::new(),
+            geo_sources: Vec::new(),
+            mat_sources: Vec::new(),
+            dat_sources: Vec::new(),
+            handover: Vec::new(),
+            again: Vec::new(),
+            released: Vec::new(),
+            project_dir: None,
+            exprs: ExprTable::default(),
+            live: LiveValues::default(),
+            revision: 0,
+            python: None,
+            py_checked: None,
+            py_jobs: Vec::new(),
+            py_results: Vec::new(),
+            mode: CookMode::Live,
+        }
+    }
+
+    /// Switches between live cooking (the default) and offline rendering
+    /// (FR-H1). Set it before the first cook: operators keep state.
+    pub fn set_mode(&mut self, mode: CookMode) {
+        self.mode = mode;
+    }
+
+    pub fn mode(&self) -> CookMode {
+        self.mode
+    }
+
+    /// Turns the fusion of straight runs of per-point stages on (the
+    /// default) or off. Fused and unfused runs give the same results.
+    pub fn set_fusion(&mut self, on: bool) {
+        self.fusion = on;
+    }
+
+    /// How many nodes cooked inside fused runs in the last frame.
+    pub fn fused_last_frame(&self) -> usize {
+        self.fused
+    }
+
+    /// Numbers the next cook `frame` (operators see it as their frame
+    /// index); an offline render starting part-way sets its first frame.
+    pub fn set_frame(&mut self, frame: u64) {
+        self.frame = frame;
+    }
+
+    /// Sets (`Some`) or clears (`None`) the live value of `node`'s
+    /// `param`: it wins over the parameter's binding, expression and stored
+    /// value until cleared, is not an edit (no undo step, not saved) and
+    /// marks the node for cooking when it changes. For MIDI/OSC mappings and
+    /// the timeline (M3); unknown nodes are ignored.
+    /// Allocates nothing when a value of the same shape changes.
+    pub fn set_live(&mut self, node: NodeId, param: &str, value: Option<&Value>) {
+        if self.net.node(node).is_none() {
+            return;
+        }
+        if self.live.set(node, param, value) {
+            self.scheduler.mark_dirty_one(&self.net, node);
+        }
+    }
+
+    /// Clears the live value of `node`'s `param` only if it is still
+    /// `value`: a writer (the timeline, a mapping) releases what it set
+    /// without clearing what another writer set since. Whether it cleared.
+    pub fn clear_live_if(&mut self, node: NodeId, param: &str, value: &Value) -> bool {
+        if self.live.get(node, param) != Some(value) {
+            return false;
+        }
+        self.live.set(node, param, None);
+        self.scheduler.mark_dirty_one(&self.net, node);
+        true
+    }
+
+    /// Clears every live value (for example when a show stops).
+    pub fn clear_live(&mut self) {
+        let nodes = self.live.clear();
+        self.scheduler.mark_dirty(&self.net, nodes);
+    }
+
+    /// The live values set now.
+    pub fn live_values(&self) -> &LiveValues {
+        &self.live
+    }
+
+    /// The value `param`'s expression gave on `node`'s last cook (for
+    /// display; `None` without an expression or while it fails).
+    pub fn expression_value(&self, node: NodeId, param: &str) -> Option<ExprValue> {
+        self.exprs.value(node, param)
+    }
+
+    /// Component `i` of a vector or colour parameter as `node` reads it
+    /// now ([`Params::component`]): with bindings and expressions from the
+    /// last cook, and live values unless `with_live` is false (a timeline
+    /// filling the components it does not key).
+    pub fn param_component(
+        &self,
+        node: NodeId,
+        param: &str,
+        i: usize,
+        with_live: bool,
+    ) -> Option<f64> {
+        let params = Params {
+            net: &self.net,
+            registry: &self.registry,
+            sig: &self.sig,
+            node,
+            project_dir: None,
+            exprs: Some(&self.exprs),
+            live: with_live.then_some(&self.live),
+            mode: self.mode,
+        };
+        params.component(param, i)
+    }
+
+    /// A number, integer or toggle parameter as `node` reads it now
+    /// ([`Params::number`]): with bindings and expressions from the last
+    /// cook, and live values unless `with_live` is false (a timeline
+    /// condition reading it).
+    pub fn param_number(&self, node: NodeId, param: &str, with_live: bool) -> Option<f64> {
+        let params = Params {
+            net: &self.net,
+            registry: &self.registry,
+            sig: &self.sig,
+            node,
+            project_dir: None,
+            exprs: Some(&self.exprs),
+            live: with_live.then_some(&self.live),
+            mode: self.mode,
+        };
+        params.number(param)
+    }
+
+    /// Component `i` of a vector or colour parameter as its binding or
+    /// expression drove it on the last cook, ignoring live values; `None`
+    /// when neither drives it (a mapping filling the components it does
+    /// not write).
+    pub fn driven_component(&self, node: NodeId, param: &str, i: usize) -> Option<f64> {
+        let p = self.net.node(node)?.params.get(param)?;
+        if p.bind.is_none() && p.expr.is_none() {
+            return None;
+        }
+        self.param_component(node, param, i, false)
+    }
+
+    /// Attaches the Python worker that evaluates expressions outside the
+    /// native subset (`lsr-py`). Without one they report an error.
+    pub fn set_python(&mut self, host: Box<dyn PythonHost>) {
+        self.python = Some(host);
+    }
+
+    /// Recompiles expressions after the network changed; returns nodes whose
+    /// expressions now read different nodes.
+    fn rebuild_exprs(&mut self) -> Vec<NodeId> {
+        let (table, extra, changed) = ExprTable::build(&self.net, &self.registry, &mut self.exprs);
+        self.exprs = table;
+        self.scheduler.set_extra(extra);
+        // Python entries are offered to the worker once checked against the
+        // allow-list (next cook).
+        self.py_checked = None;
+        self.py_jobs.clear();
+        changed
+    }
+
+    /// Sets the folder relative paths in parameters are relative to (the
+    /// open project's). Set it before [`Engine::load`]: operators resolve a
+    /// path when it changes.
+    pub fn set_project_dir(&mut self, dir: Option<PathBuf>) {
+        self.project_dir = dir;
+    }
+
+    pub fn project_dir(&self) -> Option<&Path> {
+        self.project_dir.as_deref()
+    }
+
+    /// Changes the project resolution (generators' output size); every
+    /// node cooks again.
+    pub fn set_resolution(&mut self, width: u32, height: u32) {
+        let max = self.device.limits().max_texture_dimension_2d;
+        let (width, height) = (width.clamp(1, max), height.clamp(1, max));
+        if (width, height) == (self.config.width, self.config.height) {
+            return;
+        }
+        self.config.width = width;
+        self.config.height = height;
+        let all: Vec<NodeId> = self.net.nodes().map(|n| n.id).collect();
+        self.scheduler.mark_dirty(&self.net, all);
+    }
+
+    pub fn network(&self) -> &Network {
+        &self.net
+    }
+
+    /// Adds operator types (a project's own shaders). Operators already in
+    /// use must not be removed; load the network after extending.
+    pub fn extend<R>(&mut self, f: impl FnOnce(&mut Registry, &mut OpLibrary) -> R) -> R {
+        f(&mut self.registry, &mut self.library)
+    }
+
+    pub fn registry(&self) -> &Registry {
+        &self.registry
+    }
+
+    pub fn history(&self) -> &History {
+        &self.history
+    }
+
+    pub fn config(&self) -> EngineConfig {
+        self.config
+    }
+
+    pub fn pool(&self) -> &TexturePool {
+        &self.pool
+    }
+
+    /// The attribute buffer pool of GEO results.
+    pub fn buffer_pool(&self) -> &BufferPool {
+        &self.buffers
+    }
+
+    pub fn device(&self) -> &wgpu::Device {
+        &self.device
+    }
+
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.queue
+    }
+
+    /// Reserves an ID for a node about to be added with [`Edit::AddNode`].
+    pub fn alloc_id(&mut self) -> NodeId {
+        self.net.alloc_id()
+    }
+
+    /// Reserves an ID for a new comment box.
+    pub fn alloc_comment_id(&mut self) -> lsr_core::graph::CommentId {
+        self.net.alloc_comment_id()
+    }
+
+    /// Applies `edits` as one undo step.
+    pub fn edit(
+        &mut self,
+        label: &str,
+        edits: impl IntoIterator<Item = Edit>,
+    ) -> Result<(), EngineError> {
+        let committed = self
+            .history
+            .commit(&mut self.net, &self.registry, label, edits)?;
+        self.after_change(committed.dirty);
+        Ok(())
+    }
+
+    /// Applies `edits`, merging with the previous step while `key` repeats
+    /// and the history is not sealed (one undo step per gesture).
+    pub fn edit_coalesced(
+        &mut self,
+        label: &str,
+        key: &str,
+        edits: impl IntoIterator<Item = Edit>,
+    ) -> Result<(), EngineError> {
+        let committed =
+            self.history
+                .commit_coalesced(&mut self.net, &self.registry, label, key, edits)?;
+        self.after_change(committed.dirty);
+        Ok(())
+    }
+
+    /// Ends the current gesture (see [`Self::edit_coalesced`]).
+    pub fn seal_history(&mut self) {
+        self.history.seal();
+    }
+
+    pub fn undo(&mut self) -> Result<bool, EngineError> {
+        let Some(c) = self.history.undo(&mut self.net, &self.registry)? else {
+            return Ok(false);
+        };
+        self.after_change(c.dirty);
+        Ok(true)
+    }
+
+    pub fn redo(&mut self) -> Result<bool, EngineError> {
+        let Some(c) = self.history.redo(&mut self.net, &self.registry)? else {
+            return Ok(false);
+        };
+        self.after_change(c.dirty);
+        Ok(true)
+    }
+
+    /// A counter bumped by every change to the network: each applied
+    /// edit, undo, redo and load. Views that derive a model from the
+    /// network (the Stage) re-read it only when this moves.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    fn after_change(&mut self, dirty: Vec<NodeId>) {
+        self.revision += 1;
+        let net = &self.net;
+        self.live.nodes.retain(|id, _| net.node(*id).is_some());
+        let alive = |id: &NodeId| self.net.node(*id).is_some();
+        let removed: Vec<NodeId> = self
+            .gpu_ops
+            .keys()
+            .chain(self.sig_ops.keys())
+            .chain(self.analysis_ops.keys())
+            .chain(self.geo_ops.keys())
+            .chain(self.mat_ops.keys())
+            .chain(self.dat_ops.keys())
+            .chain(self.dat.keys())
+            .chain(self.results.keys())
+            .chain(self.sig.keys())
+            .chain(self.geo.keys())
+            .chain(self.mat.keys())
+            .copied()
+            .filter(|id| !alive(id))
+            .collect();
+        for id in removed {
+            self.gpu_ops.remove(&id);
+            self.sig_ops.remove(&id);
+            self.analysis_ops.remove(&id);
+            self.geo_ops.remove(&id);
+            self.fusers.remove(&id);
+            self.mat_ops.remove(&id);
+            self.mat.remove(&id);
+            self.dat_ops.remove(&id);
+            self.dat.remove(&id);
+            self.dat_seen.remove(&id);
+            self.sig.remove(&id);
+            // Its buffers return to the pool, reusable after the next submit.
+            self.geo.remove(&id);
+            self.errors.remove(&id);
+            self.scheduler.forget(id);
+            if let Some(t) = self.results.remove(&id) {
+                // Not yet safe to reuse if a submitted frame still reads it;
+                // it joins the next frame's release list.
+                self.released.push(t);
+            }
+        }
+        let mut dirty: Vec<NodeId> = dirty
+            .into_iter()
+            .filter(|id| self.net.node(*id).is_some())
+            .collect();
+        dirty.extend(self.rebuild_exprs());
+        self.scheduler.mark_dirty(&self.net, dirty);
+        count_consumers(&self.net, &mut self.consumers);
+    }
+
+    /// Cooks what `requested` needs at `time` (seconds) and submits it.
+    /// Returns how many node-cooks it made (0 when everything was cached; a
+    /// node in a loop that makes several passes counts once per pass).
+    pub fn cook(&mut self, requested: &[NodeId], time: f64) -> Result<usize, EngineError> {
+        if !self.again.is_empty() {
+            let net = &self.net;
+            let again = self
+                .again
+                .iter()
+                .copied()
+                .filter(|id| net.node(*id).is_some());
+            self.scheduler.mark_dirty(net, again);
+            self.again.clear();
+        }
+        let Self {
+            device,
+            queue,
+            registry,
+            library,
+            config,
+            net,
+            scheduler,
+            gpu_ops,
+            sig_ops,
+            analysis_ops,
+            geo_ops,
+            mat_ops,
+            dat_ops,
+            fusers,
+            fusion,
+            fused,
+            stages,
+            results,
+            sig,
+            geo,
+            mat,
+            dat,
+            dat_seen,
+            errors,
+            pool,
+            buffers,
+            consumers,
+            black,
+            frame,
+            last_time,
+            plan,
+            steps,
+            loop_after,
+            loop_body,
+            inputs,
+            sig_sources,
+            geo_sources,
+            mat_sources,
+            dat_sources,
+            handover,
+            released,
+            again,
+            project_dir,
+            exprs,
+            live,
+            python,
+            py_checked,
+            py_jobs,
+            py_results,
+            mode,
+            ..
+        } = self;
+        let mode = *mode;
+        // The allow-list: each Python expression is offered to the worker
+        // only while its exact content is allowed. Checked when the table or
+        // the list changed, never per frame.
+        if let Some(py) = python.as_ref() {
+            let generation = py.generation();
+            if *py_checked != Some(generation) {
+                *py_checked = Some(generation);
+                exprs.check_python(|node, param, source| py.allows(node, param, source));
+                exprs.python_jobs(net, py_jobs);
+            }
+        }
+        // Python results computed from the last frame's values (offline,
+        // every one of them: the previous frame waited for the worker).
+        match python.as_mut() {
+            Some(py) => {
+                py.collect(py_results);
+                exprs.apply_python(py_results);
+            }
+            None if exprs.has_python() => exprs.no_python(),
+            None => {}
+        }
+        for (&id, op) in gpu_ops.iter() {
+            let params = Params {
+                net,
+                registry,
+                sig,
+                node: id,
+                project_dir: project_dir.as_deref(),
+                exprs: Some(exprs),
+                live: Some(live),
+                mode,
+            };
+            let idle = op.needed_inputs(&params).map_or(0, |needed| !needed);
+            scheduler.set_idle_inputs(id, idle);
+        }
+        scheduler.plan(net, registry, requested, plan)?;
+        // Offline every frame is exactly one step long, the first included.
+        let dt = mode
+            .step()
+            .unwrap_or_else(|| last_time.map_or(0.0, |t| (time - t).max(0.0)));
+        *last_time = Some(time);
+        let key = TexKey {
+            width: config.width,
+            height: config.height,
+            format: config.format,
+            usage: ENGINE_USAGE,
+        };
+        unroll_loops(
+            &Unroll {
+                net,
+                registry,
+                library,
+                sig,
+                dat,
+                exprs,
+                live,
+                project_dir: project_dir.as_deref(),
+                mode,
+                time,
+                frame: *frame,
+                plan,
+            },
+            device,
+            geo_ops,
+            steps,
+            loop_after,
+            loop_body,
+        );
+        let frame_dt = dt;
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("lsr-cook"),
+        });
+
+        *fused = 0;
+        // Steps before this index are not fused this frame: the rest of a
+        // run whose fuser could not cook it (its pipeline is being built).
+        let mut unfused_until = 0;
+        let mut at = 0;
+        while at < steps.len() {
+            let step = steps[at];
+            at += 1;
+            let id = step.node;
+            if step.flush {
+                // A new pass of a loop: what the previous pass recorded runs
+                // with the uniforms it wrote.
+                let done = std::mem::replace(
+                    &mut encoder,
+                    device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("lsr-cook"),
+                    }),
+                );
+                queue.submit([done.finish()]);
+            }
+            let dt = if step.substeps {
+                frame_dt / f64::from(step.iterations)
+            } else {
+                frame_dt
+            };
+            let start = Instant::now();
+            let node = net.node(id).expect("planned nodes exist");
+            let Some(schema) = registry.get(&node.type_id) else {
+                continue;
+            };
+            if !exprs.is_empty() {
+                crate::expr::Ctx {
+                    net,
+                    registry,
+                    sig,
+                    dat,
+                    table: exprs,
+                    live,
+                    time,
+                    frame: *frame as f64,
+                }
+                .eval_node(id);
+            }
+            let is_sig = schema
+                .outputs
+                .first()
+                .is_some_and(|o| o.wire == WireType::Sig);
+            let is_geo = schema
+                .outputs
+                .first()
+                .is_some_and(|o| o.wire == WireType::Geo);
+            let is_mat = schema
+                .outputs
+                .first()
+                .is_some_and(|o| o.wire == WireType::Mat);
+            let is_dat = schema
+                .outputs
+                .first()
+                .is_some_and(|o| o.wire == WireType::Dat);
+
+            if is_dat {
+                if let std::collections::hash_map::Entry::Vacant(slot) = dat_ops.entry(id) {
+                    match library.dat_factories.get(&node.type_id) {
+                        Some(f) => {
+                            slot.insert(f());
+                        }
+                        None => {
+                            errors.insert(
+                                id,
+                                format!("no DAT implementation for `{}`", node.type_id),
+                            );
+                            dat.remove(&id);
+                            scheduler.record(id, start.elapsed());
+                            continue;
+                        }
+                    }
+                }
+                dat_sources.clear();
+                sig_sources.clear();
+                // A non-DAT input (a trigger channel) whose source cooked.
+                let mut others_cooked = false;
+                for socket in &schema.inputs {
+                    let src = net
+                        .inputs_of(id)
+                        .find(|(name, _)| *name == socket.name)
+                        .map(|(_, src)| src.node);
+                    dat_sources.push(src.filter(|_| socket.wire == WireType::Dat));
+                    sig_sources.push(src.filter(|_| socket.wire == WireType::Sig));
+                    others_cooked |=
+                        socket.wire != WireType::Dat && src.is_some_and(|s| plan.contains(&s));
+                }
+                let seen = dat_seen.entry(id).or_default();
+                let inputs_changed = !dat.contains_key(&id)
+                    || seen.len() != dat_sources.len()
+                    || dat_sources.iter().zip(seen.iter()).any(|(src, old)| {
+                        match (src.and_then(|s| dat.get(&s)), old) {
+                            (None, None) => false,
+                            (Some(now), Some(old)) => !Dat::ptr_eq(now, old),
+                            _ => true,
+                        }
+                    });
+                // Planned only because a source cooked, and every DAT input
+                // is the value it saw last time: its result stands.
+                let unchanged = !inputs_changed
+                    && !others_cooked
+                    && !schema.time_dependent
+                    && !scheduler.is_dirty(id)
+                    && !exprs.has(id)
+                    && !net.bindings_of(id).any(|b| plan.contains(&b.node));
+                if unchanged {
+                    continue;
+                }
+                seen.clear();
+                seen.extend(
+                    dat_sources
+                        .iter()
+                        .map(|s| s.and_then(|s| dat.get(&s)).cloned()),
+                );
+                let mut out = dat.remove(&id).unwrap_or_default();
+                let mut ctx = DatCtx {
+                    inputs: DatInputs {
+                        sources: dat_sources,
+                        dat: Some(dat),
+                    },
+                    sig_inputs: SigInputs {
+                        sources: sig_sources,
+                        sig,
+                    },
+                    output: &mut out,
+                    params: Params {
+                        net,
+                        registry,
+                        sig,
+                        node: id,
+                        project_dir: project_dir.as_deref(),
+                        exprs: Some(exprs),
+                        live: Some(live),
+                        mode,
+                    },
+                    inputs_changed,
+                    time,
+                    dt,
+                    frame: *frame,
+                    cook_again: false,
+                };
+                let op = dat_ops.get_mut(&id).expect("instance created above");
+                let result = op.cook(&mut ctx);
+                if ctx.cook_again {
+                    again.push(id);
+                }
+                match result {
+                    Ok(()) => settle(errors, exprs, id),
+                    // The last good value stays (a failed request keeps the
+                    // previous response).
+                    Err(e) => {
+                        errors.insert(id, e);
+                    }
+                }
+                dat.insert(id, out);
+                scheduler.record(id, start.elapsed());
+                continue;
+            }
+
+            if is_mat {
+                if let std::collections::hash_map::Entry::Vacant(slot) = mat_ops.entry(id) {
+                    match library.mat_factories.get(&node.type_id) {
+                        Some(f) => {
+                            slot.insert(f());
+                        }
+                        None => {
+                            errors.insert(
+                                id,
+                                format!("no MAT implementation for `{}`", node.type_id),
+                            );
+                            mat.remove(&id);
+                            scheduler.record(id, start.elapsed());
+                            continue;
+                        }
+                    }
+                }
+                // The texture is the first IMG input; the renderer looks its
+                // image up when it draws.
+                let texture_source = schema
+                    .inputs
+                    .iter()
+                    .find(|s| s.wire == WireType::Img)
+                    .and_then(|socket| {
+                        net.inputs_of(id)
+                            .find(|(name, _)| *name == socket.name)
+                            .map(|(_, src)| src.node)
+                    });
+                let mut out = mat.remove(&id).unwrap_or_default();
+                let mut ctx = MatCtx {
+                    output: &mut out,
+                    params: Params {
+                        net,
+                        registry,
+                        sig,
+                        node: id,
+                        project_dir: project_dir.as_deref(),
+                        exprs: Some(exprs),
+                        live: Some(live),
+                        mode,
+                    },
+                    has_texture: texture_source.is_some_and(|s| results.contains_key(&s)),
+                    time,
+                    frame: *frame,
+                };
+                let op = mat_ops.get_mut(&id).expect("instance created above");
+                match op.cook(&mut ctx) {
+                    Ok(()) => settle(errors, exprs, id),
+                    Err(e) => {
+                        errors.insert(id, e);
+                    }
+                }
+                out.texture_source = texture_source;
+                mat.insert(id, out);
+                scheduler.record(id, start.elapsed());
+                continue;
+            }
+
+            if is_geo {
+                if let std::collections::hash_map::Entry::Vacant(slot) = geo_ops.entry(id) {
+                    match library.geo_factories.get(&node.type_id) {
+                        Some(f) => {
+                            slot.insert(f(device));
+                        }
+                        None => {
+                            errors.insert(
+                                id,
+                                format!("no GEO implementation for `{}`", node.type_id),
+                            );
+                            geo.remove(&id);
+                            scheduler.record(id, start.elapsed());
+                            continue;
+                        }
+                    }
+                }
+                let sources = GeoSources {
+                    net,
+                    plan,
+                    requested,
+                    consumers,
+                    scheduler,
+                    results,
+                };
+                // A straight run of per-point stages from here: one pass.
+                if *fusion
+                    && at > unfused_until
+                    && let Some(make) = &library.fuser
+                {
+                    stages.clear();
+                    let params = |n: NodeId| Params {
+                        net,
+                        registry,
+                        sig,
+                        node: n,
+                        project_dir: project_dir.as_deref(),
+                        exprs: Some(exprs),
+                        live: Some(live),
+                        mode,
+                    };
+                    let mut last = at - 1;
+                    if let Some(first) = geo_ops[&id].point_stage(&params(id), dt) {
+                        stages.push(first);
+                        while stages.len() < MAX_FUSED {
+                            let Some(next) = steps.get(last + 1) else {
+                                break;
+                            };
+                            let prev = steps[last].node;
+                            if next.flush
+                                || next.iteration != step.iteration
+                                || !sources.only_geo_reader(registry, prev, next.node)
+                            {
+                                break;
+                            }
+                            let b = next.node;
+                            let Some(bn) = net.node(b) else { break };
+                            if let std::collections::hash_map::Entry::Vacant(slot) =
+                                geo_ops.entry(b)
+                            {
+                                let Some(f) = library.geo_factories.get(&bn.type_id) else {
+                                    break;
+                                };
+                                slot.insert(f(device));
+                            }
+                            if !exprs.is_empty() {
+                                crate::expr::Ctx {
+                                    net,
+                                    registry,
+                                    sig,
+                                    dat,
+                                    table: exprs,
+                                    live,
+                                    time,
+                                    frame: *frame as f64,
+                                }
+                                .eval_node(b);
+                            }
+                            let Some(stage) = geo_ops[&b].point_stage(&params(b), dt) else {
+                                break;
+                            };
+                            stages.push(stage);
+                            last += 1;
+                        }
+                    }
+                    if stages.len() >= 2 {
+                        let end = steps[last].node;
+                        sources.fill(schema, id, inputs, sig_sources, geo_sources, handover);
+                        let fuser = fusers.entry(end).or_insert_with(|| make(device));
+                        let mut out = geo.remove(&end).unwrap_or_default();
+                        let mut ctx = GeoCtx {
+                            device,
+                            queue,
+                            encoder: &mut encoder,
+                            buffers,
+                            images: inputs,
+                            sig_inputs: SigInputs {
+                                sources: sig_sources,
+                                sig,
+                            },
+                            output: &mut out,
+                            params: params(end),
+                            time,
+                            dt,
+                            frame: *frame,
+                            iteration: step.iteration,
+                            iterations: step.iterations,
+                            cook_again: false,
+                            node: end,
+                            sources: geo_sources,
+                            handover,
+                            geo,
+                        };
+                        let done = fuser.cook(&mut ctx, stages);
+                        geo.insert(end, out);
+                        if done {
+                            // The run's inner results are never read (each
+                            // has one reader, in the run): release them.
+                            let took = start.elapsed() / (stages.len() as u32);
+                            for s in &steps[at - 1..=last] {
+                                let n = s.node;
+                                if n != end {
+                                    geo.remove(&n);
+                                }
+                                settle(errors, exprs, n);
+                                scheduler.record(n, took);
+                            }
+                            *fused += stages.len();
+                            at = last + 1;
+                            continue;
+                        }
+                        // The whole run cooks unfused this frame (fusing its
+                        // tail would ask the fuser for other pipelines).
+                        unfused_until = last + 1;
+                    }
+                }
+                sources.fill(schema, id, inputs, sig_sources, geo_sources, handover);
+                let mut out = geo.remove(&id).unwrap_or_default();
+                let mut ctx = GeoCtx {
+                    device,
+                    queue,
+                    encoder: &mut encoder,
+                    buffers,
+                    images: inputs,
+                    sig_inputs: SigInputs {
+                        sources: sig_sources,
+                        sig,
+                    },
+                    output: &mut out,
+                    params: Params {
+                        net,
+                        registry,
+                        sig,
+                        node: id,
+                        project_dir: project_dir.as_deref(),
+                        exprs: Some(exprs),
+                        live: Some(live),
+                        mode,
+                    },
+                    time,
+                    dt,
+                    frame: *frame,
+                    iteration: step.iteration,
+                    iterations: step.iterations,
+                    cook_again: false,
+                    node: id,
+                    sources: geo_sources,
+                    handover,
+                    geo,
+                };
+                let op = geo_ops.get_mut(&id).expect("instance created above");
+                let result = op.cook(&mut ctx);
+                if ctx.cook_again {
+                    again.push(id);
+                }
+                match result {
+                    Ok(()) => settle(errors, exprs, id),
+                    Err(e) => {
+                        errors.insert(id, e);
+                        if !op.keeps_output_on_error() {
+                            out.clear();
+                        }
+                    }
+                }
+                geo.insert(id, out);
+                scheduler.record(id, start.elapsed());
+                continue;
+            }
+
+            if is_sig && let Some(factory) = library.analysis_factories.get(&node.type_id) {
+                let op = analysis_ops.entry(id).or_insert_with(|| factory(device));
+                inputs.clear();
+                geo_sources.clear();
+                let mut inputs_cooked = false;
+                for socket in &schema.inputs {
+                    let src = net
+                        .inputs_of(id)
+                        .find(|(name, _)| *name == socket.name)
+                        .map(|(_, src)| src.node)
+                        .filter(|_| matches!(socket.wire, WireType::Img | WireType::Geo));
+                    // The plan is in dependency order: sources come first.
+                    inputs_cooked |= src.is_some_and(|s| plan.contains(&s));
+                    let img = src.filter(|_| socket.wire == WireType::Img);
+                    inputs.push(img.and_then(|s| results.get(&s)).cloned());
+                    geo_sources.push(src.filter(|_| socket.wire == WireType::Geo));
+                }
+                let mut out = sig.remove(&id).unwrap_or_default();
+                let mut ctx = GpuToSigCtx {
+                    device,
+                    queue,
+                    encoder: &mut encoder,
+                    inputs,
+                    geo_inputs: GeoInputs {
+                        sources: geo_sources,
+                        geo,
+                    },
+                    inputs_cooked,
+                    output: &mut out,
+                    params: Params {
+                        net,
+                        registry,
+                        sig,
+                        node: id,
+                        project_dir: project_dir.as_deref(),
+                        exprs: Some(exprs),
+                        live: Some(live),
+                        mode,
+                    },
+                    time,
+                    frame: *frame,
+                    cook_again: false,
+                };
+                let result = op.cook(&mut ctx);
+                if ctx.cook_again {
+                    again.push(id);
+                }
+                match result {
+                    Ok(()) => settle(errors, exprs, id),
+                    Err(e) => {
+                        errors.insert(id, e);
+                    }
+                }
+                sig.insert(id, out);
+                scheduler.record(id, start.elapsed());
+                continue;
+            }
+
+            if is_sig {
+                if let std::collections::hash_map::Entry::Vacant(slot) = sig_ops.entry(id) {
+                    match library.sig_factories.get(&node.type_id) {
+                        Some(f) => {
+                            slot.insert(f());
+                        }
+                        None => {
+                            errors.insert(id, format!("no implementation for `{}`", node.type_id));
+                            sig.remove(&id);
+                            scheduler.record(id, start.elapsed());
+                            continue;
+                        }
+                    }
+                }
+                sig_sources.clear();
+                dat_sources.clear();
+                for socket in &schema.inputs {
+                    let src = net
+                        .inputs_of(id)
+                        .find(|(name, _)| *name == socket.name)
+                        .map(|(_, src)| src.node);
+                    sig_sources.push(src.filter(|_| socket.wire == WireType::Sig));
+                    dat_sources.push(src.filter(|_| socket.wire == WireType::Dat));
+                }
+                let mut out = sig.remove(&id).unwrap_or_default();
+                let mut dat_out = schema
+                    .outputs
+                    .iter()
+                    .any(|o| o.wire == WireType::Dat)
+                    .then(|| dat.remove(&id).unwrap_or_default());
+                let mut ctx = SigCtx {
+                    inputs: SigInputs {
+                        sources: sig_sources,
+                        sig,
+                    },
+                    dat: DatIo {
+                        inputs: DatInputs {
+                            sources: dat_sources,
+                            dat: Some(dat),
+                        },
+                        output: dat_out.as_mut(),
+                    },
+                    output: &mut out,
+                    params: Params {
+                        net,
+                        registry,
+                        sig,
+                        node: id,
+                        project_dir: project_dir.as_deref(),
+                        exprs: Some(exprs),
+                        live: Some(live),
+                        mode,
+                    },
+                    time,
+                    dt,
+                    frame: *frame,
+                };
+                let op = sig_ops.get_mut(&id).expect("instance created above");
+                match op.cook(&mut ctx) {
+                    Ok(()) => settle(errors, exprs, id),
+                    Err(e) => {
+                        errors.insert(id, e);
+                    }
+                }
+                sig.insert(id, out);
+                if let Some(d) = dat_out {
+                    dat.insert(id, d);
+                }
+                scheduler.record(id, start.elapsed());
+                continue;
+            }
+
+            if let std::collections::hash_map::Entry::Vacant(slot) = gpu_ops.entry(id) {
+                match library.factories.get(&node.type_id) {
+                    Some(f) => {
+                        slot.insert(f(device, config.format));
+                    }
+                    None => {
+                        errors.insert(id, format!("no GPU implementation for `{}`", node.type_id));
+                        if let Some(old) = results.remove(&id) {
+                            released.push(old);
+                        }
+                        scheduler.record(id, start.elapsed());
+                        continue;
+                    }
+                }
+            }
+
+            inputs.clear();
+            sig_sources.clear();
+            geo_sources.clear();
+            mat_sources.clear();
+            // Size of the first connected IMG input (feedback inputs carry
+            // last frame's image and do not set the size).
+            let mut input_size = None;
+            let mut inputs_cooked = false;
+            for socket in &schema.inputs {
+                let src = net
+                    .inputs_of(id)
+                    .find(|(name, _)| *name == socket.name)
+                    .map(|(_, src)| src.node);
+                // The plan is in dependency order: sources come first.
+                inputs_cooked |= !socket.feedback && src.is_some_and(|s| plan.contains(&s));
+                let tex = src.and_then(|s| results.get(&s)).cloned();
+                if input_size.is_none()
+                    && socket.wire == WireType::Img
+                    && !socket.feedback
+                    && let Some(t) = &tex
+                {
+                    input_size = Some((t.width(), t.height()));
+                }
+                inputs.push(tex);
+                sig_sources.push(src.filter(|_| socket.wire == WireType::Sig));
+                geo_sources.push(src.filter(|_| socket.wire == WireType::Geo));
+                mat_sources.push(src.filter(|_| socket.wire == WireType::Mat));
+            }
+
+            let project = (config.width, config.height);
+            let wanted = gpu_ops
+                .get(&id)
+                .and_then(|op| {
+                    op.output_size(
+                        &Params {
+                            net,
+                            registry,
+                            sig,
+                            node: id,
+                            project_dir: project_dir.as_deref(),
+                            exprs: Some(exprs),
+                            live: Some(live),
+                            mode,
+                        },
+                        input_size,
+                        project,
+                    )
+                })
+                .or(input_size)
+                .unwrap_or(project);
+            let max = device.limits().max_texture_dimension_2d;
+            let output = pool.acquire(TexKey {
+                width: wanted.0.clamp(1, max),
+                height: wanted.1.clamp(1, max),
+                ..key
+            });
+            if mode.is_offline() {
+                // A pooled texture holds whatever it last held. Operators
+                // overwrite their whole output, and offline this guarantees
+                // it: no frame depends on the pool's history.
+                clear_texture(&mut encoder, &output);
+            }
+            let mut ctx = CookCtx {
+                device,
+                queue,
+                encoder: &mut encoder,
+                inputs,
+                inputs_cooked,
+                sig_inputs: SigInputs {
+                    sources: sig_sources,
+                    sig,
+                },
+                geo_inputs: GeoInputs {
+                    sources: geo_sources,
+                    geo,
+                },
+                mat_inputs: MatInputs {
+                    sources: mat_sources,
+                    mat,
+                    images: results,
+                },
+                buffers,
+                black,
+                output: &output,
+                params: Params {
+                    net,
+                    registry,
+                    sig,
+                    node: id,
+                    project_dir: project_dir.as_deref(),
+                    exprs: Some(exprs),
+                    live: Some(live),
+                    mode,
+                },
+                time,
+                frame: *frame,
+                cook_again: false,
+            };
+            let op = gpu_ops.get_mut(&id).expect("instance created above");
+            let result = op.cook(&mut ctx);
+            if ctx.cook_again {
+                again.push(id);
+            }
+            match result {
+                Ok(()) => {
+                    settle(errors, exprs, id);
+                    if let Some(old) = results.insert(id, output) {
+                        released.push(old);
+                    }
+                }
+                Err(e) => {
+                    errors.insert(id, e);
+                    released.push(output);
+                }
+            }
+            scheduler.record(id, start.elapsed());
+        }
+        inputs.clear();
+
+        queue.submit([encoder.finish()]);
+        if let Some(py) = python.as_mut()
+            && !py_jobs.is_empty()
+        {
+            crate::expr::Ctx {
+                net,
+                registry,
+                sig,
+                dat,
+                table: exprs,
+                live,
+                time,
+                frame: *frame as f64,
+            }
+            .update_python_jobs(py_jobs);
+            if mode.is_offline() {
+                py.submit_wait(py_jobs);
+            } else {
+                py.submit(py_jobs);
+            }
+        }
+        for id in plan.iter() {
+            if let Some(op) = analysis_ops.get_mut(id) {
+                op.after_submit();
+            } else if let Some(op) = gpu_ops.get_mut(id) {
+                op.after_submit();
+            } else if let Some(op) = geo_ops.get_mut(id) {
+                op.after_submit();
+            }
+        }
+        for t in released.drain(..) {
+            pool.release(t);
+        }
+        pool.end_frame();
+        buffers.end_frame();
+        *frame += 1;
+        Ok(steps.len())
+    }
+
+    /// Replaces the network (e.g. a loaded project) after validating it
+    /// against the registry. Undo history, operator instances and cached
+    /// results start afresh; on error the current network is kept.
+    pub fn load(&mut self, net: Network) -> Result<(), EngineError> {
+        let net = net.validated(&self.registry)?;
+        self.net = net;
+        self.revision += 1;
+        self.history = History::default();
+        self.scheduler = Scheduler::default();
+        self.gpu_ops.clear();
+        self.sig_ops.clear();
+        self.analysis_ops.clear();
+        self.geo_ops.clear();
+        self.mat_ops.clear();
+        self.dat_ops.clear();
+        self.sig.clear();
+        self.mat.clear();
+        self.dat.clear();
+        self.dat_seen.clear();
+        // Buffers return to the pool, reusable after the next submit.
+        self.geo.clear();
+        self.errors.clear();
+        self.again.clear();
+        self.live = LiveValues::default();
+        self.last_time = None;
+        count_consumers(&self.net, &mut self.consumers);
+        // Textures may still be read by a submitted frame: release them
+        // with the next frame's.
+        self.released.extend(self.results.drain().map(|(_, t)| t));
+        self.exprs = ExprTable::default();
+        self.rebuild_exprs();
+        Ok(())
+    }
+
+    /// True when an operator's last result was provisional (for example a
+    /// shader still compiling) and it will cook again on the next frame.
+    pub fn pending(&self) -> bool {
+        !self.again.is_empty() || self.fusers.values().any(|f| f.busy())
+    }
+
+    /// Cooks one frame of the running patch: the viewed node (if any) plus
+    /// every sink (operators with external side effects, such as OSC Out),
+    /// which must run even when nothing downstream is viewed.
+    pub fn cook_frame(&mut self, viewed: Option<NodeId>, time: f64) -> Result<usize, EngineError> {
+        self.cook_frame_with(viewed, &[], time)
+    }
+
+    /// [`Self::cook_frame`] plus `extra` nodes that must cook this frame
+    /// whatever is viewed (the Stage's deck, nodes the timeline watches).
+    /// Allocates nothing after warm-up.
+    pub fn cook_frame_with(
+        &mut self,
+        viewed: Option<NodeId>,
+        extra: &[NodeId],
+        time: f64,
+    ) -> Result<usize, EngineError> {
+        let mut requested = std::mem::take(&mut self.requested);
+        requested.clear();
+        requested.extend(viewed);
+        for node in self.net.nodes() {
+            if self.registry.get(&node.type_id).is_some_and(|s| s.sink) && Some(node.id) != viewed {
+                requested.push(node.id);
+            }
+        }
+        for &n in extra {
+            if !requested.contains(&n) && self.net.node(n).is_some() {
+                requested.push(n);
+            }
+        }
+        let result = self.cook(&requested, time);
+        self.requested = requested;
+        result
+    }
+
+    /// The latest image of an IMG node, if it has cooked successfully.
+    pub fn result(&self, node: NodeId) -> Option<&wgpu::Texture> {
+        self.results.get(&node)
+    }
+
+    /// The latest channels of a SIG node.
+    pub fn channels(&self, node: NodeId) -> Option<&Channels> {
+        self.sig.get(&node)
+    }
+
+    /// The latest geometry of a GEO node. `None` before it cooks, and also
+    /// when its value was handed over to its only consumer this frame
+    /// (request the node to keep its result, as a viewer does).
+    pub fn geometry(&self, node: NodeId) -> Option<&Geometry> {
+        self.geo.get(&node)
+    }
+
+    /// The latest value of a DAT node, or the DAT output of a SIG node
+    /// that has one (Speech to Text's transcript).
+    pub fn dat(&self, node: NodeId) -> Option<&Dat> {
+        self.dat.get(&node)
+    }
+
+    /// The latest material of a MAT node.
+    pub fn material(&self, node: NodeId) -> Option<&Material> {
+        self.mat.get(&node)
+    }
+
+    /// The last cook error of `node`, if any.
+    pub fn error(&self, node: NodeId) -> Option<&str> {
+        self.errors.get(&node).map(String::as_str)
+    }
+
+    /// The status line of an IMG, GEO or DAT node's operator, if it reports one
+    /// ([`GpuOp::status`]).
+    pub fn status(&self, node: NodeId) -> Option<&str> {
+        if let Some(op) = self.gpu_ops.get(&node) {
+            return op.status();
+        }
+        if let Some(op) = self.dat_ops.get(&node) {
+            return op.status();
+        }
+        self.geo_ops.get(&node)?.status()
+    }
+
+    pub fn stat(&self, node: NodeId) -> Option<&CookStat> {
+        self.scheduler.stat(node)
+    }
+
+    pub fn frame(&self) -> u64 {
+        self.frame
+    }
+}
+
+/// What deciding a GEO node's inputs reads.
+struct GeoSources<'a> {
+    net: &'a Network,
+    plan: &'a [NodeId],
+    requested: &'a [NodeId],
+    consumers: &'a HashMap<NodeId, u32>,
+    scheduler: &'a Scheduler,
+    results: &'a HashMap<NodeId, wgpu::Texture>,
+}
+
+impl GeoSources<'_> {
+    /// Whether the GEO value of planned node `a`, read through a normal input,
+    /// can be handed over: this is its only wire, it cooked this frame and
+    /// will next frame, and nobody asked to see it.
+    fn can_hand_over(&self, a: NodeId) -> bool {
+        self.consumers.get(&a) == Some(&1)
+            && self.plan.contains(&a)
+            && !self.requested.contains(&a)
+            && self.scheduler.continuous(a)
+    }
+
+    /// Whether `b` reads `a` as its only wired GEO input (a normal one) and
+    /// nothing else can read `a`'s value: `a`'s result is then only ever
+    /// `b`'s input, so the two may be fused.
+    fn only_geo_reader(&self, registry: &Registry, a: NodeId, b: NodeId) -> bool {
+        let Some(schema) = self.net.node(b).and_then(|n| registry.get(&n.type_id)) else {
+            return false;
+        };
+        if schema
+            .outputs
+            .first()
+            .is_none_or(|o| o.wire != WireType::Geo)
+        {
+            return false;
+        }
+        let mut wired = schema.inputs.iter().filter_map(|socket| {
+            self.net
+                .inputs_of(b)
+                .find(|(name, _)| *name == socket.name)
+                .map(|(_, src)| (socket, src.node))
+        });
+        matches!(
+            (wired.next(), wired.next()),
+            (Some((socket, src)), None)
+                if src == a && socket.wire == WireType::Geo && !socket.feedback
+        ) && self.net.bindings_of(b).next().is_none()
+            && self.can_hand_over(a)
+    }
+
+    /// Fills the input lists of GEO node `id`: its IMG textures, SIG and GEO
+    /// sources, and whether each GEO value is handed over (moved, no copy on
+    /// write) because nothing else can read it. Through a feedback input
+    /// (the previous frame's value): this is its only wire and the source
+    /// cooks again later this frame.
+    fn fill(
+        &self,
+        schema: &lsr_core::registry::OperatorSchema,
+        id: NodeId,
+        inputs: &mut Vec<Option<wgpu::Texture>>,
+        sig_sources: &mut Vec<Option<NodeId>>,
+        geo_sources: &mut Vec<Option<NodeId>>,
+        handover: &mut Vec<bool>,
+    ) {
+        inputs.clear();
+        sig_sources.clear();
+        geo_sources.clear();
+        handover.clear();
+        let pos = |n: NodeId| self.plan.iter().position(|&p| p == n);
+        for socket in &schema.inputs {
+            let src = self
+                .net
+                .inputs_of(id)
+                .find(|(name, _)| *name == socket.name)
+                .map(|(_, src)| src.node);
+            let from_geo = src.filter(|_| socket.wire == WireType::Geo);
+            handover.push(from_geo.is_some_and(|a| {
+                a != id
+                    && if socket.feedback {
+                        self.consumers.get(&a) == Some(&1) && pos(a) > pos(id)
+                    } else {
+                        self.can_hand_over(a)
+                    }
+            }));
+            geo_sources.push(from_geo);
+            sig_sources.push(src.filter(|_| socket.wire == WireType::Sig));
+            inputs.push(
+                src.filter(|_| socket.wire == WireType::Img)
+                    .and_then(|s| self.results.get(&s))
+                    .cloned(),
+            );
+        }
+    }
+}
+
+/// One cook of the frame: a planned node in one pass of its loop.
+#[derive(Debug, Clone, Copy)]
+struct Step {
+    node: NodeId,
+    iteration: u32,
+    iterations: u32,
+    /// The passes are sub-steps: each gets `dt / iterations`.
+    substeps: bool,
+    /// Submit what is recorded so far first (the start of a pass after the
+    /// first).
+    flush: bool,
+}
+
+impl Step {
+    fn once(node: NodeId) -> Self {
+        Self {
+            node,
+            iteration: 0,
+            iterations: 1,
+            substeps: false,
+            flush: false,
+        }
+    }
+}
+
+/// What [`unroll_loops`] reads.
+struct Unroll<'a> {
+    net: &'a Network,
+    registry: &'a Registry,
+    library: &'a OpLibrary,
+    sig: &'a HashMap<NodeId, Channels>,
+    dat: &'a HashMap<NodeId, Dat>,
+    exprs: &'a ExprTable,
+    live: &'a LiveValues,
+    project_dir: Option<&'a Path>,
+    mode: CookMode,
+    time: f64,
+    frame: u64,
+    plan: &'a [NodeId],
+}
+
+impl Unroll<'_> {
+    /// When planned node `i` heads a loop that makes more than one pass this
+    /// frame: the plan index of the loop's end and the passes.
+    fn loop_at(
+        &self,
+        i: usize,
+        device: &wgpu::Device,
+        geo_ops: &mut HashMap<NodeId, Box<dyn GeoOp>>,
+    ) -> Option<(usize, Repeat)> {
+        let head = self.plan[i];
+        let node = self.net.node(head)?;
+        let schema = self.registry.get(&node.type_id)?;
+        if schema
+            .outputs
+            .first()
+            .is_none_or(|o| o.wire != WireType::Geo)
+        {
+            return None;
+        }
+        let end = schema
+            .inputs
+            .iter()
+            .filter(|s| s.feedback && s.wire == WireType::Geo)
+            .find_map(|s| {
+                self.net
+                    .inputs_of(head)
+                    .find(|(name, _)| *name == s.name)
+                    .map(|(_, src)| src.node)
+            })?;
+        let end = i + self.plan[i..].iter().position(|&n| n == end)?;
+        if let std::collections::hash_map::Entry::Vacant(slot) = geo_ops.entry(head) {
+            let factory = self.library.geo_factories.get(&node.type_id)?;
+            slot.insert(factory(device));
+        }
+        if !self.exprs.is_empty() {
+            crate::expr::Ctx {
+                net: self.net,
+                registry: self.registry,
+                sig: self.sig,
+                dat: self.dat,
+                table: self.exprs,
+                live: self.live,
+                time: self.time,
+                frame: self.frame as f64,
+            }
+            .eval_node(head);
+        }
+        let params = Params {
+            net: self.net,
+            registry: self.registry,
+            sig: self.sig,
+            node: head,
+            project_dir: self.project_dir,
+            exprs: Some(self.exprs),
+            live: Some(self.live),
+            mode: self.mode,
+        };
+        let repeat = match geo_ops[&head].repeat(&params) {
+            Repeat::SubSteps(n) if n > 1 => Repeat::SubSteps(n.min(MAX_REPEAT)),
+            Repeat::Iterations(n) if n > 1 => Repeat::Iterations(n.min(MAX_REPEAT)),
+            _ => return None,
+        };
+        Some((end, repeat))
+    }
+}
+
+/// Writes the frame's cooks into `steps`: the plan, with every loop that
+/// makes more than one pass ([`GeoOp::repeat`]) unrolled. Within the plan
+/// stretch from a loop's head to its end, nodes that do not depend on the
+/// head cook first, then the body (the nodes on a path from the head to the
+/// end) once per pass, then the other nodes that depend on the head (they
+/// see the last pass). A loop inside another loop's body makes one pass per
+/// outer pass. Reuses its buffers, so nothing allocates once warm.
+fn unroll_loops(
+    u: &Unroll<'_>,
+    device: &wgpu::Device,
+    geo_ops: &mut HashMap<NodeId, Box<dyn GeoOp>>,
+    steps: &mut Vec<Step>,
+    after: &mut HashSet<NodeId>,
+    body: &mut HashSet<NodeId>,
+) {
+    steps.clear();
+    let plan = u.plan;
+    let mut i = 0;
+    while i < plan.len() {
+        let Some((end, repeat)) = u.loop_at(i, device, geo_ops) else {
+            steps.push(Step::once(plan[i]));
+            i += 1;
+            continue;
+        };
+        let stretch = &plan[i..=end];
+        let reads = |n: NodeId, set: &HashSet<NodeId>| {
+            let net = u.net;
+            let schema = net.node(n).and_then(|node| u.registry.get(&node.type_id));
+            let feedback = |input: &str| {
+                schema
+                    .and_then(|s| s.inputs.iter().find(|i| i.name == input))
+                    .is_some_and(|i| i.feedback)
+            };
+            net.inputs_of(n)
+                .any(|(input, src)| !feedback(input) && set.contains(&src.node))
+                || net.bindings_of(n).any(|b| set.contains(&b.node))
+        };
+        // Downstream of the head (in plan order, so inputs come first).
+        after.clear();
+        after.insert(plan[i]);
+        for &n in &stretch[1..] {
+            if reads(n, after) {
+                after.insert(n);
+            }
+        }
+        if !after.contains(&plan[end]) {
+            // The feedback comes from a node that does not depend on the
+            // head: no loop to repeat.
+            steps.extend(stretch.iter().map(|&n| Step::once(n)));
+            i = end + 1;
+            continue;
+        }
+        // Of those, the ones the end depends on: walk back from the end.
+        body.clear();
+        body.insert(plan[end]);
+        for &n in stretch.iter().rev().skip(1) {
+            if after.contains(&n)
+                && stretch
+                    .iter()
+                    .any(|&m| body.contains(&m) && m != n && reads_from(u, m, n))
+            {
+                body.insert(n);
+            }
+        }
+        body.insert(plan[i]);
+        for &n in stretch {
+            if !after.contains(&n) {
+                steps.push(Step::once(n));
+            }
+        }
+        let (passes, substeps) = match repeat {
+            Repeat::SubSteps(n) => (n, true),
+            Repeat::Iterations(n) => (n, false),
+            Repeat::Once => (1, false),
+        };
+        for k in 0..passes {
+            for &n in stretch {
+                if body.contains(&n) {
+                    steps.push(Step {
+                        node: n,
+                        iteration: k,
+                        iterations: passes,
+                        substeps,
+                        flush: k > 0 && n == plan[i],
+                    });
+                }
+            }
+        }
+        for &n in stretch {
+            if after.contains(&n) && !body.contains(&n) {
+                steps.push(Step::once(n));
+            }
+        }
+        i = end + 1;
+    }
+}
+
+/// Whether `consumer` reads `source` through a normal (not feedback) input
+/// or a channel binding.
+fn reads_from(u: &Unroll<'_>, consumer: NodeId, source: NodeId) -> bool {
+    let net = u.net;
+    let schema = net
+        .node(consumer)
+        .and_then(|node| u.registry.get(&node.type_id));
+    let feedback = |input: &str| {
+        schema
+            .and_then(|s| s.inputs.iter().find(|i| i.name == input))
+            .is_some_and(|i| i.feedback)
+    };
+    net.inputs_of(consumer)
+        .any(|(input, src)| !feedback(input) && src.node == source)
+        || net.bindings_of(consumer).any(|b| b.node == source)
+}
+
+/// Counts the wires leaving each node (on edits, not per frame).
+fn count_consumers(net: &Network, out: &mut HashMap<NodeId, u32>) {
+    out.clear();
+    for w in net.wires() {
+        *out.entry(w.from.node).or_default() += 1;
+    }
+}
+
+/// Records a clear of `texture` to transparent black.
+fn clear_texture(encoder: &mut wgpu::CommandEncoder, texture: &wgpu::Texture) {
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("lsr-offline-clear"),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view: &view,
+            depth_slice: None,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        depth_stencil_attachment: None,
+        timestamp_writes: None,
+        occlusion_query_set: None,
+        multiview_mask: None,
+    });
+}
+
+/// Records a node's state after a successful cook: an expression error if
+/// it has one (updated only when the message changes, so nothing
+/// allocates per frame), otherwise none.
+fn settle(errors: &mut HashMap<NodeId, String>, exprs: &ExprTable, id: NodeId) {
+    match exprs.error(id) {
+        Some(msg) => {
+            if errors.get(&id).map(String::as_str) != Some(msg.as_str()) {
+                errors.insert(id, msg.clone());
+            }
+        }
+        None => {
+            errors.remove(&id);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_empty_channel_drives_no_component() {
+        let node = NodeId(7);
+        let whole = ChannelRef {
+            node,
+            channel: String::new(),
+        };
+        let mut ch = Channels::single(&["x", "y"], &[0.25, 0.5]);
+        let sig = HashMap::from([(node, ch.clone())]);
+        assert_eq!(bound_component(&sig, &whole, 1, 2), Some(0.5));
+        // A block of no samples: the components keep their stored value.
+        ch.set_block(&["x", "y"], 48_000.0, 0);
+        let sig = HashMap::from([(node, ch)]);
+        assert_eq!(bound_component(&sig, &whole, 0, 2), None);
+        assert_eq!(bound_component(&sig, &whole, 1, 2), None);
+        assert_eq!(bound_component(&sig, &whole, 0, 1), None, "one channel");
+    }
+
+    #[test]
+    fn a_writer_that_keeps_the_previous_values_leaves_them_alone() {
+        let mut ch = Channels::default();
+        let mut w = ch.writer();
+        w.push("a", 1.0);
+        w.push("b", 2.0);
+        drop(w);
+        ch.writer().keep_previous();
+        assert_eq!((ch.value("a"), ch.value("b")), (Some(1.0), Some(2.0)));
+        // A writer that pushed nothing and was dropped empties the channels.
+        drop(ch.writer());
+        assert_eq!(ch.value("a"), None);
+    }
+
+    #[test]
+    fn channels_reuse_storage_and_resolve_names() {
+        let mut c = Channels::single(&["x", "y"], &[1.0, 2.0]);
+        assert_eq!(c.value("y"), Some(2.0));
+        assert_eq!(c.value(""), Some(1.0), "empty name is the first channel");
+        assert_eq!(c.value("z"), None);
+        let names_ptr = c.names.as_ptr();
+        let data_ptr = c.data.as_ptr();
+        c.set_single(&["x", "y"], &[3.0, 4.0]);
+        assert_eq!(c.names.as_ptr(), names_ptr, "names reused");
+        assert_eq!(c.data.as_ptr(), data_ptr, "data reused");
+        assert_eq!((c.last(0), c.last(1)), (3.0, 4.0));
+        let mut d = Channels::default();
+        d.copy_from(&c);
+        assert_eq!(d, c);
+
+        // The writer reuses name strings and trims leftovers.
+        let mut w = c.writer();
+        w.push("x", 9.0);
+        drop(w);
+        assert_eq!(c, Channels::single(&["x"], &[9.0]));
+    }
+}

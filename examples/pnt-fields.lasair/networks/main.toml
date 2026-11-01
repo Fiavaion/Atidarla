@@ -1,0 +1,217 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 21
+
+[[node]]
+id = 0
+name = "grid"
+type = "pnt.points"
+pos = [0.0, 0.0]
+params.count = 6400
+params.size = [3.4, 1.9, 0.0]
+
+[[node]]
+id = 1
+name = "spot"
+type = "pnt.falloff_field"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+params.centre = [-0.9, -0.1, 0.0]
+params.inner = 0.3
+params.radius = 0.7
+
+[[node]]
+id = 2
+name = "band"
+type = "pnt.falloff_field"
+pos = [440.0, 0.0]
+inputs.in = { node = 1, output = "out" }
+params.centre = [0.0, 0.5, 0.0]
+params.operation = "max"
+params.radius = 0.3
+params.shape = "plane"
+
+[[node]]
+id = 3
+name = "heat"
+type = "pnt.colour"
+pos = [660.0, 0.0]
+inputs.in = { node = 2, output = "out" }
+params.attribute = "falloff"
+params.high = 1.0
+params.low = 0.0
+params.measure = "x"
+params.ramp = "heat"
+
+[[node]]
+id = 4
+name = "grain"
+type = "pnt.attribute_noise"
+pos = [880.0, 0.0]
+inputs.in = { node = 3, output = "out" }
+params.amplitude = 0.4
+params.centre = 1.0
+params.evolution = { value = 0.0, expr = "time * 0.5" }
+params.frequency = 5.0
+params.operation = "multiply"
+
+[[node]]
+id = 5
+name = "across"
+type = "pnt.attribute"
+pos = [1100.0, 0.0]
+inputs.in = { node = 4, output = "out" }
+params.end = [1.7, 0.0, 0.0]
+params.name = "u"
+params.source = "ramp"
+params.start = [-1.7, 0.0, 0.0]
+params.value = [0.0, 0.0, 0.0, 0.0]
+params.value2 = [1.0, 0.0, 0.0, 0.0]
+
+[[node]]
+id = 6
+name = "wave"
+type = "sig.pattern"
+pos = [1100.0, 200.0]
+params.amplitude = 0.4
+params.cycles = 3.0
+params.length = 128
+params.offset = 0.7
+params.speed = 0.3
+
+[[node]]
+id = 7
+name = "pulse"
+type = "pnt.attribute_from_channels"
+pos = [1320.0, 0.0]
+inputs.channels = { node = 6, output = "out" }
+inputs.in = { node = 5, output = "out" }
+params.lookup = "attribute"
+params.name = "Cd"
+params.operation = "multiply"
+params.type = "vec4"
+
+[[node]]
+id = 8
+name = "brushes"
+type = "pnt.scatter"
+pos = [0.0, 400.0]
+params.count = 5
+params.radius = 0.8
+params.seed = 3
+params.shape = "ball"
+
+[[node]]
+id = 9
+name = "wander"
+type = "pnt.noise"
+pos = [220.0, 400.0]
+inputs.in = { node = 8, output = "out" }
+params.amplitude = 0.6
+params.evolution = { value = 0.0, expr = "time * 0.3" }
+params.frequency = 0.8
+
+[[node]]
+id = 10
+name = "inks"
+type = "pnt.randomize"
+pos = [440.0, 400.0]
+inputs.in = { node = 9, output = "out" }
+params.min = [0.1, 0.4, 0.6, 1.0]
+params.seed = 2
+
+[[node]]
+id = 11
+name = "paint"
+type = "pnt.attribute_transfer"
+pos = [1540.0, 0.0]
+inputs.from = { node = 10, output = "out" }
+inputs.in = { node = 7, output = "out" }
+params.method = "average"
+params.radius = 0.6
+
+[[node]]
+id = 12
+name = "near_brush"
+type = "pnt.proximity"
+pos = [1760.0, 0.0]
+inputs.in = { node = 11, output = "out" }
+inputs.to = { node = 10, output = "out" }
+params.radius = 0.6
+
+[[node]]
+id = 13
+name = "holes"
+type = "pnt.delete"
+pos = [1980.0, 0.0]
+inputs.in = { node = 12, output = "out" }
+params.attribute = "dist"
+params.compare = "<"
+params.rule = "attribute"
+params.value = 0.12
+
+[[node]]
+id = 14
+name = "draw"
+type = "img.render_points"
+pos = [2200.0, 0.0]
+inputs.geo = { node = 13, output = "out" }
+params.blend = "over"
+params.size = 3.0
+
+[[node]]
+id = 15
+name = "swarm"
+type = "pnt.scatter"
+pos = [0.0, 600.0]
+params.centre = [1.0, -0.4, 0.0]
+params.count = 700
+params.radius = 0.4
+params.seed = 9
+params.shape = "ball"
+
+[[node]]
+id = 16
+name = "swirl"
+type = "pnt.noise"
+pos = [220.0, 600.0]
+inputs.in = { node = 15, output = "out" }
+params.amplitude = 0.15
+params.evolution = { value = 0.0, expr = "time * 0.4" }
+
+[[node]]
+id = 17
+name = "crowding"
+type = "pnt.neighbours"
+pos = [440.0, 600.0]
+inputs.in = { node = 16, output = "out" }
+params.radius = 0.12
+
+[[node]]
+id = 18
+name = "by_crowd"
+type = "pnt.colour"
+pos = [660.0, 600.0]
+inputs.in = { node = 17, output = "out" }
+params.attribute = "nbrcount"
+params.high = 30.0
+params.low = 0.0
+params.measure = "x"
+params.ramp = "ice"
+
+[[node]]
+id = 19
+name = "draw_swarm"
+type = "img.render_points"
+pos = [880.0, 600.0]
+inputs.geo = { node = 18, output = "out" }
+params.size = 4.0
+
+[[node]]
+id = 20
+name = "stage"
+type = "img.composite"
+pos = [2420.0, 300.0]
+inputs.a = { node = 14, output = "out" }
+inputs.b = { node = 19, output = "out" }
+params.operation = "add"

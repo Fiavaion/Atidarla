@@ -1,4 +1,4 @@
-# Atidarla Pack. Its network is network.toml; its help page is help.md.
+# Lasair Pack. Its network is network.toml; its help page is help.md.
 format = 1
 name = "kaleido_tunnel"
 version = "1.0.1"

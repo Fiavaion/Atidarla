@@ -1,0 +1,87 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 10
+
+[[node]]
+id = 0
+name = "audio1"
+type = "sig.audio_file_in"
+pos = [0.0, 0.0]
+params.file = "media/beat.wav"
+
+[[node]]
+id = 1
+name = "spectrum1"
+type = "sig.spectrum"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+params.gain = 4.0
+params.smoothing = 0.6
+
+[[node]]
+id = 2
+name = "loudness"
+type = "sig.math"
+pos = [440.0, 0.0]
+inputs.a = { node = 1, output = "out" }
+params.from_max = 0.6
+params.to_max = 1.0
+params.to_min = 0.35
+
+[[node]]
+id = 3
+name = "clock1"
+type = "sig.timer"
+pos = [0.0, 160.0]
+params.length = 16.0
+
+[[node]]
+id = 4
+name = "noise1"
+type = "img.noise"
+pos = [0.0, 320.0]
+params.monochrome = false
+params.scale = 3.0
+params.z = { value = 0.0, bind = { node = 3, channel = "seconds" } }
+
+[[node]]
+id = 5
+name = "feedback1"
+type = "img.feedback"
+pos = [220.0, 320.0]
+inputs.in = { node = 4, output = "out" }
+inputs.loop = { node = 8, output = "out" }
+
+[[node]]
+id = 6
+name = "transform1"
+type = "img.transform"
+pos = [440.0, 320.0]
+inputs.in = { node = 5, output = "out" }
+params.extend = "mirror"
+params.rotate = { value = 0.0, bind = { node = 1, channel = "band2" } }
+params.scale = [1.02, 1.02]
+
+[[node]]
+id = 7
+name = "composite1"
+type = "img.composite"
+pos = [660.0, 320.0]
+inputs.a = { node = 4, output = "out" }
+inputs.b = { node = 6, output = "out" }
+params.opacity = 0.85
+params.operation = "over"
+
+[[node]]
+id = 8
+name = "level1"
+type = "img.level"
+pos = [880.0, 320.0]
+inputs.in = { node = 7, output = "out" }
+params.brightness = { value = 1.0, bind = { node = 2, channel = "level" } }
+
+[[comment]]
+id = 9
+pos = [200.0, 280.0]
+size = [880.0, 120.0]
+text = "The loop: level1's previous frame comes back into feedback1."

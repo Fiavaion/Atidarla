@@ -1,0 +1,178 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 19
+
+[[node]]
+id = 0
+name = "column"
+type = "pnt.scatter"
+pos = [0.0, 0.0]
+params.count = 150000
+params.shape = "box"
+params.size = [0.45, 1.6, 0.45]
+
+[[node]]
+id = 1
+name = "twist"
+type = "pnt.twist"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+params.angle = { value = 90.0, expr = "120 * sin(time * 0.7)" }
+
+[[node]]
+id = 2
+name = "taper"
+type = "pnt.taper"
+pos = [440.0, 0.0]
+inputs.in = { node = 5, output = "out" }
+params.end = 0.35
+params.length = 1.6
+params.origin = [0.0, -0.8, 0.0]
+params.start = 1.4
+
+[[node]]
+id = 3
+name = "bend"
+type = "pnt.bend"
+pos = [660.0, 0.0]
+inputs.in = { node = 2, output = "out" }
+params.angle = { value = 45.0, expr = "70 * sin(time * 0.5)" }
+params.length = 1.6
+params.origin = [0.0, -0.8, 0.0]
+
+[[node]]
+id = 4
+name = "ripple"
+type = "pnt.wave"
+pos = [880.0, 0.0]
+inputs.in = { node = 3, output = "out" }
+params.amplitude = 0.03
+params.direction = [1.0, 0.0, 0.0]
+params.phase = { value = 0.0, expr = "time * 240" }
+params.travel = [0.0, 1.0, 0.0]
+params.wavelength = 0.4
+
+[[node]]
+id = 5
+name = "hole"
+type = "pnt.delete"
+pos = [1100.0, 0.0]
+inputs.in = { node = 1, output = "out" }
+params.centre = [0.0, 0.25, 0.0]
+params.size = [0.18, 0.3, 2.0]
+
+[[node]]
+id = 6
+name = "height"
+type = "pnt.colour"
+pos = [1320.0, 0.0]
+inputs.in = { node = 4, output = "out" }
+params.high = 0.9
+params.low = -0.9
+params.ramp = "rainbow"
+
+[[node]]
+id = 7
+name = "left"
+type = "pnt.transform"
+pos = [1540.0, 0.0]
+inputs.in = { node = 6, output = "out" }
+params.translate = [-0.8, 0.0, 0.0]
+
+[[node]]
+id = 8
+name = "ring"
+type = "pnt.scatter"
+pos = [0.0, 200.0]
+params.count = 300
+params.radius = 0.06
+params.shape = "circle"
+
+[[node]]
+id = 9
+name = "grid"
+type = "pnt.points"
+pos = [0.0, 340.0]
+params.count = 36
+params.size = [1.1, 1.1, 0.0]
+
+[[node]]
+id = 10
+name = "sizes"
+type = "pnt.randomize"
+pos = [220.0, 340.0]
+inputs.in = { node = 9, output = "out" }
+params.max = [1.6, 1.0, 1.0, 1.0]
+params.min = [0.5, 0.0, 0.0, 1.0]
+params.name = "pscale"
+params.type = "float"
+
+[[node]]
+id = 11
+name = "colours"
+type = "pnt.randomize"
+pos = [440.0, 340.0]
+inputs.in = { node = 10, output = "out" }
+params.min = [0.2, 0.2, 0.4, 1.0]
+params.seed = 3
+
+[[node]]
+id = 12
+name = "diagonal"
+type = "pnt.group"
+pos = [660.0, 340.0]
+inputs.in = { node = 11, output = "out" }
+params.name = "diagonal"
+params.nth = 7
+params.rule = "every_nth"
+
+[[node]]
+id = 13
+name = "pick"
+type = "pnt.delete"
+pos = [880.0, 340.0]
+inputs.in = { node = 12, output = "out" }
+params.group = "diagonal"
+params.rule = "group"
+
+[[node]]
+id = 14
+name = "rings"
+type = "pnt.copy"
+pos = [1100.0, 260.0]
+inputs.points = { node = 18, output = "out" }
+inputs.source = { node = 8, output = "out" }
+
+[[node]]
+id = 15
+name = "turn"
+type = "pnt.transform"
+pos = [1320.0, 260.0]
+inputs.in = { node = 14, output = "out" }
+params.rotate = [0.0, 0.0, 15.0]
+params.translate = [0.8, 0.0, 0.0]
+params.uniform_scale = { value = 1.0, expr = "1 + 0.1 * sin(time * 2)" }
+
+[[node]]
+id = 16
+name = "both"
+type = "pnt.merge"
+pos = [1760.0, 120.0]
+inputs.a = { node = 7, output = "out" }
+inputs.b = { node = 15, output = "out" }
+
+[[node]]
+id = 17
+name = "draw"
+type = "img.render_points"
+pos = [1980.0, 120.0]
+inputs.geo = { node = 16, output = "out" }
+params.intensity = 0.35
+
+[[node]]
+id = 18
+name = "every_other"
+type = "pnt.subset"
+pos = [1100.0, 420.0]
+inputs.in = { node = 13, output = "out" }
+params.nth = 2

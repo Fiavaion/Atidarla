@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Lasair Windows installer (FR-H5), WiX Toolset v5: `wix build`, run by
+  packaging/windows/build-msi.ps1, which passes:
+    -d Version=1.2.3    numeric MSI version
+    -d BinDir=...       folder with lasair-app.exe and lasair.exe
+    -d Root=...         repository root (licences)
+    -d ExamplesDir=...  a copy of examples\ without .cache folders (WiX
+                        cannot exclude a folder name at any depth)
+    -d PythonDir=...    the bundled CPython runtime (python-build-standalone,
+                        PRD A68), installed as INSTALLFOLDER\python
+    -d PythonDll=...    its DLL (python313.dll), also installed beside the
+                        executables, which load it at start-up
+    -d AiHostDir=...    the AI Host (source, lock, extras' pinned
+                        requirements; precompiled), installed as
+                        INSTALLFOLDER\ai-host. Optional extras go to the
+                        user's %LOCALAPPDATA%\Lasair\ai-host on request
+
+  The Microsoft Visual C++ runtime is not in this MSI: the setup bundle
+  (bundle.wxs, Lasair-<version>-windows-x64-setup.exe) installs it first.
+  Deploying the bare MSI (Intune, SCCM, GPO) needs the VC++ 2015-2022 x64
+  redistributable deployed before it.
+
+  Per-machine install into "C:\Program Files\Lasair". Public properties for
+  silent installs (docs/install.md):
+    INSTALLFOLDER=<path>  install somewhere else
+    ADDTOPATH=0|1         put the folder (lasair.exe) on the system PATH (default 1)
+    DESKTOPSHORTCUT=0|1   a desktop shortcut for all users (default 0)
+  e.g.  msiexec /i Lasair-1.0.0-windows-x64.msi /qn /norestart ADDTOPATH=1 /l*v install.log
+
+  Uninstalling (not a major upgrade) also removes what the app keeps for the
+  user who uninstalls (PRD A70): `lasair storage uninstall`, run as that
+  user before the files go. An uninstall someone watches asks about the
+  model files (keep or remove); a quiet one keeps them. Its failure never
+  fails the uninstall. Who is watching:
+    - From the setup bundle (bundle.wxs; the usual route, since the bundle
+      hides this MSI from Settings > Apps): Burn always runs the MSI with no
+      UI of its own, so UILevel says nothing. The bundle passes its own UI
+      level as LSRBUNDLEUILEVEL ([WixBundleUILevel], Burn's
+      BOOTSTRAPPER_DISPLAY: 2 none (/quiet), 3 passive, 4 full). Asks at 4.
+    - The bare MSI (managed deployment): asks only at UILevel 5 (full UI,
+      msiexec /x); basic (/passive, 3), reduced (4) and none (/qn, 2) keep.
+  The command runs through the Util extension's WixQuietExec, so lasair.exe
+  (a console program) shows no console window; its question is a message
+  box, which still shows, and its output goes to the MSI log. It never waits
+  for a click: in session 0, on a window station nobody sees, or with no
+  answer in two minutes it keeps the models; run as an account other than
+  the one signed in (an elevation prompt answered by an administrator), it
+  removes nothing (crates/lsr-cli/src/storage.rs). There is no rollback: an
+  uninstall cancelled after this action leaves the app without the user's
+  data, so it runs as late as it can, just before RemoveFiles.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="Lasair"
+      Manufacturer="The Lasair Contributors"
+      Version="$(Version)"
+      UpgradeCode="6B0E3C52-6D4A-4C55-9C1F-2A9B7A3C1D10"
+      Scope="perMachine"
+      Compressed="yes">
+    <SummaryInformation Description="Lasair real-time visual instrument" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Lasair is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Property Id="ADDTOPATH" Value="1" Secure="yes" />
+    <Property Id="DESKTOPSHORTCUT" Value="0" Secure="yes" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/fiavaion/lasair" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <!-- Set by the setup bundle only (bundle.wxs): its UI level. -->
+    <Property Id="LSRBUNDLEUILEVEL" Secure="yes" />
+
+    <!-- The per-user data (PRD A70), removed on uninstall only: deferred and
+         impersonated, so it runs as the user and sees their folders, before
+         RemoveFiles takes lasair.exe away. WixQuietExec (Util extension)
+         runs it without a console window and reads the command line from
+         the property named after the action. Return="ignore": an error here
+         leaves the data and the uninstall goes on. -->
+    <SetProperty Id="RemoveUserDataAsk" Sequence="execute" Before="RemoveUserDataAsk"
+                 Value="&quot;[INSTALLFOLDER]lasair.exe&quot; storage uninstall --models ask" />
+    <SetProperty Id="RemoveUserDataKeep" Sequence="execute" Before="RemoveUserDataKeep"
+                 Value="&quot;[INSTALLFOLDER]lasair.exe&quot; storage uninstall --models keep" />
+    <CustomAction Id="RemoveUserDataAsk" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+                  DllEntry="WixQuietExec" Execute="deferred" Impersonate="yes" Return="ignore" />
+    <CustomAction Id="RemoveUserDataKeep" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+                  DllEntry="WixQuietExec" Execute="deferred" Impersonate="yes" Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="RemoveUserDataAsk" Before="RemoveFiles"
+              Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND ((LSRBUNDLEUILEVEL AND LSRBUNDLEUILEVEL &gt;= 4) OR (NOT LSRBUNDLEUILEVEL AND UILevel = 5))" />
+      <Custom Action="RemoveUserDataKeep" Before="RemoveFiles"
+              Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND NOT ((LSRBUNDLEUILEVEL AND LSRBUNDLEUILEVEL &gt;= 4) OR (NOT LSRBUNDLEUILEVEL AND UILevel = 5))" />
+    </InstallExecuteSequence>
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Lasair">
+        <Directory Id="EXAMPLESFOLDER" Name="examples" />
+        <Directory Id="PYTHONFOLDER" Name="python" />
+        <Directory Id="AIHOSTFOLDER" Name="ai-host" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+    <StandardDirectory Id="DesktopFolder" />
+
+    <ComponentGroup Id="Program" Directory="INSTALLFOLDER">
+      <Component>
+        <File Id="LasairApp" Source="$(BinDir)\lasair-app.exe" KeyPath="yes">
+          <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="Lasair"
+                    Description="Lasair real-time visual instrument"
+                    WorkingDirectory="INSTALLFOLDER" Advertise="yes" />
+        </File>
+      </Component>
+      <!-- The CLI beside the app, so `lasair run` finds lasair-app.exe. -->
+      <Component>
+        <File Id="LasairCli" Source="$(BinDir)\lasair.exe" KeyPath="yes" />
+      </Component>
+      <Component>
+        <File Source="$(Root)\LICENSE-MIT" KeyPath="yes" />
+      </Component>
+      <Component>
+        <File Source="$(Root)\LICENSE-APACHE" KeyPath="yes" />
+      </Component>
+      <!-- The executables load python313.dll at start-up, so it sits beside
+           them; the rest of the runtime is in python\ (lsr-core::runtime). -->
+      <Component>
+        <File Id="PythonDllBesideApp" Source="$(PythonDir)\$(PythonDll)" KeyPath="yes" />
+      </Component>
+      <Component>
+        <File Id="PythonLicence" Source="$(PythonDir)\LICENSE.txt" Name="Python-License.txt" KeyPath="yes" />
+      </Component>
+      <Component Id="SystemPath" Condition="ADDTOPATH = 1">
+        <Environment Id="PathEntry" Name="PATH" Value="[INSTALLFOLDER]" Part="last"
+                     Action="set" System="yes" Permanent="no" />
+        <RegistryValue Root="HKLM" Key="Software\Lasair" Name="AddToPath" Type="integer"
+                       Value="1" KeyPath="yes" />
+      </Component>
+      <Component Id="DesktopShortcut" Condition="DESKTOPSHORTCUT = 1">
+        <Shortcut Id="DesktopShortcutLink" Directory="DesktopFolder" Name="Lasair"
+                  Target="[INSTALLFOLDER]lasair-app.exe" WorkingDirectory="INSTALLFOLDER" />
+        <RegistryValue Root="HKLM" Key="Software\Lasair" Name="DesktopShortcut" Type="integer"
+                       Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="Examples" Directory="EXAMPLESFOLDER">
+      <Files Include="$(ExamplesDir)\**" />
+    </ComponentGroup>
+
+    <ComponentGroup Id="Python" Directory="PYTHONFOLDER">
+      <Files Include="$(PythonDir)\**" />
+    </ComponentGroup>
+
+    <ComponentGroup Id="AiHost" Directory="AIHOSTFOLDER">
+      <Files Include="$(AiHostDir)\**" />
+    </ComponentGroup>
+
+    <Feature Id="Main" Title="Lasair" Level="1">
+      <ComponentGroupRef Id="Program" />
+      <ComponentGroupRef Id="Examples" />
+      <ComponentGroupRef Id="Python" />
+      <ComponentGroupRef Id="AiHost" />
+    </Feature>
+  </Package>
+</Wix>

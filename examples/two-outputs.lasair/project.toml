@@ -1,0 +1,19 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Two outputs"
+description = '''
+One composition sent to two outputs (cmp.window), as for two projectors side by side with
+an overlap. "left" shows the left 55% of the image and "right" the right 55%, so the middle
+10% is on both; each fades it out with a soft edge (blend) so the overlap does not show
+twice as bright on the wall.
+
+Each output has two slices, an upper and a lower half. The left output's lower slice is a
+perspective corner pin (a keystoned projector); the right output's lower slice is a 3×3
+Catmull-Rom warp with a mask cutting off its bottom-right corner (a pillar in the way).
+
+Try: open the Outputs tab, pick an output, drag the warp points over the preview; set
+Test Pattern to `grid` or `circles` to line projectors up; turn Fullscreen on to put a
+window on a display. The windows open when the project does; closing one turns its
+Enabled off.
+'''
+resolution = [1280, 720]

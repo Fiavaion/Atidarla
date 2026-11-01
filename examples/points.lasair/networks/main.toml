@@ -1,0 +1,67 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 7
+
+[[node]]
+id = 0
+name = "cloud"
+type = "pnt.points"
+pos = [0.0, 0.0]
+params.colour = [0.5, 0.7, 1.0, 1.0]
+params.count = 200000
+params.random_colour = true
+params.shape = "random"
+params.size = [3.2, 1.8, 1.0]
+
+[[node]]
+id = 1
+name = "swirl"
+type = "pnt.noise"
+pos = [220.0, 0.0]
+inputs.in = { node = 0, output = "out" }
+params.amplitude = 0.15
+params.evolution = { value = 0.0, expr = "time * 0.25" }
+params.frequency = 1.5
+
+[[node]]
+id = 2
+name = "grid"
+type = "pnt.points"
+pos = [0.0, 140.0]
+params.colour = [1.0, 0.6, 0.2, 1.0]
+params.count = 4096
+params.size = [3.0, 1.6, 0.0]
+
+[[node]]
+id = 3
+name = "ripple"
+type = "pnt.noise"
+pos = [220.0, 140.0]
+inputs.in = { node = 2, output = "out" }
+params.amplitude = { value = 0.05, expr = "0.05 + 0.04 * sin(time)" }
+params.frequency = 3.0
+
+[[node]]
+id = 4
+name = "draw_cloud"
+type = "img.render_points"
+pos = [440.0, 0.0]
+inputs.geo = { node = 1, output = "out" }
+params.intensity = 0.3
+
+[[node]]
+id = 5
+name = "draw_grid"
+type = "img.render_points"
+pos = [440.0, 140.0]
+inputs.geo = { node = 3, output = "out" }
+params.size = 3.0
+
+[[node]]
+id = 6
+name = "mix"
+type = "img.composite"
+pos = [660.0, 70.0]
+inputs.a = { node = 4, output = "out" }
+inputs.b = { node = 5, output = "out" }
+params.operation = "add"

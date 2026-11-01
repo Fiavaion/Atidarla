@@ -1,12 +1,12 @@
-# atd-ai-host
+# lsr-ai-host
 
-The AI Host for Atidarla (PRD §5.1, A6). It runs model work (torch, ONNX
+The AI Host for Lasair (PRD §5.1, A6). It runs model work (torch, ONNX
 Runtime, later TensorRT and Core ML) **out of process**, so a crash or a slow
 model can never stall the engine's render thread. It speaks AI Host Protocol
 v1 (`docs/ai-host-protocol.md`). No model weights are ever bundled: models live
-in the per-user cache (`~/Library/Caches/Atidarla/models`,
-`%LOCALAPPDATA%\Atidarla\models`, `$XDG_CACHE_HOME/atidarla/models`;
-`ATD_MODELS_DIR` overrides).
+in the per-user cache (`~/Library/Caches/Lasair/models`,
+`%LOCALAPPDATA%\Lasair\models`, `$XDG_CACHE_HOME/lasair/models`;
+`LSR_MODELS_DIR` overrides).
 
 ## Install
 
@@ -18,10 +18,10 @@ uv run pytest                             # tests needing extras or weights skip
 
 uv picks a Python 3.11+ it finds (or downloads one).
 
-**In an installed Atidarla** this package is bundled (`Contents/Resources/ai-host`, `<install
-folder>\ai-host`, `usr/lib/atidarla/ai-host`) and the app starts it on its own CPython with no
-setup and no `ATD_AI_HOST_CMD`. Extras are added on request with
-`atidarla ai-host install <extra> [--allow-internet | --wheelhouse <folder>]`, into the user's
+**In an installed Lasair** this package is bundled (`Contents/Resources/ai-host`, `<install
+folder>\ai-host`, `usr/lib/lasair/ai-host`) and the app starts it on its own CPython with no
+setup and no `LSR_AI_HOST_CMD`. Extras are added on request with
+`lasair ai-host install <extra> [--allow-internet | --wheelhouse <folder>]`, into the user's
 folder, from `requirements/<extra>.txt`: `uv export` of `uv.lock` for each extra, hash-pinned and
 installed with `pip --require-hashes --no-deps --only-binary :all:` (`docs/install.md`). After
 changing `uv.lock`, regenerate them (`tests/test_requirements.py` fails until you do):
@@ -37,9 +37,9 @@ uv export --frozen --extra vision --no-dev --no-emit-project --no-header --forma
 resolves it to the standard wheels. The two extras conflict (`[tool.uv] conflicts`), so a checkout
 syncs one: `uv sync --extra diffusion-cuda` on an NVIDIA PC. To move to a newer CUDA build, change
 the index URL in `pyproject.toml` and `PYTORCH_INDEX` / `CUDA_BUILD` / `CUDA_DRIVER_FLOOR` in
-`crates/atd-ai/src/hostenv.rs` together (a test in each checks they agree), then `uv lock` and
+`crates/lsr-ai/src/hostenv.rs` together (a test in each checks they agree), then `uv lock` and
 re-export.
-The supervisor's lookup order is `ATD_AI_HOST_CMD`, then the bundled host, then this checkout.
+The supervisor's lookup order is `LSR_AI_HOST_CMD`, then the bundled host, then this checkout.
 
 | Extra | Adapter | Runs |
 |---|---|---|
@@ -55,8 +55,8 @@ The supervisor's lookup order is `ATD_AI_HOST_CMD`, then the bundled host, then 
 per AI node, each with its own shared-memory ring:
 
 ```sh
-atd-ai-host --listen 127.0.0.1:0 --token <random> --parent-pid <engine pid>
-# stdout: atd-ai-host listening on 127.0.0.1:<port>
+lsr-ai-host --listen 127.0.0.1:0 --token <random> --parent-pid <engine pid>
+# stdout: lsr-ai-host listening on 127.0.0.1:<port>
 ```
 
 `--connect HOST:PORT` (dial the engine, one session) still works. `--parent-pid`
@@ -66,21 +66,21 @@ makes the host exit within about a second of the engine dying.
 token; the engine sends it in `session.open`:
 
 ```sh
-atd-ai-host --listen 0.0.0.0:7420 --token <secret>   # or ATD_AI_HOST_TOKEN=<secret>
+lsr-ai-host --listen 0.0.0.0:7420 --token <secret>   # or LSR_AI_HOST_TOKEN=<secret>
 ```
 
 **Cloud (Runpod).** `Dockerfile` builds a CUDA image that listens on 7420 and
-reads the token from `ATD_AI_HOST_TOKEN`; mount the model cache at `/models`.
+reads the token from `LSR_AI_HOST_TOKEN`; mount the model cache at `/models`.
 
-**Development.** `atd-ai-host --dev` listens on 127.0.0.1 and logs verbosely.
+**Development.** `lsr-ai-host --dev` listens on 127.0.0.1 and logs verbosely.
 
 ## Benchmark
 
 ```sh
-uv run --extra diffusion atd-ai-host bench --model sd-turbo --size 512 --steps 1 --frames 600
-uv run --extra diffusion atd-ai-host bench --steps 2 --rcfg self            # R-CFG (self-negative)
-uv run --extra diffusion atd-ai-host bench --similarity 0.98 --static       # similarity filter on a still input
-uv run --extra diffusion atd-ai-host bench --via-protocol [--inflight 2]    # through a host and the shm ring
+uv run --extra diffusion lsr-ai-host bench --model sd-turbo --size 512 --steps 1 --frames 600
+uv run --extra diffusion lsr-ai-host bench --steps 2 --rcfg self            # R-CFG (self-negative)
+uv run --extra diffusion lsr-ai-host bench --similarity 0.98 --static       # similarity filter on a still input
+uv run --extra diffusion lsr-ai-host bench --via-protocol [--inflight 2]    # through a host and the shm ring
 ```
 
 `--model` takes a folder or a name in the model cache. It prints one JSON line:

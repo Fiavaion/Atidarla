@@ -1,0 +1,11 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Pack: Beat Flash"
+description = '''
+An angular colour ramp flashing on every beat at 128 BPM through the Beat Flash Pack. The Pack's
+`flash` output drives a Transform after it through an expression,
+`op('flash1')['trigger'] * 12 - 12`, so the image also kicks round on the beat.
+
+Try: change BPM, or Decay for longer flashes.
+'''
+resolution = [1280, 720]

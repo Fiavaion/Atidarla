@@ -1,0 +1,22 @@
+[package]
+name = "lsr-kernel"
+description = "Lasair: Kernel DSL compiler"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+lsr-core.workspace = true
+naga.workspace = true
+
+[dev-dependencies]
+lsr-gpu.workspace = true
+wgpu.workspace = true
+pollster.workspace = true
+
+[lints]
+workspace = true

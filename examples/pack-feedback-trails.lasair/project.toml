@@ -1,0 +1,14 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Pack: Feedback Trails"
+description = '''
+An orbiting, spinning triangle through the Feedback Trails Pack: every frame the trail is zoomed, turned,
+faded and hue-shifted, so the triangle leaves a coloured spiral.
+
+The Pack's Spin follows an LFO (a binding on a promoted parameter), so the spiral winds one
+way, then the other.
+
+Try: double-click the Pack to look inside (it is locked: unlock it to change your own copy),
+or change Decay and Zoom in its parameters.
+'''
+resolution = [1280, 720]

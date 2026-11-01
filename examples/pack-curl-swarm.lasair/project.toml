@@ -1,0 +1,10 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Pack: Curl Swarm"
+description = '''
+The Curl Swarm Pack in magenta and teal, with its Pull driven by an expression so the swarm
+breathes out and gathers again every six seconds.
+
+Try: Flow 0 for frozen streams; Scale 4 for fine turbulence; switch Reset on and off.
+'''
+resolution = [1280, 720]

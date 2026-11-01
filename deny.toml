@@ -1,11 +1,11 @@
 # cargo-deny policy (CLAUDE.md rule 3, PRD §10): no GPL, LGPL-static or
 # non-commercial code in core crates. Optional plugins that bind GPL code
-# (atd-plugin-link) must be excluded here when they gain such dependencies,
+# (lsr-plugin-link) must be excluded here when they gain such dependencies,
 # and are never linked into core builds.
 
 [graph]
 all-features = false
-# The platforms Atidarla ships on (CLAUDE.md rule 6; Linux best-effort).
+# The platforms Lasair ships on (CLAUDE.md rule 6; Linux best-effort).
 # Dependencies that exist only for other targets (wasm32, Android) are not
 # checked: e.g. rustls-platform-verifier pulls webpki-root-certs
 # (CDLA-Permissive-2.0) only on wasm32.

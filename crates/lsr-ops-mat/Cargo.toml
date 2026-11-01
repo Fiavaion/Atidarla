@@ -1,0 +1,25 @@
+[package]
+name = "lsr-ops-mat"
+description = "Lasair: MAT operator family"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+lsr-core.workspace = true
+lsr-gpu.workspace = true
+wgpu.workspace = true
+
+[dev-dependencies]
+lsr-interop.workspace = true
+lsr-ops-img.workspace = true
+lsr-ops-pnt.workspace = true
+pollster.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

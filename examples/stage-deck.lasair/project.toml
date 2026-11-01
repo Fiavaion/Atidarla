@@ -1,0 +1,19 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Stage deck"
+description = '''
+A Stage deck: three layers by four columns of generator chains, mixed by a Mixer and
+launched in time with a 120 BPM clock. Open the Stage tab to play it.
+
+Layers (img.layer) play the clip wired into slot `target`; launching a clip sets that
+parameter, so it is undoable and saved. "backs" fades over two beats and waits for the next
+bar; "shapes" wipes, waits for the next beat, and here follows an LFO, so it changes by
+itself on beat boundaries; "accents" cuts on the beat and shows the launch modes: toggle,
+flash (held), one-shot (two beats, then back) and trigger. Clip names and modes are in each
+layer's Slots parameter. The Mixer (img.mixer) puts "backs" in crossfader group A, "shapes"
+(added) in group B and "accents" on top.
+
+Try: in the Stage tab click a column, hold Strobe, move the crossfader; set the Mixer's
+Autopilot to `next` to launch a column every 16 beats.
+'''
+resolution = [1280, 720]

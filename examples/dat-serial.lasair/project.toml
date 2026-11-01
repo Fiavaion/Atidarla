@@ -1,0 +1,13 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "DAT serial"
+description = '''
+A serial device (an Arduino, a sensor board) on a DAT wire. `board` is a Serial node: set its
+Port to your device (`/dev/tty.usbmodem…` on macOS, `COM3` on Windows) and its Baud to the
+sketch's; each line the board prints becomes a row. `readings` keeps the lines that start with
+`temp`. Each new value of `command` is written to the board followed by a newline.
+
+Try: flash a sketch that prints `temp 21.5` once a second and reads commands with
+`Serial.readStringUntil('\n')`; edit `command` to send one.
+'''
+resolution = [1280, 720]

@@ -1,0 +1,50 @@
+# Lasair Pack. Its network is network.toml; its help page is help.md.
+format = 1
+name = "lfo_bank"
+version = "1.0.0"
+label = "LFO Bank"
+summary = "Four oscillators at one rate and shape, spaced apart in phase: a ready-made modulation source with four channels."
+locked = true
+
+[[param]]
+name = "rate"
+label = "Rate"
+default = 0.25
+min = 0.0
+max = 20.0
+help = "Cycles per second, shared by all four."
+to = [{ node = 0, param = "frequency" }, { node = 1, param = "frequency" }, { node = 2, param = "frequency" }, { node = 3, param = "frequency" }]
+
+[[param]]
+name = "shape"
+label = "Shape"
+default = "sine"
+help = "Wave shape of all four: sine, triangle, square or ramp."
+to = [{ node = 0, param = "waveform" }, { node = 1, param = "waveform" }, { node = 2, param = "waveform" }, { node = 3, param = "waveform" }]
+
+[[param]]
+name = "spread"
+label = "Spread"
+default = 0.25
+min = 0.0
+max = 1.0
+help = "Phase step from one channel to the next, in cycles: 0 moves all four together, 0.25 a quarter cycle apart, 0.5 alternately opposite."
+to = [{ node = 1, param = "phase" }]
+
+[[param]]
+name = "low"
+label = "Low"
+default = 0.0
+help = "Value at the bottom of every wave."
+to = [{ node = 5, param = "to_min" }]
+
+[[param]]
+name = "high"
+label = "High"
+default = 1.0
+help = "Value at the top of every wave."
+to = [{ node = 5, param = "to_max" }]
+
+[[output]]
+name = "out"
+from = { node = 5, output = "out" }

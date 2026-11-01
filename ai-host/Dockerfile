@@ -2,8 +2,8 @@
 # to it over the `inline` transport. No model weights are baked in: mount the
 # model cache at /models (PRD A61). Start with a token:
 #
-#   docker build -t atd-ai-host ai-host
-#   docker run --gpus all -p 7420:7420 -e ATD_AI_HOST_TOKEN=... -v ~/atidarla-models:/models atd-ai-host
+#   docker build -t lsr-ai-host ai-host
+#   docker run --gpus all -p 7420:7420 -e LSR_AI_HOST_TOKEN=... -v ~/lasair-models:/models lsr-ai-host
 FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -11,7 +11,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_INSTALL_DIR=/opt/python \
-    ATD_MODELS_DIR=/models
+    LSR_MODELS_DIR=/models
 
 COPY --from=ghcr.io/astral-sh/uv:0.12.9 /uv /usr/local/bin/uv
 
@@ -24,12 +24,12 @@ RUN uv python install 3.13 \
  && uv sync --frozen --no-dev --extra diffusion --extra vision \
  && uv pip uninstall --python .venv/bin/python onnxruntime \
  && uv pip install --python .venv/bin/python onnxruntime-gpu \
- && useradd --create-home atd \
- && mkdir -p /models && chown atd /models
+ && useradd --create-home lsr \
+ && mkdir -p /models && chown lsr /models
 
 ENV PATH=/app/.venv/bin:$PATH
-USER atd
+USER lsr
 EXPOSE 7420
 VOLUME /models
-# Listening beyond loopback refuses to start without ATD_AI_HOST_TOKEN (or --token).
-ENTRYPOINT ["atd-ai-host", "--listen", "0.0.0.0:7420"]
+# Listening beyond loopback refuses to start without LSR_AI_HOST_TOKEN (or --token).
+ENTRYPOINT ["lsr-ai-host", "--listen", "0.0.0.0:7420"]

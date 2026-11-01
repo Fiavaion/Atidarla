@@ -1,0 +1,16 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Texture sharing"
+description = '''
+Sharing images with other applications on this computer (Spout on Windows, Syphon on macOS).
+Moving noise is published by Share Out as the sender "Lasair Example" and received back by
+Share In in the same patch (a loopback), then tinted so you can tell the two apart. The
+parameter panel shows the name each node publishes or receives.
+
+Other Spout or Syphon applications see "Lasair Example" in their sender or server lists. To
+receive one of theirs, pick it in Share In's Sender menu (empty follows the active sender, or
+on macOS the newest Syphon server). On Linux both nodes report that sharing is not available.
+
+Try: change Share Out's name and type the same name into Share In, or switch Share Out off.
+'''
+resolution = [640, 360]

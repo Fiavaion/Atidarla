@@ -1,7 +1,7 @@
 [project]
-name = "atd-ai-host"
+name = "lsr-ai-host"
 version = "0.1.0"
-description = "Atidarla AI Host: runs model work out of process for the Atidarla engine"
+description = "Lasair AI Host: runs model work out of process for the Lasair engine"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 requires-python = ">=3.11"
@@ -54,7 +54,7 @@ cloud = [
 ]
 
 [project.scripts]
-atd-ai-host = "atd_ai_host.__main__:main"
+lsr-ai-host = "lsr_ai_host.__main__:main"
 
 [dependency-groups]
 dev = ["pytest>=8", "onnx>=1.17", "numpy>=2.0"]
@@ -64,7 +64,7 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/atd_ai_host"]
+packages = ["src/lsr_ai_host"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

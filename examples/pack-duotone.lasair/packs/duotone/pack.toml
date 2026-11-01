@@ -1,0 +1,54 @@
+# Lasair Pack. Its network is network.toml; its help page is help.md.
+format = 1
+name = "duotone"
+version = "1.0.0"
+label = "Duotone"
+summary = "Recolours an image in two colours: its shadows in one, its highlights in the other, with a gradient between."
+locked = true
+
+[[param]]
+name = "shadows"
+label = "Shadows"
+default = [0.1, 0.03, 0.3, 1.0]
+help = "The colour dark areas become."
+to = [{ node = 1, param = "colour_a" }]
+
+[[param]]
+name = "highlights"
+label = "Highlights"
+default = [1.0, 0.8, 0.45, 1.0]
+help = "The colour bright areas become."
+to = [{ node = 1, param = "colour_b" }]
+
+[[param]]
+name = "contrast"
+label = "Contrast"
+default = 1.2
+min = 0.0
+max = 4.0
+help = "Contrast before recolouring: higher pushes more of the image to the two pure colours."
+to = [{ node = 0, param = "contrast" }]
+
+[[param]]
+name = "balance"
+label = "Balance"
+default = 0.0
+min = -0.5
+max = 0.5
+help = "Moves the point where shadows turn into highlights; positive and negative give more of one colour or the other."
+to = [{ node = 1, param = "phase" }]
+
+[[param]]
+name = "mix"
+label = "Mix"
+default = 1.0
+help = "0 shows the original image, 1 the duotone."
+to = [{ node = 3, param = "opacity" }]
+
+[[input]]
+name = "in"
+to = [{ node = 0, input = "in" }, { node = 3, input = "b" }]
+
+[[output]]
+name = "out"
+from = { node = 3, output = "out" }

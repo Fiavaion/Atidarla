@@ -1,0 +1,84 @@
+# Lasair network. Node IDs are stable: inputs and bindings refer to them.
+format = 1
+next_id = 9
+
+[[node]]
+id = 0
+name = "clock"
+type = "sig.beat"
+pos = [0.0, 0.0]
+params.bpm = 124.0
+
+[[node]]
+id = 1
+name = "sweep"
+type = "sig.lfo"
+pos = [220.0, 0.0]
+inputs.clock = { node = 0, output = "out" }
+params.amplitude = 40.0
+params.frequency = 0.25
+params.sync = "beats"
+
+[[node]]
+id = 2
+name = "flash"
+type = "sig.lfo"
+pos = [220.0, 140.0]
+inputs.clock = { node = 0, output = "out" }
+params.amplitude = -0.3
+params.frequency = 1.0
+params.offset = 0.7
+params.sync = "beats"
+params.waveform = "ramp"
+
+[[node]]
+id = 3
+name = "cycle"
+type = "sig.timer"
+pos = [220.0, 280.0]
+inputs.clock = { node = 0, output = "out" }
+params.length = 8.0
+params.sync = "beats"
+
+[[node]]
+id = 4
+name = "cycle_fraction"
+type = "sig.select"
+pos = [440.0, 280.0]
+inputs.in = { node = 3, output = "out" }
+params.channels = "fraction"
+
+[[node]]
+id = 5
+name = "hue"
+type = "sig.math"
+pos = [660.0, 280.0]
+inputs.a = { node = 4, output = "out" }
+params.to_max = 360.0
+
+[[node]]
+id = 6
+name = "star"
+type = "img.shape"
+pos = [0.0, 420.0]
+params.fill = [0.3, 0.9, 1.0, 1.0]
+params.rotate = { value = 0.0, bind = { node = 1, channel = "lfo" } }
+params.shape = "polygon"
+params.sides = 5
+params.size = [0.45, 0.45]
+
+[[node]]
+id = 7
+name = "colour"
+type = "img.hsv_adjust"
+pos = [220.0, 420.0]
+inputs.in = { node = 6, output = "out" }
+params.hue = { value = 0.0, bind = { node = 5, channel = "fraction" } }
+
+[[node]]
+id = 8
+name = "beat_flash"
+type = "img.level"
+pos = [440.0, 420.0]
+inputs.in = { node = 7, output = "out" }
+params.brightness = { value = 1.0, bind = { node = 2, channel = "lfo" } }

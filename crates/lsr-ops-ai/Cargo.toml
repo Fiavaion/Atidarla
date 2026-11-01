@@ -1,0 +1,37 @@
+[package]
+name = "lsr-ops-ai"
+description = "Lasair: AI operator family"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+lsr-core.workspace = true
+lsr-ai.workspace = true
+lsr-gpu.workspace = true
+lsr-interop.workspace = true
+# ComfyUI results decode with lsr-io's PNG/JPEG reader; inputs encode as PNG.
+lsr-io.workspace = true
+png.workspace = true
+wgpu.workspace = true
+serde_json.workspace = true
+log.workspace = true
+
+[dev-dependencies]
+pollster.workspace = true
+tungstenite.workspace = true
+lsr-ops-img.workspace = true
+lsr-stage.workspace = true
+
+[lints]
+workspace = true
+
+# PT-9 / M4 AC3: runs its own reference host as a child process (the test
+# binary re-executes itself), so it needs its own `main`.
+[[test]]
+name = "pt9"
+harness = false

@@ -1,0 +1,17 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "PNT Fountain"
+description = '''
+Forces on a particle loop (M2 PNT batch): Emitter shoots particles up from a ring (Scatter,
+with normals pointing up) into a Particles system that emits nothing itself. In its feedback
+loop Gravity pulls them down, Vortex spins them about the vertical axis, Turbulence and Wind
+stir them, Drag slows them and Collide bounces them off the floor. Colour by Attribute paints
+them by speed (heat ramp) before Render Points draws them with bloom.
+
+The state lives on the wire: Particles reads the end of the force chain (Collide) through its
+feedback input prev, so every force carries on to the next frame. Counts stay on the GPU.
+
+Try: Vortex strength 3; Collide shape sphere_inside with radius 1.1; Wind gust 2; Emitter
+spread 1.
+'''
+resolution = [1280, 720]

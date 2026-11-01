@@ -1,0 +1,13 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "Pack: Chromatic Aberration"
+description = '''
+Text through the Chromatic Aberration Pack: red and blue split apart, the split breathing with
+an LFO bound to the Pack's Amount.
+
+Inside the Pack, blue moves by minus red's amount through an expression,
+`-op('red_shift').par.amount`, which still works when the Pack is placed twice.
+
+Try: change Direction to 1, 1 for a diagonal split.
+'''
+resolution = [1280, 720]

@@ -1,0 +1,13 @@
+# Lasair project. The patch is in networks/main.toml.
+format = 1
+name = "DAT files"
+description = '''
+Files on DAT wires. `cues` reads data/cues.csv as a table (quoted cells keep their commas) and
+reloads it whenever the file is saved; `verses` keeps the cues whose scene is `verse`. `show`
+reads data/show.json as text and `acts` turns its `acts` array into a table with a header row.
+`export` writes the verses to out/verses.tsv when you press its Write Now pulse.
+
+Try: edit data/cues.csv in a text editor and save it; press `export`'s Write Now; set `export`
+to on_change to write every change.
+'''
+resolution = [1280, 720]

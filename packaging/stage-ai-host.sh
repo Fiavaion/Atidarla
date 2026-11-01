@@ -10,7 +10,7 @@
 # requirements of each optional extra (ai-host/requirements/, exported from
 # uv.lock). The base host is standard library only; extras (torch, ONNX
 # Runtime, ...) are installed later only on request, into the user's folder
-# (`atidarla ai-host install`). No packages and no model weights are shipped.
+# (`lasair ai-host install`). No packages and no model weights are shipped.
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -20,7 +20,7 @@ PY=${2:?usage: stage-ai-host.sh <dest> <python>}
 rm -rf "$DEST"
 mkdir -p "$DEST/src"
 cp "$ROOT/ai-host/pyproject.toml" "$ROOT/ai-host/uv.lock" "$ROOT/ai-host/README.md" "$DEST/"
-cp -R "$ROOT/ai-host/src/atd_ai_host" "$DEST/src/"
+cp -R "$ROOT/ai-host/src/lsr_ai_host" "$DEST/src/"
 cp -R "$ROOT/ai-host/requirements" "$DEST/requirements"
 find "$DEST" -name __pycache__ -type d -prune -exec rm -rf {} +
 find "$DEST" -name '*.pyc' -delete
