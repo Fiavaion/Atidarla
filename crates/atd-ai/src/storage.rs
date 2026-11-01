@@ -573,13 +573,15 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn junctions_are_never_followed() {
+        // `mklink` reads a `/` inside a path as a switch.
+        let windows_path = |p: &Path| p.to_string_lossy().replace('/', "\\");
         let junction = |link: &Path, target: &Path| {
             let out = std::process::Command::new("cmd")
                 .arg("/C")
                 .arg("mklink")
                 .arg("/J")
-                .arg(link)
-                .arg(target)
+                .arg(windows_path(link))
+                .arg(windows_path(target))
                 .output()
                 .unwrap();
             assert!(out.status.success(), "{out:?}");
