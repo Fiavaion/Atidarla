@@ -18,6 +18,7 @@ mod pt8;
 mod render;
 mod serve;
 mod soak;
+mod storage;
 mod supervise;
 
 /// The mock ComfyUI server of `atd-ops-ai`'s tests, for the render test.
@@ -336,6 +337,13 @@ enum Command {
         #[command(subcommand)]
         action: models::ModelsCommand,
     },
+    /// What Atidarla keeps for this user (AI Host packages, models,
+    /// settings), with sizes, and removing it; `uninstall` is what the
+    /// Windows uninstaller runs (PRD A70, docs/install.md).
+    Storage {
+        #[command(subcommand)]
+        action: Option<storage::StorageCommand>,
+    },
     /// Batch wedges (FR-B1–B3, docs/batch.md): cook work items over
     /// parameters (prompts, seeds, any parameter) across AI Hosts into the
     /// Stage media bin (media/bin), skipping items already there.
@@ -509,6 +517,7 @@ fn main() -> ExitCode {
         Command::VerifyShow { bundle, gpu } => export::verify(&bundle, gpu),
         Command::AiHost { action } => ai_host::run(action),
         Command::Models { action } => models::run(action),
+        Command::Storage { action } => storage::run(action),
         Command::Cloud { action } => cloud::run(action),
         Command::Points { action } => points::run(action),
         Command::Run {

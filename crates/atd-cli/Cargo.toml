@@ -50,6 +50,10 @@ toml_edit = { workspace = true, features = ["serde"] }
 # `run` supervisor: stop the child on Ctrl-C / SIGTERM.
 ctrlc.workspace = true
 
+# `storage uninstall --models ask`: the Yes/No message box.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_UI_WindowsAndMessaging"] }
+
 [dev-dependencies]
 # The mock ComfyUI server shared with atd-ops-ai's tests (render test).
 tungstenite.workspace = true
