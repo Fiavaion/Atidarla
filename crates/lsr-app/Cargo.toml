@@ -44,6 +44,10 @@ lsr-py.workspace = true
 rfd.workspace = true
 pollster.workspace = true
 
+# The exe's icon resource (build.rs, PRD A69).
+[target.'cfg(windows)'.build-dependencies]
+winresource.workspace = true
+
 [features]
 # Non-HAP video through FFmpeg (PRD A23); needs FFmpeg development files.
 ffmpeg = ["lsr-ops-img/ffmpeg"]

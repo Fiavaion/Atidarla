@@ -100,7 +100,8 @@ fn main() -> ExitCode {
             .with_inner_size([1440.0, 900.0])
             .with_min_inner_size([800.0, 500.0])
             .with_fullscreen(kiosk)
-            .with_decorations(!kiosk),
+            .with_decorations(!kiosk)
+            .with_icon(window_icon()),
         ..Default::default()
     };
     let heartbeat = heartbeat.and_then(|path| {
@@ -131,5 +132,26 @@ fn main() -> ExitCode {
             eprintln!("error: {e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// The window's icon (title bar, taskbar, Alt-Tab; PRD A69): the 256 px
+/// render of `packaging/icons/lasair.svg`, decoded once before the window
+/// opens.
+fn window_icon() -> egui::IconData {
+    const PNG: &[u8] = include_bytes!("../../../packaging/icons/png/lasair-256.png");
+    eframe::icon_data::from_png_bytes(PNG).expect("the embedded icon is a valid PNG")
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn window_icon_decodes_at_256_px() {
+        let icon = super::window_icon();
+        assert_eq!((icon.width, icon.height), (256, 256));
+        assert_eq!(icon.rgba.len(), 256 * 256 * 4);
+        // The tile's rounded corners are transparent, its centre opaque.
+        assert_eq!(icon.rgba[3], 0);
+        assert_eq!(icon.rgba[(128 * 256 + 128) * 4 + 3], 255);
     }
 }
