@@ -224,8 +224,17 @@ expressions are evaluated in Rust and always run.
   the expression worker and the Script worker check each job again before running it, so a job
   queued before the list changed (another project opened) does not run.
 
-Known limit: a script that never returns holds the Script worker (no timeout yet; the show is
-not affected).
+**Script timeouts.** A Script run longer than the node's Timeout (`timeout_s`, default 5 s, 0
+for none) is stopped the same way as a Python operator's cook: a `TimeoutError` is raised inside
+it, and the node reports it with the line it was stuck on and keeps its last good value. Code
+that cannot be interrupted (a blocking C call such as a long `time.sleep` or a socket read, or a
+script that catches the `TimeoutError` and carries on) gets one more second; then the Script
+worker is abandoned for a fresh one, so the next run works, and the node says so. The abandoned
+thread exits when its call returns. A C call that holds the GIL the whole time (a pathological
+regular expression, say) cannot be stopped by anything in-process: the node still reports the
+timeout and the show keeps running, but every Python worker waits until that call returns.
+The render thread never waits for any of this. Offline, a frame waits at most the Timeout plus
+2 s (30 s with Timeout 0).
 
 ## Where it lives
 

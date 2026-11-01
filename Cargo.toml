@@ -81,6 +81,11 @@ image-webp = "0.2"
 # store (platform verifier), so no bundled root list and no native-tls.
 ureq = { version = "3.5", default-features = false, features = ["rustls-no-provider", "platform-verifier"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+# WebSocket `wss://` (atd-ops-dat): the same OS trust store as the downloads.
+rustls-platform-verifier = "0.7"
+# Tests only: certificates for local TLS servers (MIT OR Apache-2.0).
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
+time = "0.3"
 # ComfyUI client (atd-ai::comfy): plain HTTP and WebSocket to a local or LAN
 # server through the egress gate. ureq 2 for its resolver hook (the gate
 # pins the resolved address); to move to ureq 3 with the model downloads.

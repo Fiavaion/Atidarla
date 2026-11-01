@@ -40,3 +40,4 @@ def cook(inputs):
     words = text.split()
     return {"lines": len(text.splitlines()), "words": len(words), "longest": max(words, key=len, default="")}
 '''
+params.timeout_s = 2.0
