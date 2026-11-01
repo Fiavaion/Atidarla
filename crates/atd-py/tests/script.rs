@@ -52,13 +52,17 @@ impl Rig {
     }
 
     fn code(&mut self, code: &str) {
+        self.set("code", json!(code));
+    }
+
+    fn set(&mut self, param: &str, value: serde_json::Value) {
         self.net
             .apply(
                 &self.registry,
                 Edit::SetParam {
                     node: self.node,
-                    param: "code".into(),
-                    value: Some(Param::constant(json!(code))),
+                    param: param.into(),
+                    value: Some(Param::constant(value)),
                 },
             )
             .unwrap();
@@ -188,5 +192,53 @@ fn inputs_become_python_values_and_results_dats() {
     rig.code_allowed("import time\ndef cook(inputs):\n    time.sleep(0.05)\n    return 'slow'\n");
     rig.cook_in(CookMode::Offline { fps: 30.0 }).unwrap();
     assert_eq!(rig.out.as_text(), "slow");
+    atd_py::allow::clear();
+}
+
+#[test]
+fn a_script_past_its_timeout_is_stopped_and_the_next_run_works() {
+    let _gate = GATE.lock().unwrap_or_else(|e| e.into_inner());
+    atd_py::allow::clear();
+    let mut rig = Rig::new("def cook(inputs):\n    return 'good'\n");
+    rig.set("timeout_s", json!(0.3));
+    rig.allow();
+    rig.until(|r, _| r.out.as_text() == "good").unwrap();
+    let restarts = script::restarts();
+    // Pure Python is interrupted where it is stuck; the last good value
+    // stays and the cook never waits (`until` checks).
+    rig.code_allowed("def cook(inputs):\n    while True:\n        pass\n");
+    let e = rig.until(|_, r| r.is_err()).unwrap_err();
+    assert!(
+        e.starts_with("TimeoutError") && e.contains("0.3 s") && e.contains("stopped at line 2"),
+        "{e}"
+    );
+    assert_eq!(rig.out.as_text(), "good");
+    assert_eq!(script::restarts(), restarts, "interrupted, not replaced");
+    rig.code_allowed("def cook(inputs):\n    return 'next'\n");
+    rig.until(|r, _| r.out.as_text() == "next").unwrap();
+    // A blocking call cannot be interrupted: the worker is replaced.
+    rig.code_allowed("import time\ndef cook(inputs):\n    time.sleep(30)\n");
+    let e = rig.until(|_, r| r.is_err()).unwrap_err();
+    assert!(e.contains("Script worker was replaced"), "{e}");
+    assert_eq!(rig.out.as_text(), "next");
+    assert_eq!(script::restarts(), restarts + 1);
+    rig.code_allowed("def cook(inputs):\n    return 'after'\n");
+    rig.until(|r, _| r.out.as_text() == "after").unwrap();
+    // Swallowing the TimeoutError does not help either.
+    rig.code_allowed(
+        "def cook(inputs):\n    while True:\n        try:\n            while True:\n                pass\n        except Exception:\n            pass\n",
+    );
+    let e = rig.until(|_, r| r.is_err()).unwrap_err();
+    assert!(e.contains("replaced"), "{e}");
+    // Offline the frame waits about the timeout, then fails.
+    rig.code_allowed("def cook(inputs):\n    while True:\n        pass\n");
+    let t = Instant::now();
+    let e = rig.cook_in(CookMode::Offline { fps: 30.0 }).unwrap_err();
+    assert!(e.starts_with("TimeoutError"), "{e}");
+    assert!(t.elapsed() < Duration::from_secs(3), "{:?}", t.elapsed());
+    // 0: no limit.
+    rig.set("timeout_s", json!(0.0));
+    rig.code_allowed("import time\ndef cook(inputs):\n    time.sleep(0.5)\n    return 'slow'\n");
+    rig.until(|r, _| r.out.as_text() == "slow").unwrap();
     atd_py::allow::clear();
 }
