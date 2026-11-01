@@ -59,8 +59,8 @@ The CLI is `/Applications/Atidarla.app/Contents/MacOS/atidarla` on macOS,
   `~/Library/Application Support/Atidarla/ai-host/python3.13` (macOS),
   `%LOCALAPPDATA%\Atidarla\ai-host\python3.13` (Windows),
   `$XDG_DATA_HOME/atidarla/ai-host/python3.13` or `~/.local/share/atidarla/ai-host/python3.13`
-  (Linux). The host picks them up the next time it starts. Uninstalling the app leaves them; delete
-  the folder (or run `atidarla ai-host remove` first) to reclaim the space.
+  (Linux). The host picks them up the next time it starts. `atidarla ai-host remove` removes
+  them; uninstalling removes them too ([Uninstalling](#uninstalling)).
 - **Sovereign mode** (the default) blocks the download: `install` refuses without
   `--allow-internet` and says so. Nothing is installed on start or in the background.
 - **Offline (a machine with no internet).** On a connected machine with the same OS and CPU,
@@ -213,6 +213,51 @@ The AppImage carries the app, the CLI, the examples, Python and the AI Host
 (`./Atidarla-*.AppImage ai-host status`); the GPU driver (Vulkan), ALSA,
 X11 or Wayland come from the system. Build with `packaging/linux/build-appimage.sh`
 (it downloads `appimagetool` into `dist/tools` unless `APPIMAGETOOL` points at one).
+
+## Uninstalling
+
+Uninstalling removes everything Atidarla installed for you (PRD A70): the AI Host packages,
+caches and logs, your settings (`ui.toml`, Learn progress, trusted Python operators), host tokens
+(`hosts.toml`) and cloud keys (`secrets.toml`). **Model files are the exception**: a reinstall,
+or other tools pointed at the model folder, may reuse them, so you choose whether to keep them in
+storage or remove them. Models that other tools manage themselves (Ollama's `~/.ollama`, the
+Hugging Face cache) are never touched. When `ATD_MODELS_DIR` points the model cache at a folder of
+your own, only the catalogue models' folders in it are removed.
+
+See what is kept, with sizes, and remove it by kind at any time:
+
+```sh
+atidarla storage                      # or: atidarla storage list
+atidarla storage remove packages      # kinds: packages, models, cache, settings
+atidarla storage uninstall            # everything but the models, then asks about them
+atidarla storage uninstall --models keep    # or --models remove: no question
+```
+
+**Windows.** Uninstalling runs `atidarla storage uninstall` as you, before the files go. With the
+MSI's full UI (`msiexec /x Atidarla-<version>-windows-x64.msi`, no `/q`) it asks about the model
+files in a Yes/No box (No keeps them). Every other uninstall keeps them: silent (`/qn`), basic or
+reduced UI, and the setup `.exe`, which runs the MSI without its UI. An upgrade to a newer version
+removes nothing. If the clean-up fails, the uninstall still completes;
+run `atidarla storage` from the new install, or delete the folders below. The data is per user:
+other accounts on the machine keep theirs.
+
+**macOS** has no uninstaller. Remove your data with
+`/Applications/Atidarla.app/Contents/MacOS/atidarla storage uninstall`, or **Remove app data…**
+in the app, then drag Atidarla from Applications to the Trash. Both ask about the model files.
+
+**Linux** is the same: `./Atidarla-*.AppImage storage uninstall` (or **Remove app data…**), then
+delete the AppImage.
+
+What it removes, by platform:
+
+| Kind | macOS | Windows | Linux |
+|---|---|---|---|
+| `packages` | `~/Library/Application Support/Atidarla/ai-host` | `%LOCALAPPDATA%\Atidarla\ai-host` | `~/.local/share/atidarla/ai-host` |
+| `models` | `~/Library/Caches/Atidarla/models`, `accepted.toml` | `%LOCALAPPDATA%\Atidarla\models`, `accepted.toml` | `~/.cache/atidarla/models`, `accepted.toml` |
+| `settings` | `hosts.toml`, `secrets.toml` beside `accepted.toml`; `ui.toml`, `learn.toml`, `allowed-python-ops.txt` in `~/Library/Application Support/Atidarla` | the same beside `accepted.toml`; the rest in `%APPDATA%\Atidarla` | the same beside `accepted.toml`; the rest in `~/.config/atidarla` |
+| `cache` | none today (logs go to the terminal; a project's caches stay in its `.cache/`) | | |
+
+The folders around them are removed only when nothing else is left in them.
 
 ## Release builds in CI
 
