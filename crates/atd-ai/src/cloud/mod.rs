@@ -45,8 +45,12 @@ pub fn read_secret(path: &Path, keys: &[&str]) -> Option<String> {
 }
 
 /// Writes `section.key` (dotted path) into a secrets file, creating it
-/// readable by this user only.
+/// readable by this user only. Refused in a folder whose app data was
+/// removed this session ([`atd_core::user_data`]).
 pub fn write_secret(path: &Path, keys: &[&str], secret: &str) -> std::io::Result<()> {
+    if atd_core::user_data::was_removed(path) {
+        return Err(atd_core::user_data::removed_error(path));
+    }
     let (last, tables) = keys.split_last().expect("at least one key");
     let mut doc: DocumentMut = std::fs::read_to_string(path)
         .ok()

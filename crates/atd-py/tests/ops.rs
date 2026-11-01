@@ -407,6 +407,19 @@ fn the_trust_store_remembers_contents_not_folders() {
     assert!(!store.contains(PythonOps::open(&p.0).hash()));
 }
 
+/// After Remove app data… the trust store writes nothing more this session.
+#[test]
+fn the_trust_store_writes_nothing_after_app_data_is_removed() {
+    let p = TempProject::new("trust-removed", &[("counter.py", COUNTER)]);
+    let settings = p.0.join("settings");
+    let store = TrustStore::at(settings.join("allowed.txt"));
+    let ops = PythonOps::open(&p.0);
+    atd_core::user_data::mark_removed(&settings);
+    let err = store.remember(ops.hash(), &p.0).unwrap_err();
+    assert!(err.to_string().contains("removed this session"), "{err}");
+    assert!(!store.path().exists());
+}
+
 /// A SIG counter keeps state across frames; an LFO reads its parameters
 /// and a SIG input; parameters can follow channels.
 #[test]

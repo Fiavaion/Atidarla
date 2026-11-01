@@ -31,6 +31,7 @@ impl TrustStore {
             var("HOME")?.join("Library/Application Support/Atidarla")
         } else {
             var("XDG_CONFIG_HOME")
+                .filter(|p| p.is_absolute())
                 .or_else(|| var("HOME").map(|h| h.join(".config")))?
                 .join("atidarla")
         };
@@ -60,10 +61,14 @@ impl TrustStore {
     }
 
     /// Remembers `hash` as allowed (the project's `ops/` files exactly as
-    /// they are now).
+    /// they are now). Refused in a folder whose app data was removed this
+    /// session ([`atd_core::user_data`]).
     pub fn remember(&self, hash: &str, project: &Path) -> std::io::Result<()> {
         if hash.is_empty() || self.contains(hash) {
             return Ok(());
+        }
+        if atd_core::user_data::was_removed(&self.path) {
+            return Err(atd_core::user_data::removed_error(&self.path));
         }
         if let Some(dir) = self.path.parent() {
             std::fs::create_dir_all(dir)?;

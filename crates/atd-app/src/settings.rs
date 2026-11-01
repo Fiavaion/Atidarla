@@ -85,11 +85,15 @@ impl UiSettings {
     }
 
     /// Writes the settings on a worker thread (the UI thread never waits
-    /// for the disk). Does nothing for in-memory settings.
+    /// for the disk). Does nothing for in-memory settings, or in a folder
+    /// whose app data was removed this session ([`atd_core::user_data`]).
     pub fn save(&self) {
         let Some(path) = self.path.clone() else {
             return;
         };
+        if atd_core::user_data::was_removed(&path) {
+            return;
+        }
         let text = self.to_toml();
         std::thread::spawn(move || {
             let written = path
@@ -100,12 +104,6 @@ impl UiSettings {
                 log::warn!("settings: could not write {}: {e}", path.display());
             }
         });
-    }
-
-    /// Writes nothing more this session (the settings files were removed,
-    /// e.g. by Remove app data…).
-    pub fn stop_saving(&mut self) {
-        self.path = None;
     }
 
     /// Follows the context's zoom factor (changed by Ctrl/Cmd +, - and 0
@@ -137,6 +135,18 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("atd-settings-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         dir.join(FILE)
+    }
+
+    /// A zoom change after Remove app data… does not write `ui.toml` again.
+    #[test]
+    fn nothing_is_written_after_app_data_is_removed() {
+        let path = temp("removed");
+        let mut s = UiSettings::load(path.clone());
+        atd_core::user_data::mark_removed(path.parent().unwrap());
+        assert!(s.follow_zoom(1.25));
+        s.save();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(!path.exists());
     }
 
     #[test]

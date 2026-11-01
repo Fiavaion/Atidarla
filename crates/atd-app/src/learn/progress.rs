@@ -70,10 +70,15 @@ impl Progress {
         self.steps.insert(id.to_owned(), n) != Some(n)
     }
 
+    /// Writes nothing in memory, or in a folder whose app data was removed
+    /// this session ([`atd_core::user_data`]).
     pub fn save(&self) -> std::io::Result<()> {
         let Some(path) = &self.path else {
             return Ok(());
         };
+        if atd_core::user_data::was_removed(path) {
+            return Ok(());
+        }
         let mut doc = DocumentMut::new();
         doc.decor_mut()
             .set_prefix("# Atidarla Learn progress: steps finished per quest.\n");
@@ -130,5 +135,16 @@ mod tests {
         std::fs::write(&file, "steps = [[[ not toml").unwrap();
         assert_eq!(Progress::load(file).done("01-first-patch"), 0);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn nothing_is_written_after_app_data_is_removed() {
+        let dir = std::env::temp_dir().join(format!("atd-learn-removed-{}", std::process::id()));
+        let file = dir.join("learn.toml");
+        let mut p = Progress::load(file.clone());
+        p.set("01-first-patch", 1);
+        atd_core::user_data::mark_removed(&dir);
+        p.save().unwrap();
+        assert!(!file.exists());
     }
 }

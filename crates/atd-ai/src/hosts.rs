@@ -48,8 +48,12 @@ impl HostTokens {
     }
 
     /// Writes `path` (to a temporary file readable by the user only, then
-    /// renamed).
+    /// renamed). Refused in a folder whose app data was removed this session
+    /// ([`atd_core::user_data`]).
     pub fn save(&self, path: &Path) -> Result<(), String> {
+        if atd_core::user_data::was_removed(path) {
+            return Err(atd_core::user_data::removed_error(path).to_string());
+        }
         let err = |e: std::io::Error| format!("{}: {e}", path.display());
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(err)?;

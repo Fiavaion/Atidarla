@@ -192,7 +192,15 @@ impl Storage {
     }
 
     /// Removes the items of `kinds`, then the app's folders left empty.
+    /// Removing the settings also stops every settings writer from writing
+    /// them again this session ([`atd_core::user_data`]).
     pub fn remove(&self, kinds: &[Kind]) -> Removal {
+        if kinds.contains(&Kind::Settings) {
+            atd_core::user_data::mark_removed(&self.settings);
+            if let Some(config) = &self.config {
+                atd_core::user_data::mark_removed(config);
+            }
+        }
         let mut out = Removal::default();
         for entry in self.list() {
             if !kinds.contains(&entry.kind) {
@@ -462,6 +470,28 @@ mod tests {
         s.remove(&[Kind::Models]);
         assert!(!shared.join(id).exists());
         assert!(shared.join("someone-elses/weights.bin").is_file());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Once the settings are removed, host tokens and cloud keys are not
+    /// written again this session (a later save would undo the removal).
+    #[test]
+    fn removed_settings_are_not_written_again() {
+        let root = scratch("rewrite");
+        let s = layout(&root);
+        let store = Store::with_settings_dir(&s.models, &s.settings);
+        let mut tokens = crate::hosts::HostTokens::default();
+        tokens.set("lan:studio", "tok");
+        s.remove(&[Kind::Packages]);
+        tokens.save(&store.hosts_path()).unwrap();
+
+        s.remove(&[Kind::Settings]);
+        let err = tokens.save(&store.hosts_path()).unwrap_err();
+        assert!(err.contains("removed this session"), "{err}");
+        crate::cloud::write_secret(&store.secrets_path(), &["runpod", "api_key"], "k").unwrap_err();
+        assert!(!store.hosts_path().exists() && !store.secrets_path().exists());
+        // Elsewhere is unaffected.
+        tokens.save(&root.join("elsewhere/hosts.toml")).unwrap();
         let _ = std::fs::remove_dir_all(&root);
     }
 

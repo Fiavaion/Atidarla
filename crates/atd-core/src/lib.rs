@@ -16,6 +16,7 @@ pub mod pack;
 pub mod platform;
 pub mod registry;
 pub mod runtime;
+pub mod user_data;
 pub mod wgsl;
 
 pub use capability::{CapabilityFlag, CapabilityRequirement, Fallback};
