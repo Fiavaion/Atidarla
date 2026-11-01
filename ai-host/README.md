@@ -30,13 +30,22 @@ changing `uv.lock`, regenerate them (`tests/test_requirements.py` fails until yo
 uv export --frozen --extra vision --no-dev --no-emit-project --no-header --format requirements-txt -q -o requirements/vision.txt
 ```
 
-(and the same for `stt`, `diffusion`, `cloud`). No ML packages and no weights are bundled.
+(and the same for `stt`, `diffusion`, `diffusion-cuda`, `cloud`). No ML packages and no weights are bundled.
+
+`diffusion-cuda` is `diffusion` with PyTorch's CUDA 13.4 build (`+cu134`, from
+`download.pytorch.org/whl/cu134`) on Windows and Linux, for NVIDIA driver 580 or later; macOS
+resolves it to the standard wheels. The two extras conflict (`[tool.uv] conflicts`), so a checkout
+syncs one: `uv sync --extra diffusion-cuda` on an NVIDIA PC. To move to a newer CUDA build, change
+the index URL in `pyproject.toml` and `PYTORCH_INDEX` / `CUDA_BUILD` / `CUDA_DRIVER_FLOOR` in
+`crates/atd-ai/src/hostenv.rs` together (a test in each checks they agree), then `uv lock` and
+re-export.
 The supervisor's lookup order is `ATD_AI_HOST_CMD`, then the bundled host, then this checkout.
 
 | Extra | Adapter | Runs |
 |---|---|---|
 | (none) | `builtin` | `builtin.invert`, `builtin.echo` (reference models for tests) |
 | `diffusion` | `diffusion.sd` | SD-Turbo-class img2img: stream batch, R-CFG, similarity filter, TAESD, Prompt Blend |
+| `diffusion-cuda` | `diffusion.sd` | the same on PyTorch's CUDA build (Windows, Linux) |
 | `vision` | `onnx` | any `.onnx` vision model: depth, segment, pose, flow, background, upscale, generic |
 | – | `video.v2v` | interface only; backends (Decart) arrive later |
 

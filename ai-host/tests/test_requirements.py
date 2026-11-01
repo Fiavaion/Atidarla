@@ -10,6 +10,7 @@ be exactly `uv export` of `uv.lock` for that extra. Regenerate with:
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import tomllib
@@ -40,6 +41,37 @@ def test_requirements_pin_every_package_by_hash(extra):
     # Each pinned entry is followed by at least one hash.
     assert text.count("--hash=sha256:") >= len(entries)
     assert not any(line.startswith("atd-ai-host") for line in entries), "the host ships as source"
+
+
+def torch_pins(extra: str) -> dict[str, str]:
+    """`torch` version per marker in an extra's requirements."""
+    text = (ROOT / "requirements" / f"{extra}.txt").read_text()
+    return {
+        marker.strip(): version
+        for version, marker in re.findall(r"^torch==(\S+)(?: ;([^\\\n]*))?", text, flags=re.MULTILINE)
+    }
+
+
+def test_the_cuda_extra_takes_torch_from_pytorchs_cuda_index_on_windows_and_linux_only():
+    # `atd_ai::hostenv::PYTORCH_INDEX` passes this index to pip.
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    (index,) = pyproject["tool"]["uv"]["index"]
+    assert index["explicit"] is True
+    (source,) = pyproject["tool"]["uv"]["sources"]["torch"]
+    assert source == {
+        "index": index["name"],
+        "extra": "diffusion-cuda",
+        "marker": "sys_platform == 'win32' or sys_platform == 'linux'",
+    }
+    assert [{"extra": "diffusion"}, {"extra": "diffusion-cuda"}] in pyproject["tool"]["uv"]["conflicts"]
+    cuda_tag = index["url"].rsplit("/", 1)[1]
+    pins = torch_pins("diffusion-cuda")
+    assert pins["sys_platform == 'linux' or sys_platform == 'win32'"].endswith(f"+{cuda_tag}")
+    assert "+" not in pins["sys_platform != 'linux' and sys_platform != 'win32'"], "macOS keeps PyPI's torch"
+    (standard,) = torch_pins("diffusion").values()
+    assert "+" not in standard
+    # Same torch release in both, so the adapter sees one API.
+    assert {v.split("+")[0] for v in pins.values()} == {standard}
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv")

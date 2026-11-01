@@ -21,6 +21,18 @@ diffusion = [
     "numpy>=2.0",
     "pillow>=11",
 ]
+# The same with PyTorch's CUDA 13.4 build on Windows and Linux (NVIDIA driver
+# 580 or later; PRD A70): PyPI's Windows torch is CPU only. macOS resolves to
+# the standard wheels. Install one of `diffusion` and `diffusion-cuda`.
+diffusion-cuda = [
+    "torch>=2.5",
+    "diffusers>=0.31",
+    "transformers>=4.46",
+    "safetensors>=0.4",
+    "accelerate>=1.0",
+    "numpy>=2.0",
+    "pillow>=11",
+]
 # Vision models through ONNX Runtime (adapter `onnx`) and the `jpeg` codec.
 vision = [
     "onnxruntime>=1.20",
@@ -56,6 +68,21 @@ packages = ["src/atd_ai_host"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.uv]
+conflicts = [[{ extra = "diffusion" }, { extra = "diffusion-cuda" }]]
+
+# Only torch comes from PyTorch's index, and only for `diffusion-cuda` on
+# Windows and Linux; everything else (its nvidia-* libraries too) is PyPI's.
+[[tool.uv.index]]
+name = "pytorch-cu134"
+url = "https://download.pytorch.org/whl/cu134"
+explicit = true
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu134", extra = "diffusion-cuda", marker = "sys_platform == 'win32' or sys_platform == 'linux'" },
+]
 
 [tool.ruff]
 line-length = 120
