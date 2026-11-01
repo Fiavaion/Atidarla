@@ -229,10 +229,13 @@ impl AtidarlaApp {
             vec![Tab::Timeline],
             vec![Tab::Patch, Tab::Stage, Tab::Outputs],
         );
+        let mut ai_hosts = crate::ai_hosts::AiHostsPanel::default();
         if smoke.is_some() {
-            // Smoke runs draw the Assistant too (closed by default), so CI
-            // proves it renders over a live engine.
+            // Smoke runs draw the Assistant and the AI Hosts window with its
+            // Storage section too (closed by default), so CI proves they
+            // render over a live engine.
             dock.open(Area::Left, Tab::Assistant);
+            ai_hosts.show_storage();
         }
         Self {
             shell,
@@ -258,7 +261,7 @@ impl AtidarlaApp {
                 record: Default::default(),
                 outputs: Default::default(),
                 models: Default::default(),
-                ai_hosts: Default::default(),
+                ai_hosts,
                 learn: Default::default(),
                 diff: Default::default(),
                 merge: Default::default(),
@@ -368,7 +371,7 @@ impl eframe::App for AtidarlaApp {
         self.shortcuts(ui);
         self.project_frame(ui.ctx());
         let (ai, opened) = (&self.project.meta.ai, self.project.opened);
-        self.panels.ai_hosts.frame(ai, opened);
+        self.panels.ai_hosts.frame(ai, opened, &mut self.settings);
         self.python_frame(ui.ctx());
         self.kernels_frame();
         if !self.shell.kiosk {
@@ -434,10 +437,21 @@ impl eframe::App for AtidarlaApp {
                         }
                         if ui
                             .button("AI Hosts")
-                            .on_hover_text("Where AI nodes run, Sovereign mode and cloud spending")
+                            .on_hover_text(
+                                "AI assist, where AI nodes run, Sovereign mode and cloud spending",
+                            )
                             .clicked()
                         {
                             self.panels.ai_hosts.open = true;
+                        }
+                        if ui
+                            .button("Storage")
+                            .on_hover_text(
+                                "What Atidarla keeps for you, with sizes; remove app data",
+                            )
+                            .clicked()
+                        {
+                            self.panels.ai_hosts.show_storage();
                         }
                         if ui
                             .button(tab_title(Tab::Learn))
@@ -538,7 +552,8 @@ impl eframe::App for AtidarlaApp {
             .window(ui.ctx(), p.engine.as_ref(), &mut self.project.meta.mappings);
         let meta = &mut self.project.meta;
         p.models.window(ui.ctx(), &mut meta.ai, &meta.models);
-        p.ai_hosts.window(ui.ctx(), &mut meta.ai);
+        p.ai_hosts
+            .window(ui.ctx(), &mut meta.ai, &mut self.settings);
         p.ai_hosts.confirm(ui.ctx(), &mut meta.ai);
         p.diff.window(ui.ctx(), p.engine.as_ref(), &self.project);
         let merged = p.merge.window(ui.ctx(), p.engine.as_ref(), &self.project);

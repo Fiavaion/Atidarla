@@ -13,24 +13,10 @@ pub const MAX_SCALE: f32 = 5.0;
 
 /// The app's per-user config folder: `%APPDATA%\Atidarla` on Windows,
 /// `~/Library/Application Support/Atidarla` on macOS, else
-/// `$XDG_CONFIG_HOME/atidarla` (or `~/.config/atidarla`).
+/// `$XDG_CONFIG_HOME/atidarla` (or `~/.config/atidarla`). The storage list
+/// and the uninstall use the same folder.
 pub fn config_dir() -> Option<PathBuf> {
-    let var = |k: &str| {
-        std::env::var_os(k)
-            .filter(|v| !v.is_empty())
-            .map(PathBuf::from)
-    };
-    if cfg!(windows) {
-        Some(var("APPDATA")?.join("Atidarla"))
-    } else if cfg!(target_os = "macos") {
-        Some(var("HOME")?.join("Library/Application Support/Atidarla"))
-    } else {
-        Some(
-            var("XDG_CONFIG_HOME")
-                .or_else(|| var("HOME").map(|h| h.join(".config")))?
-                .join("atidarla"),
-        )
-    }
+    atd_ai::storage::config_dir()
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -39,6 +25,9 @@ pub struct UiSettings {
     pub scale: f32,
     /// Draw each wire's type (IMG, SIG, ...) at its middle.
     pub wire_labels: bool,
+    /// The AI assist switch (PRD A70 b); `None` until the user sets it,
+    /// which reads as on when AI Host extras are installed.
+    pub ai_assist: Option<bool>,
     /// Where they are kept; `None` keeps them in memory (tests, smoke runs).
     path: Option<PathBuf>,
 }
@@ -48,6 +37,7 @@ impl Default for UiSettings {
         Self {
             scale: 1.0,
             wire_labels: false,
+            ai_assist: None,
             path: None,
         }
     }
@@ -71,6 +61,7 @@ impl UiSettings {
                 if let Some(v) = doc.get("wire_labels").and_then(|v| v.as_bool()) {
                     s.wire_labels = v;
                 }
+                s.ai_assist = doc.get("ai_assist").and_then(|v| v.as_bool());
             }
             Err(e) => log::warn!("settings: {}: {e}; using the defaults", path.display()),
         }
@@ -87,6 +78,9 @@ impl UiSettings {
         let mut doc = DocumentMut::new();
         doc["scale"] = value(f64::from((self.scale * 100.0).round() / 100.0));
         doc["wire_labels"] = value(self.wire_labels);
+        if let Some(on) = self.ai_assist {
+            doc["ai_assist"] = value(on);
+        }
         doc.to_string()
     }
 
@@ -106,6 +100,12 @@ impl UiSettings {
                 log::warn!("settings: could not write {}: {e}", path.display());
             }
         });
+    }
+
+    /// Writes nothing more this session (the settings files were removed,
+    /// e.g. by Remove app data…).
+    pub fn stop_saving(&mut self) {
+        self.path = None;
     }
 
     /// Follows the context's zoom factor (changed by Ctrl/Cmd +, - and 0
@@ -157,6 +157,26 @@ mod tests {
         let back = UiSettings::load(path.clone());
         assert_eq!(back.scale, 1.5);
         assert!(back.wire_labels);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn the_ai_assist_switch_round_trips_and_starts_unset() {
+        let path = temp("ai-assist");
+        let mut s = UiSettings::load(path.clone());
+        assert_eq!(s.ai_assist, None);
+        assert!(!s.to_toml().contains("ai_assist"), "unset is not written");
+        s.ai_assist = Some(true);
+        s.save();
+        for _ in 0..100 {
+            if UiSettings::load(path.clone()).ai_assist.is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert_eq!(UiSettings::load(path.clone()).ai_assist, Some(true));
+        std::fs::write(&path, "ai_assist = false\n").unwrap();
+        assert_eq!(UiSettings::load(path.clone()).ai_assist, Some(false));
         std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
 

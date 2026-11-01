@@ -433,7 +433,7 @@ impl ProjectState {
 }
 
 /// Runs a dialog future on its own thread.
-fn spawn<F>(dialog: F) -> Receiver<Option<PathBuf>>
+pub(crate) fn spawn<F>(dialog: F) -> Receiver<Option<PathBuf>>
 where
     F: std::future::Future<Output = Option<rfd::FileHandle>> + Send + 'static,
 {

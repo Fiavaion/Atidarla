@@ -1,6 +1,7 @@
 //! Atidarla application shell (PRD §5.2 `atd-app`).
 
 mod accessibility;
+mod ai_assist;
 mod ai_badges;
 mod ai_hosts;
 mod app;
@@ -24,6 +25,7 @@ mod record;
 mod settings;
 mod smoke;
 mod stage;
+mod storage_panel;
 mod suggest;
 mod textport;
 mod timeline;

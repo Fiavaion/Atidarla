@@ -1,30 +1,52 @@
 //! The project's AI settings in the app: Sovereign mode (FR-A8), the spend
 //! cap (FR-A7) and LAN/cloud hosts, applied to the process when a project
 //! opens or they change; the Sovereign badge in the top bar; and the AI
-//! Hosts window (FR-A2): the supervisor's hosts, adding and removing remote
-//! ones, and the spend meter.
+//! Hosts window (FR-A2): the AI assist switch (PRD A70 b,
+//! [`crate::ai_assist`]), the supervisor's hosts, adding and removing remote
+//! ones, the spend meter and the Storage section ([`crate::storage_panel`]).
 //!
 //! Applying only registers hosts (the supervisor connects when a node wants
 //! one) and the window reads the supervisor's snapshot, a short lock, at
-//! most twice a second: nothing here waits on a host (rule 1). Host tokens
-//! go to the per-user `hosts.toml` (`atd_ai::hosts`), never the project.
+//! most twice a second: nothing here waits on a host (rule 1). Installing,
+//! listing and removing run on workers. Host tokens go to the per-user
+//! `hosts.toml` (`atd_ai::hosts`), never the project.
 
 use std::path::PathBuf;
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use atd_ai::hosts::{self, HostTokens};
+use atd_ai::models::Job;
 use atd_ai::router;
 use atd_ai::supervisor::{HostSnapshot, HostState, Supervisor};
 use atd_format::AiSettings;
 use atd_format::models::{valid_host_addr, valid_host_name};
 use egui::{Color32, RichText, Ui};
 
+use crate::ai_assist::{Assist, Phase, Probe};
+use crate::settings::UiSettings;
+use crate::storage_panel::{self, StoragePanel};
+
 /// How often the window re-reads the supervisor.
 const REFRESH: Duration = Duration::from_millis(500);
+
+/// Shown instead of the switch when no installer put a host beside the app.
+const DEV_HINT: &str = "AI assist appears in installed builds. In this checkout the local \
+                        AI Host runs from ai-host/ (cd ai-host && uv sync --extra <name>).";
 
 #[derive(Debug, Default)]
 pub struct AiHostsPanel {
     pub open: bool,
+    /// Finding the bundled host and the recommendation, once at start.
+    probe: Option<Job<Probe>>,
+    probed: bool,
+    /// `None` in a development checkout, or until the probe is back.
+    assist: Option<Assist>,
+    /// The folder of wheels being picked.
+    folder: Option<Receiver<Option<PathBuf>>>,
+    storage: StoragePanel,
+    /// Open the Storage section on the next frame.
+    storage_open: bool,
     /// The settings last applied, and the project they belong to.
     applied: Option<(u64, AiSettings)>,
     tokens: HostTokens,
@@ -50,9 +72,11 @@ impl AiHostsPanel {
     }
 
     /// Applies the project's AI settings when a project opens (`opened`
-    /// changes; the spend meter restarts) or they change. Compares in
-    /// place, so an unchanged frame does no work.
-    pub fn frame(&mut self, ai: &AiSettings, opened: u64) {
+    /// changes; the spend meter restarts) or they change, and keeps the AI
+    /// assist switch's jobs going. Compares in place and polls finished
+    /// flags, so an unchanged frame does no work.
+    pub fn frame(&mut self, ai: &AiSettings, opened: u64, settings: &mut UiSettings) {
+        self.assist_frame(settings);
         let opening = self.applied.as_ref().is_none_or(|(o, _)| *o != opened);
         if !opening && self.applied.as_ref().is_some_and(|(_, a)| a == ai) {
             return;
@@ -70,6 +94,157 @@ impl AiHostsPanel {
         }
         self.applied = Some((opened, ai.clone()));
         self.refreshed = None;
+    }
+
+    /// Starts the probe once, takes its result, polls the install and the
+    /// folder picker, and saves the switch when the user settled it.
+    fn assist_frame(&mut self, settings: &mut UiSettings) {
+        if !self.probed {
+            self.probed = true;
+            self.probe = Some(Job::spawn("atd-ai-assist-probe", |_| Probe::find()));
+        }
+        if let Some(job) = &mut self.probe
+            && let Some(done) = job.try_take()
+        {
+            self.probe = None;
+            if let Ok(probe) = done
+                && let Some(bundled) = probe.bundled.clone()
+            {
+                let (assist, effect) =
+                    Assist::new(probe, settings.ai_assist, Assist::installer(bundled));
+                effect.apply();
+                self.assist = Some(assist);
+            }
+        }
+        if let Some(rx) = &self.folder
+            && let Ok(picked) = rx.try_recv()
+        {
+            self.folder = None;
+            if let (Some(dir), Some(a)) = (picked, &mut self.assist) {
+                a.install_from_folder(dir);
+            }
+        }
+        let Some(a) = &mut self.assist else {
+            return;
+        };
+        a.poll().apply();
+        if let Some(on) = a.take_changed() {
+            settings.ai_assist = Some(on);
+            settings.save();
+        }
+    }
+
+    fn pick_folder(&mut self) {
+        if self.folder.is_none() {
+            let pick = rfd::AsyncFileDialog::new()
+                .set_title("Folder of AI Host wheels")
+                .pick_folder();
+            self.folder = Some(crate::project::spawn(pick));
+        }
+    }
+
+    /// The switch, or the development hint.
+    fn assist_ui(&mut self, ui: &mut Ui, ai: &AiSettings) {
+        let Some(a) = &mut self.assist else {
+            ui.weak(if self.probe.is_some() {
+                "Checking this machine…"
+            } else {
+                DEV_HINT
+            });
+            return;
+        };
+        let mut on = a.is_on();
+        let mut pick = false;
+        ui.horizontal(|ui| {
+            let installing = matches!(a.phase, Phase::Installing { .. });
+            if ui
+                .checkbox(&mut on, RichText::new("AI assist").strong())
+                .on_hover_text("On installs the AI Host packages this machine can use; off stops using the local AI Host and keeps them")
+                .changed()
+            {
+                let effect = if on {
+                    a.turn_on(ai.sovereign)
+                } else {
+                    a.turn_off()
+                };
+                effect.apply();
+            }
+            match &a.phase {
+                Phase::Installing { cancelling, .. } => {
+                    ui.spinner();
+                    ui.label(&a.progress);
+                    if !cancelling && ui.button("Cancel").clicked() {
+                        a.turn_off().apply();
+                    }
+                }
+                Phase::On => {
+                    ui.label(&a.on_text);
+                }
+                Phase::Off | Phase::Confirm => {
+                    ui.weak(&a.off_text);
+                }
+            }
+            if !installing && matches!(a.phase, Phase::Off) && ai.sovereign {
+                pick = ui
+                    .small_button("Install from a folder of wheels…")
+                    .on_hover_text("The offline route: wheels prepared on another machine (docs/install.md)")
+                    .clicked();
+            }
+        });
+        if !a.probe().recommendation.reason.is_empty() {
+            ui.weak(&a.probe().recommendation.reason);
+        }
+        if let Some((text, error)) = &a.note {
+            let colour = if *error {
+                ui.visuals().error_fg_color
+            } else {
+                ui.visuals().weak_text_color()
+            };
+            ui.colored_label(colour, text);
+        }
+        if pick {
+            self.pick_folder();
+        }
+    }
+
+    /// The Sovereign question before AI assist downloads.
+    fn assist_confirm(&mut self, ctx: &egui::Context) {
+        let Some(a) = &mut self.assist else {
+            return;
+        };
+        if !matches!(a.phase, Phase::Confirm) {
+            return;
+        }
+        let mut answer = None;
+        let mut pick = false;
+        let modal = egui::Modal::new(egui::Id::unique("atd_ai_assist_confirm")).show(ctx, |ui| {
+            ui.set_max_width(460.0);
+            ui.heading("Allow this download?");
+            ui.label(&a.question);
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button("Download once").clicked() {
+                    answer = Some(true);
+                }
+                if ui.button("Install from a folder of wheels…").clicked() {
+                    pick = true;
+                }
+                if ui.button("Cancel").clicked() {
+                    answer = Some(false);
+                }
+            });
+        });
+        if modal.should_close() && answer.is_none() && !pick {
+            answer = Some(false);
+        }
+        if let Some(allow) = answer {
+            a.answer(allow);
+        }
+        if pick {
+            // Stays in Confirm until a folder is picked; a cancelled picker
+            // leaves the question open.
+            self.pick_folder();
+        }
     }
 
     /// The Sovereign badge for the top bar: "SOVEREIGN" when on, "CLOUD
@@ -135,7 +310,7 @@ impl AiHostsPanel {
     }
 
     /// The AI Hosts window.
-    pub fn window(&mut self, ctx: &egui::Context, ai: &mut AiSettings) {
+    pub fn window(&mut self, ctx: &egui::Context, ai: &mut AiSettings, settings: &mut UiSettings) {
         if !self.open {
             return;
         }
@@ -145,14 +320,41 @@ impl AiHostsPanel {
         }
         ctx.request_repaint_after(REFRESH);
         let mut open = self.open;
+        let mut event = storage_panel::Event::None;
         egui::Window::new("AI Hosts")
             .open(&mut open)
             .default_width(720.0)
-            .show(ctx, |ui| self.contents(ui, ai));
+            .show(ctx, |ui| event = self.contents(ui, ai));
+        self.assist_confirm(ctx);
+        let modal = self.storage.modals(ctx);
+        for e in [event, modal] {
+            self.storage_event(e, settings);
+        }
+        if !open {
+            self.storage.closed();
+        }
         self.open = open;
     }
 
-    fn contents(&mut self, ui: &mut Ui, ai: &mut AiSettings) {
+    fn storage_event(&mut self, event: storage_panel::Event, settings: &mut UiSettings) {
+        match event {
+            storage_panel::Event::None => {}
+            storage_panel::Event::PackagesGoing => {
+                if let Some(a) = &mut self.assist {
+                    a.packages_removed().apply();
+                    if let Some(on) = a.take_changed() {
+                        settings.ai_assist = Some(on);
+                        settings.save();
+                    }
+                }
+            }
+            storage_panel::Event::SettingsGone => settings.stop_saving(),
+        }
+    }
+
+    fn contents(&mut self, ui: &mut Ui, ai: &mut AiSettings) -> storage_panel::Event {
+        self.assist_ui(ui, ai);
+        ui.separator();
         ui.horizontal(|ui| {
             self.badge(ui, ai);
             ui.weak("Hosts are started or connected when an AI node first needs them.");
@@ -179,6 +381,24 @@ impl AiHostsPanel {
             };
             ui.colored_label(colour, text);
         }
+        ui.separator();
+        let installing = self
+            .assist
+            .as_ref()
+            .is_some_and(|a| matches!(a.phase, Phase::Installing { .. }));
+        let open = std::mem::take(&mut self.storage_open).then_some(true);
+        egui::CollapsingHeader::new("Storage")
+            .id_salt("atd_ai_hosts_storage")
+            .open(open)
+            .show(ui, |ui| self.storage.show(ui, installing))
+            .body_returned
+            .unwrap_or(storage_panel::Event::None)
+    }
+
+    /// Opens the window with the Storage section showing (View → Storage).
+    pub fn show_storage(&mut self) {
+        self.open = true;
+        self.storage_open = true;
     }
 
     fn table(&mut self, ui: &mut Ui, ai: &mut AiSettings) {
