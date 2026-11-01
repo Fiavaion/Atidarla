@@ -12,6 +12,7 @@
 # Needs: Rust (MSVC), the .NET SDK and WiX v5 with two extensions:
 #   dotnet tool install --global wix --version 5.0.2
 #   wix extension add -g WixToolset.BootstrapperApplications.wixext/5.0.2 WixToolset.Util.wixext/5.0.2
+# (Util: the MSI's quiet uninstall action and the bundle's registry search)
 # (the script adds the extensions itself when they are missing).
 #
 # Environment (all optional):
@@ -193,7 +194,7 @@ if (Get-ChildItem $aiHost -Recurse -File -Include *.pyd, *.dll, *.exe, *.safeten
 }
 
 $msi = "$dist\Atidarla-$version-windows-x64.msi"
-wix build packaging\windows\atidarla.wxs -arch x64 `
+wix build packaging\windows\atidarla.wxs -arch x64 -ext WixToolset.Util.wixext `
     -d "Version=$msiVersion" -d "BinDir=$stage" -d "Root=$root" -d "ExamplesDir=$stage\examples" `
     -d "PythonDir=$pyHome" -d "PythonDll=$pyDll" -d "AiHostDir=$aiHost" -o $msi
 if ($LASTEXITCODE) { throw "wix build failed" }

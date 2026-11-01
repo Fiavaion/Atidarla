@@ -30,9 +30,19 @@
 
   Uninstalling (not a major upgrade) also removes what the app keeps for the
   user who uninstalls (PRD A70): `atidarla storage uninstall`, run as that
-  user before the files go. With the full UI it asks about the model files
-  (keep or remove); a silent uninstall keeps them. Its failure never fails
-  the uninstall.
+  user before the files go. An uninstall someone watches asks about the
+  model files (keep or remove); a quiet one keeps them. Its failure never
+  fails the uninstall. Who is watching:
+    - From the setup bundle (bundle.wxs; the usual route, since the bundle
+      hides this MSI from Settings > Apps): Burn always runs the MSI with no
+      UI of its own, so UILevel says nothing. The bundle passes its own UI
+      level as ATDBUNDLEUILEVEL ([WixBundleUILevel], Burn's
+      BOOTSTRAPPER_DISPLAY: 2 none (/quiet), 3 passive, 4 full). Asks at 4.
+    - The bare MSI (managed deployment): asks at UILevel 3 or more (basic
+      or full UI: Settings > Apps, msiexec /x); /qn (UILevel 2) keeps.
+  The command runs through the Util extension's WixQuietExec, so atidarla.exe
+  (a console program) shows no console window; its question is a message
+  box, which still shows, and its output goes to the MSI log.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package
@@ -51,21 +61,28 @@
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/fiavaion/atidarla" />
     <Property Id="ARPNOMODIFY" Value="1" />
 
+    <!-- Set by the setup bundle only (bundle.wxs): its UI level. -->
+    <Property Id="ATDBUNDLEUILEVEL" Secure="yes" />
+
     <!-- The per-user data (PRD A70), removed on uninstall only: deferred and
          impersonated, so it runs as the user and sees their folders, before
-         RemoveFiles takes atidarla.exe away. Return="ignore": an error here
+         RemoveFiles takes atidarla.exe away. WixQuietExec (Util extension)
+         runs it without a console window and reads the command line from
+         the property named after the action. Return="ignore": an error here
          leaves the data and the uninstall goes on. -->
-    <CustomAction Id="RemoveUserDataAsk" Directory="INSTALLFOLDER"
-                  ExeCommand="&quot;[INSTALLFOLDER]atidarla.exe&quot; storage uninstall --models ask"
-                  Execute="deferred" Impersonate="yes" Return="ignore" />
-    <CustomAction Id="RemoveUserDataKeep" Directory="INSTALLFOLDER"
-                  ExeCommand="&quot;[INSTALLFOLDER]atidarla.exe&quot; storage uninstall --models keep"
-                  Execute="deferred" Impersonate="yes" Return="ignore" />
+    <SetProperty Id="RemoveUserDataAsk" Sequence="execute" Before="RemoveUserDataAsk"
+                 Value="&quot;[INSTALLFOLDER]atidarla.exe&quot; storage uninstall --models ask" />
+    <SetProperty Id="RemoveUserDataKeep" Sequence="execute" Before="RemoveUserDataKeep"
+                 Value="&quot;[INSTALLFOLDER]atidarla.exe&quot; storage uninstall --models keep" />
+    <CustomAction Id="RemoveUserDataAsk" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+                  DllEntry="WixQuietExec" Execute="deferred" Impersonate="yes" Return="ignore" />
+    <CustomAction Id="RemoveUserDataKeep" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+                  DllEntry="WixQuietExec" Execute="deferred" Impersonate="yes" Return="ignore" />
     <InstallExecuteSequence>
       <Custom Action="RemoveUserDataAsk" Before="RemoveFiles"
-              Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND UILevel &gt;= 5" />
+              Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND ((ATDBUNDLEUILEVEL AND ATDBUNDLEUILEVEL &gt;= 4) OR (NOT ATDBUNDLEUILEVEL AND UILevel &gt;= 3))" />
       <Custom Action="RemoveUserDataKeep" Before="RemoveFiles"
-              Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND UILevel &lt; 5" />
+              Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND NOT ((ATDBUNDLEUILEVEL AND ATDBUNDLEUILEVEL &gt;= 4) OR (NOT ATDBUNDLEUILEVEL AND UILevel &gt;= 3))" />
     </InstallExecuteSequence>
 
     <StandardDirectory Id="ProgramFiles64Folder">

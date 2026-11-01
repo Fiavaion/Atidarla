@@ -39,7 +39,25 @@ installing first (PRD A68):
 The heavier adapters need packages that are not in the installer: `vision` (ONNX vision models,
 ONNX Runtime), `stt` (speech to text, faster-whisper), `diffusion` (SD-Turbo-class img2img,
 torch and diffusers; gigabytes), `diffusion-cuda` (the same on PyTorch's CUDA build, see
-[CUDA](#cuda-on-an-nvidia-pc)) and `cloud` (Decart's SDK). Install one only when you want it:
+[CUDA](#cuda-on-an-nvidia-pc)) and `cloud` (Decart's SDK).
+
+**In the app: View → AI Hosts → AI assist** (PRD A70 b). One switch:
+
+- **On** installs the extras this machine can use (`vision`, `stt` and `diffusion` or
+  `diffusion-cuda`; the window says why, e.g. the NVIDIA driver it found), in the background with
+  elapsed time and **Cancel** (cancelling stops pip and leaves the installed packages as they
+  were). When it finishes, the local AI Host restarts so AI nodes use the new adapters. Nothing
+  is downloaded again when the extras are already there.
+- **Off** stops using the local AI Host: AI nodes fall back as they do when no host can be
+  reached. The packages stay; remove them under **Storage**.
+- **Sovereign mode** asks first, naming the download size (rough: about 0.5 GB, or about 2.7 GB
+  with the CUDA build) and the servers it reaches (pypi.org, files.pythonhosted.org, and
+  download.pytorch.org for CUDA). **Download once** allows this one install; **Install from a
+  folder of wheels…** is the offline route (below).
+- The switch is kept per user in `ui.toml`, not in the project. Until you set it, it is on when
+  extras are installed and off otherwise. A development checkout shows a hint instead.
+
+Or from the command line, one extra at a time:
 
 ```sh
 atidarla ai-host status                              # extras offered, installed and recommended
@@ -250,7 +268,8 @@ storage or remove them. Models that other tools manage themselves (Ollama's `~/.
 Hugging Face cache) are never touched. When `ATD_MODELS_DIR` points the model cache at a folder of
 your own, only the catalogue models' folders in it are removed.
 
-See what is kept, with sizes, and remove it by kind at any time:
+See what is kept, with sizes, and remove it by kind at any time: in the app under
+**View → Storage** (the Storage section of the AI Hosts window; removing models asks first), or:
 
 ```sh
 atidarla storage                      # or: atidarla storage list
@@ -259,10 +278,21 @@ atidarla storage uninstall            # everything but the models, then asks abo
 atidarla storage uninstall --models keep    # or --models remove: no question
 ```
 
-**Windows.** Uninstalling runs `atidarla storage uninstall` as you, before the files go. With the
-MSI's full UI (`msiexec /x Atidarla-<version>-windows-x64.msi`, no `/q`) it asks about the model
-files in a Yes/No box (No keeps them). Every other uninstall keeps them: silent (`/qn`), basic or
-reduced UI, and the setup `.exe`, which runs the MSI without its UI. An upgrade to a newer version
+**Windows.** Uninstalling runs `atidarla storage uninstall` as you, before the files go, with no
+console window. An uninstall someone is watching asks about the model files in a Yes/No box (No
+keeps them); a quiet one keeps them:
+
+| Uninstall | Models |
+|---|---|
+| Settings > Apps (the setup bundle's entry; it hides the MSI's own) | asks |
+| `Atidarla-<version>-windows-x64-setup.exe /uninstall` | asks |
+| `...-setup.exe /uninstall /quiet` or `/passive` | kept |
+| bare MSI: `msiexec /x Atidarla-<version>-windows-x64.msi` (full or basic UI) | asks |
+| bare MSI: `msiexec /x ... /qn` | kept |
+
+The setup `.exe` runs the MSI without UI, so it tells the MSI its own UI level
+(`ATDBUNDLEUILEVEL`, from Burn's `WixBundleUILevel`). Note that `msiexec /x ... /passive` on the
+bare MSI is basic UI and asks; use `/qn` for unattended removal. An upgrade to a newer version
 removes nothing. If the clean-up fails, the uninstall still completes;
 run `atidarla storage` from the new install, or delete the folders below. The data is per user:
 other accounts on the machine keep theirs.

@@ -71,6 +71,12 @@
         <MsiProperty Name="ADDTOPATH" Value="[ADDTOPATH]" />
         <MsiProperty Name="DESKTOPSHORTCUT" Value="[DESKTOPSHORTCUT]" />
         <MsiProperty Name="INSTALLFOLDER" Value="[INSTALLFOLDER]" Condition="INSTALLFOLDER" />
+        <!-- Burn runs the MSI with no UI, so the MSI cannot tell whether
+             someone is watching; pass the bundle's own UI level (Burn's
+             BOOTSTRAPPER_DISPLAY: 2 /quiet, 3 /passive, 4 full). The
+             uninstall asks about model files only at 4 (atidarla.wxs).
+             Burn passes MsiProperty values on uninstall as well. -->
+        <MsiProperty Name="ATDBUNDLEUILEVEL" Value="[WixBundleUILevel]" />
       </MsiPackage>
     </Chain>
   </Bundle>
