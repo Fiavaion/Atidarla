@@ -1,7 +1,7 @@
 # Handoff: continuing M1 locally
 
 > **2026-10-31 (newest; read this first):** M5 finished and M6 built on the M5 Pro Mac, overnight.
-> - **M5:** AC1 eval met: 19/20, 18/20, 19/20 over three runs, strict criteria, qwen2.5-coder 7B (plan-then-build with Ollama structured output); cloud-model row needs an `ANTHROPIC_API_KEY`. In-app Assistant panel, in-show cues (A62), `create_pack`, Speech to Text and LLM Chat. See `docs/milestones/M5.md`.
+> - **M5:** AC1 eval met: 19/20, 18/20, 19/20 over three runs, strict criteria, qwen2.5-coder 7B (plan-then-build with Ollama structured output); cloud-model row: Haiku, Sonnet and Opus 5.5 each 20/20 on three runs (2026-11-01). In-app Assistant panel, in-show cues (A62), `create_pack`, Speech to Text and LLM Chat. See `docs/milestones/M5.md`.
 > - **M6:** registry at 211 operators (MSH modelling and construction, VAT In, PNT capture/attributes/neighbours, Sensor In, point caches, Splat In + Splat MAT with GPU sort, DAT routing and 13 DAT ops, To Channels / Pixel Out / Resample); `lasair soak` (60-min PT-10 pass here); accessibility pass; installer scripts (DMG built unsigned; MSI never built); user manual. See `docs/milestones/M6.md`.
 > - Later the same night: vector and colour parameters can be animated (A66); this lifted AC1 to 95/90/95% over three runs. Python-tier expressions and Script code now run only from a content allow-list (A67), which closes the "opening an untrusted project runs its Python" gap. It passed three security review rounds.
 > - Proposed decisions for Mark: A62 (cues), A63 (point caches, Sensor In), A64 (DAT values, Script gating), A65 (GEO→SIG readback), A66 (animated vectors), A67 (network Python trust), and the eval-criteria changes in the M5 log.
