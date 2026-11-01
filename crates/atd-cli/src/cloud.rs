@@ -29,7 +29,7 @@ pub struct PodArgs {
     #[arg(long, default_value = RUNPOD_API, hide = true)]
     pub api: String,
     /// Secrets file holding `[runpod] api_key` and the pods' host tokens
-    /// (default: secrets.toml beside the model cache). RUNPOD_API_KEY wins.
+    /// (default: secrets.toml in the app's settings folder). RUNPOD_API_KEY wins.
     #[arg(long)]
     pub secrets: Option<PathBuf>,
 }

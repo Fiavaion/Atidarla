@@ -4,8 +4,8 @@
 //!
 //! Both are `cloud:<name>` hosts in the [`Supervisor`], so the router keeps
 //! them out of Sovereign mode and charges them to the project's spend meter.
-//! Keys come from the environment or a per-user secrets file beside the
-//! model cache ([`secrets_path`]), never from a project.
+//! Keys come from the environment or a per-user secrets file in the app's
+//! settings folder ([`secrets_path`]), never from a project.
 
 pub mod runpod;
 
@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use toml_edit::{DocumentMut, Item, Table, value};
 
 use crate::client::HostCommand;
-use crate::models::models_root;
+use crate::models::Store;
 use crate::supervisor::{HostKind, HostSpec, Supervisor, default_local_command};
 
 /// The supervisor's name for the Decart host.
@@ -23,14 +23,11 @@ pub const DECART_HOST: &str = "cloud:decart";
 /// Decart Lucy 2.6 realtime, standard tier ($0.02 per billed second).
 pub const DECART_USD_PER_HOUR: f64 = 72.0;
 
-/// The per-user secrets file: `secrets.toml` beside the model cache folder
-/// (`~/Library/Caches/Atidarla/secrets.toml` on macOS).
+/// The per-user secrets file: `secrets.toml` in the app's settings folder
+/// (`~/Library/Caches/Atidarla/secrets.toml` on macOS), never beside a model
+/// folder chosen with `ATD_MODELS_DIR` ([`crate::models::settings_dir`]).
 pub fn secrets_path() -> PathBuf {
-    let models = models_root();
-    models
-        .parent()
-        .map_or_else(|| models.clone(), Path::to_path_buf)
-        .join("secrets.toml")
+    Store::default().secrets_path()
 }
 
 /// Reads `section.key` (dotted path) from a secrets file.

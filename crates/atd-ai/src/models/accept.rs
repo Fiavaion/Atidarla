@@ -1,4 +1,4 @@
-//! Licence acceptances (`accepted.toml`, per user, beside the model cache;
+//! Licence acceptances (`accepted.toml`, per user, in the app's settings folder;
 //! never in a project, PRD A61).
 //!
 //! ```toml

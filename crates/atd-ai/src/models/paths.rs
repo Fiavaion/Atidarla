@@ -10,14 +10,30 @@ use std::path::{Path, PathBuf};
 /// - Linux and others: `$XDG_CACHE_HOME/atidarla/models` (when absolute),
 ///   else `~/.cache/atidarla/models`.
 pub fn models_root() -> PathBuf {
-    let var = |k: &str| {
-        std::env::var_os(k)
-            .filter(|v| !v.is_empty())
-            .map(PathBuf::from)
-    };
-    if let Some(dir) = var("ATD_MODELS_DIR") {
-        return dir;
-    }
+    var("ATD_MODELS_DIR").unwrap_or_else(platform_models_root)
+}
+
+/// The app's own per-user folder for `accepted.toml`, `hosts.toml` and
+/// `secrets.toml`: the folder around the platform's model cache
+/// (`~/Library/Caches/Atidarla` on macOS), whatever `ATD_MODELS_DIR` says. A
+/// folder the user chose for models may have other tools' files of the same
+/// names beside it, so the app never reads, writes or removes those.
+pub fn settings_dir() -> PathBuf {
+    let models = platform_models_root();
+    models
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map_or_else(|| models.clone(), Path::to_path_buf)
+}
+
+fn var(k: &str) -> Option<PathBuf> {
+    std::env::var_os(k)
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+}
+
+/// [`models_root`] without `ATD_MODELS_DIR`.
+fn platform_models_root() -> PathBuf {
     let home = var("HOME").or_else(|| var("USERPROFILE"));
     if cfg!(target_os = "macos") {
         if let Some(home) = home {
@@ -45,8 +61,9 @@ pub fn models_root() -> PathBuf {
     std::env::temp_dir().join("atidarla").join("models")
 }
 
-/// A model cache folder and its acceptance file. Tests make their own; the
-/// app and CLI use [`Store::default`].
+/// A model cache folder and the folder of its acceptance file, host tokens
+/// and cloud keys. Tests make their own; the app and CLI use
+/// [`Store::default`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Store {
     root: PathBuf,
@@ -54,21 +71,33 @@ pub struct Store {
 }
 
 impl Default for Store {
+    /// [`models_root`], with the settings files in [`settings_dir`].
     fn default() -> Self {
-        Self::new(models_root())
+        Self::with_settings_dir(models_root(), settings_dir())
     }
 }
 
 impl Store {
     /// Models in `root/<id>/`; acceptances in `accepted.toml` beside `root`
-    /// (in its parent folder), so clearing the models keeps the record.
+    /// (in its parent folder), so clearing the models keeps the record. For
+    /// a folder the app owns, as tests make; the user's own takes
+    /// [`Store::with_settings_dir`].
     pub fn new(root: impl Into<PathBuf>) -> Self {
         let root = root.into();
-        let accepted = root
+        let dir = root
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
-            .map_or_else(|| root.join("accepted.toml"), |p| p.join("accepted.toml"));
-        Self { root, accepted }
+            .map_or_else(|| root.clone(), Path::to_path_buf);
+        Self::with_settings_dir(root, dir)
+    }
+
+    /// Models in `root/<id>/`; `accepted.toml`, `hosts.toml` and
+    /// `secrets.toml` in `settings`.
+    pub fn with_settings_dir(root: impl Into<PathBuf>, settings: impl AsRef<Path>) -> Self {
+        Self {
+            root: root.into(),
+            accepted: settings.as_ref().join("accepted.toml"),
+        }
     }
 
     pub fn root(&self) -> &Path {
@@ -88,6 +117,12 @@ impl Store {
     /// (`crate::hosts`).
     pub fn hosts_path(&self) -> PathBuf {
         self.accepted.with_file_name("hosts.toml")
+    }
+
+    /// `secrets.toml`: cloud keys, beside `accepted.toml`
+    /// ([`crate::cloud::secrets_path`]).
+    pub fn secrets_path(&self) -> PathBuf {
+        self.accepted.with_file_name("secrets.toml")
     }
 
     /// Where `rel` (a catalogue path, `/`-separated) of model `id` lives.

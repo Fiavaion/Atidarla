@@ -13,7 +13,9 @@
 //! are left empty. Models that other tools manage (Ollama's `~/.ollama`,
 //! Hugging Face's global cache) are not on the list. When `ATD_MODELS_DIR`
 //! points the model cache at a folder of the user's choosing, only the
-//! catalogue models' own folders in it are listed. Symbolic links are
+//! catalogue models' own folders in it are listed, and nothing beside it:
+//! `accepted.toml`, `hosts.toml` and `secrets.toml` stay in the app's own
+//! folder ([`models::settings_dir`]) whatever the variable says. Symbolic links are
 //! removed as links: neither sizing nor removing follows one out of the
 //! folder.
 //!
@@ -105,12 +107,14 @@ impl Removal {
 pub struct Storage {
     /// AI Host packages ([`hostenv::data_root`]).
     pub packages: PathBuf,
-    /// The model cache ([`models::models_root`]); acceptances, host tokens
-    /// and cloud keys sit beside it ([`Store`]).
+    /// The model cache ([`models::models_root`]).
     pub models: PathBuf,
     /// The model cache is a folder the user chose (`ATD_MODELS_DIR`): only
-    /// catalogue models' folders in it are the app's.
+    /// catalogue models' folders in it are the app's, and nothing around it.
     pub models_chosen: bool,
+    /// The app's folder of acceptances, host tokens and cloud keys
+    /// ([`models::settings_dir`]), never the parent of a chosen model folder.
+    pub settings: PathBuf,
     /// The settings folder (`ui.toml` and others).
     pub config: Option<PathBuf>,
 }
@@ -130,13 +134,14 @@ impl Storage {
             packages: hostenv::data_root(),
             models: models::models_root(),
             models_chosen: std::env::var_os("ATD_MODELS_DIR").is_some_and(|v| !v.is_empty()),
+            settings: models::settings_dir(),
             config: config_dir(),
         }
     }
 
     /// Every item the app may have written, existing or not.
     fn items(&self) -> Vec<(Kind, String, PathBuf)> {
-        let store = Store::new(&self.models);
+        let store = Store::with_settings_dir(&self.models, &self.settings);
         let mut out = vec![(
             Kind::Packages,
             "AI Host packages".to_owned(),
@@ -162,7 +167,7 @@ impl Storage {
         out.push((
             Kind::Settings,
             "cloud keys".to_owned(),
-            store.accepted_path().with_file_name("secrets.toml"),
+            store.secrets_path(),
         ));
         if let Some(config) = &self.config {
             for (file, what) in CONFIG_FILES {
@@ -220,10 +225,8 @@ impl Storage {
         // A chosen model folder and the one around it are the user's.
         if !self.models_chosen {
             dirs.push(self.models.clone());
-            if let Some(parent) = Store::new(&self.models).accepted_path().parent() {
-                dirs.push(parent.to_path_buf());
-            }
         }
+        dirs.push(self.settings.clone());
         dirs.extend(self.config.clone());
         for dir in dirs {
             // Fails, as it should, when the folder holds anything else.
@@ -353,6 +356,7 @@ mod tests {
             packages: root.join("data/Atidarla/ai-host"),
             models: root.join("cache/Atidarla/models"),
             models_chosen: false,
+            settings: root.join("cache/Atidarla"),
             config: Some(root.join("data/Atidarla")),
         };
         write(&s.packages.join("python3.13/site-packages/a.py"), 100);
@@ -441,6 +445,7 @@ mod tests {
             packages: root.join("ai-host"),
             models: shared.clone(),
             models_chosen: true,
+            settings: root.join("app"),
             config: None,
         };
         assert_eq!(
@@ -451,6 +456,55 @@ mod tests {
         assert!(!shared.join(id).exists());
         assert!(shared.join("someone-elses/weights.bin").is_file());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Another tool's settings files of the same names beside a chosen model
+    /// folder are not the app's: never listed, never removed. The app's own
+    /// are in its settings folder.
+    #[test]
+    fn files_beside_a_chosen_model_folder_are_never_touched() {
+        let root = scratch("beside");
+        let ai = root.join("AI");
+        let foreign = ["secrets.toml", "hosts.toml", "accepted.toml"];
+        for f in foreign {
+            write(&ai.join(f), 3);
+        }
+        let s = Storage {
+            packages: root.join("app/ai-host"),
+            models: ai.join("models"),
+            models_chosen: true,
+            settings: root.join("app"),
+            config: None,
+        };
+        write(&s.settings.join("hosts.toml"), 20);
+        assert_eq!(kinds(&s.list()), [(Kind::Settings, "host tokens", 20)]);
+        assert_eq!(s.list()[0].path, root.join("app/hosts.toml"));
+
+        let r = s.remove_everything_but_models();
+        assert!(r.failed.is_empty(), "{:?}", r.failed);
+        let r = s.remove(&Kind::ALL);
+        assert!(r.failed.is_empty(), "{:?}", r.failed);
+        for f in foreign {
+            assert!(
+                ai.join(f).is_file(),
+                "{f} beside the chosen folder survives"
+            );
+        }
+        assert!(!root.join("app").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The default store keeps its settings files in the app's folder, not
+    /// beside `ATD_MODELS_DIR`.
+    #[test]
+    fn the_default_store_keeps_settings_in_the_apps_folder() {
+        let store = Store::default();
+        let dir = models::settings_dir();
+        assert_eq!(store.accepted_path(), dir.join("accepted.toml"));
+        assert_eq!(store.hosts_path(), dir.join("hosts.toml"));
+        assert_eq!(store.secrets_path(), dir.join("secrets.toml"));
+        assert_eq!(crate::cloud::secrets_path(), dir.join("secrets.toml"));
+        assert_eq!(Storage::user().settings, dir);
     }
 
     #[cfg(unix)]

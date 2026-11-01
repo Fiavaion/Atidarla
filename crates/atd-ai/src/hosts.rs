@@ -3,7 +3,7 @@
 //!
 //! A project lists hosts by name and address (`[[ai.hosts]]` in
 //! `project.toml`). Their tokens are secrets, so they never go in a project:
-//! they live per user in `hosts.toml`, beside the model cache's
+//! they live per user in `hosts.toml`, in the app's settings folder beside
 //! `accepted.toml` ([`Store::hosts_path`](crate::models::Store::hosts_path)),
 //! keyed by host name, readable by the user only (Unix mode 0600):
 //!

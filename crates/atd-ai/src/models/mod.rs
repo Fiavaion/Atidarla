@@ -31,7 +31,7 @@ pub use atd_format::{LicenceClass, ModelPin};
 pub use catalogue::{Catalogue, Licence, Model, ModelFile, Source, catalogue, parse_catalogue};
 pub use download::agent as gated_agent;
 pub use download::{DownloadError, DownloadOptions, HUGGING_FACE, download, gate, start_download};
-pub use paths::{Store, models_root};
+pub use paths::{Store, models_root, settings_dir};
 pub use status::{FileCheck, FileState, Job, Progress, ProgressSnapshot, Status, VerifyReport};
 pub use status::{start_verify, status, verify};
 

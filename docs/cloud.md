@@ -11,7 +11,7 @@ hosts, so in a node's route (`local → lan:studio → cloud:runpod`):
   the router stops using them once the project's cap is reached.
 
 Keys are your own. They come from the environment or from a per-user
-secrets file beside the model cache (never from a project, never committed):
+secrets file in the app's settings folder, whatever `ATD_MODELS_DIR` says (never from a project, never committed):
 
 | OS | Secrets file |
 |---|---|

@@ -11,7 +11,7 @@ accepted the licence.
 |---|---|
 | Catalogue | `crates/atd-ai/src/models/catalogue.toml`, embedded in the build |
 | Model files | per-user cache, one folder per model ID: macOS `~/Library/Caches/Atidarla/models`, Windows `%LOCALAPPDATA%\Atidarla\models`, Linux `$XDG_CACHE_HOME/atidarla/models` (else `~/.cache/atidarla/models`). `ATD_MODELS_DIR` overrides all three. |
-| Licence acceptances | `accepted.toml` beside the cache folder (e.g. `~/Library/Caches/Atidarla/accepted.toml`): model ID, licence ID, licence URL, date. Per user, never in a project. |
+| Licence acceptances | `accepted.toml` beside the default cache folder (e.g. `~/Library/Caches/Atidarla/accepted.toml`), also when `ATD_MODELS_DIR` is set: model ID, licence ID, licence URL, date. Per user, never in a project. |
 | What a project needs | `project.toml`: `[[models]]` (id, licence class, SHA-256 of the main file) and `[ai] commercial_safe_only` |
 
 ```toml
