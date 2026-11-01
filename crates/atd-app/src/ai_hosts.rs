@@ -155,11 +155,17 @@ impl AiHostsPanel {
         };
         let mut on = a.is_on();
         let mut pick = false;
+        // An install must not race the Storage section deleting the packages.
+        let removing = self.storage.busy();
         ui.horizontal(|ui| {
             let installing = matches!(a.phase, Phase::Installing { .. });
             if ui
-                .checkbox(&mut on, RichText::new("AI assist").strong())
+                .add_enabled(
+                    !removing,
+                    egui::Checkbox::new(&mut on, RichText::new("AI assist").strong()),
+                )
                 .on_hover_text("On installs the AI Host packages this machine can use; off stops using the local AI Host and keeps them")
+                .on_disabled_hover_text("Waiting for the Storage section to finish removing")
                 .changed()
             {
                 let effect = if on {
@@ -348,7 +354,6 @@ impl AiHostsPanel {
                     }
                 }
             }
-            storage_panel::Event::SettingsGone => settings.stop_saving(),
         }
     }
 

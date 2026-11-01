@@ -15,8 +15,6 @@ pub enum Event {
     None,
     /// The AI Host packages are about to go: stop the local host first.
     PackagesGoing,
-    /// The settings files were removed: write none again this session.
-    SettingsGone,
 }
 
 #[derive(Debug)]
@@ -31,8 +29,13 @@ struct Row {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Confirm {
-    /// Remove the model files: the explanation.
-    Models(String),
+    /// Remove one kind: the question, what it removes, the button.
+    Kind {
+        kind: Kind,
+        heading: String,
+        body: String,
+        button: String,
+    },
     /// Remove app data: the explanation of the models kept or removed.
     AppData(String),
 }
@@ -123,8 +126,13 @@ impl StoragePanel {
         }
     }
 
+    /// A removal is running (the AI assist switch waits for it).
+    pub fn busy(&self) -> bool {
+        self.removing.is_some()
+    }
+
     /// Takes finished jobs' results.
-    fn poll(&mut self) -> Event {
+    fn poll(&mut self) {
         if let Some(job) = &mut self.listing
             && let Some(done) = job.try_take()
         {
@@ -135,20 +143,15 @@ impl StoragePanel {
             }
         }
         let Some((job, _, _)) = &mut self.removing else {
-            return Event::None;
+            return;
         };
         let Some(done) = job.try_take() else {
-            return Event::None;
+            return;
         };
-        let (_, kinds, app_data) = self.removing.take().expect("removing");
+        let (_, _, app_data) = self.removing.take().expect("removing");
         let removal = done.unwrap_or_default();
         self.note = Some(removal_note(&removal, app_data, self.models_size()));
         self.relist();
-        if kinds.contains(&Kind::Settings) {
-            Event::SettingsGone
-        } else {
-            Event::None
-        }
     }
 
     fn models_size(&self) -> u64 {
@@ -161,8 +164,8 @@ impl StoragePanel {
         if !self.listed {
             self.relist();
         }
-        let mut event = self.poll();
-        let busy = self.removing.is_some();
+        self.poll();
+        let busy = self.busy();
         if self.rows.is_empty() {
             ui.weak(if self.listing.is_some() {
                 "Measuring…"
@@ -180,21 +183,29 @@ impl StoragePanel {
                     ui.monospace(&row.size);
                     ui.weak(&row.items).on_hover_text(&row.paths);
                     let blocked = busy || (row.kind == Kind::Packages && packages_busy);
-                    if ui
-                        .add_enabled(!blocked, egui::Button::new("Remove").small())
-                        .clicked()
-                    {
+                    let button = ui.add_enabled(!blocked, egui::Button::new("Remove").small());
+                    // "Remove" alone does not say which row to a screen reader.
+                    let name = format!("Remove {}", row.label);
+                    button.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::Role::Button, !blocked, &name)
+                    });
+                    if button.clicked() {
                         remove = Some(row.kind);
                     }
                     ui.end_row();
                 }
             });
-        match remove {
-            Some(Kind::Models) => {
-                self.confirm = Some(Confirm::Models(storage::models_explanation(&self.models)));
-            }
-            Some(kind) => event = self.remove(vec![kind], false),
-            None => {}
+        if let Some(kind) = remove
+            && let Some(row) = self.rows.iter().find(|r| r.kind == kind)
+        {
+            let (heading, body, button) =
+                confirm_text(row, &storage::models_explanation(&self.models));
+            self.confirm = Some(Confirm::Kind {
+                kind,
+                heading,
+                body,
+                button,
+            });
         }
         ui.horizontal(|ui| {
             if cfg!(windows) {
@@ -215,7 +226,12 @@ impl StoragePanel {
             }
             if busy {
                 ui.spinner();
-                ui.weak("Removing…");
+                let status = ui.weak("Removing…");
+                // Announced when it appears, not only when focused.
+                ui.ctx().accesskit_node_builder(status.id, |node| {
+                    node.set_role(egui::Role::Status);
+                    node.set_live(egui::accesskit::Live::Polite);
+                });
             }
         });
         if let Some((text, error)) = &self.note {
@@ -226,7 +242,7 @@ impl StoragePanel {
             };
             ui.colored_label(colour, text);
         }
-        event
+        Event::None
     }
 
     /// The confirmations, drawn over everything.
@@ -239,15 +255,20 @@ impl StoragePanel {
         let modal = egui::Modal::new(egui::Id::unique("atd_storage_confirm")).show(ctx, |ui| {
             ui.set_max_width(460.0);
             match confirm {
-                Confirm::Models(why) => {
-                    ui.heading("Remove the model files?");
-                    ui.label(why);
+                Confirm::Kind {
+                    kind,
+                    heading,
+                    body,
+                    button,
+                } => {
+                    ui.heading(heading);
+                    ui.label(body);
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        if ui.button("Remove the model files").clicked() {
-                            answer = Some((vec![Kind::Models], false));
+                        if ui.button(button).clicked() {
+                            answer = Some((vec![*kind], false));
                         }
-                        if ui.button("Keep them").clicked() {
+                        if ui.button("Cancel").clicked() {
                             answer = Some((vec![], false));
                         }
                     });
@@ -291,6 +312,40 @@ impl StoragePanel {
         }
         self.remove(kinds, app_data)
     }
+}
+
+/// The confirmation for removing one row's kind: its heading, its text
+/// (what goes, its size, and what that means), and the button.
+fn confirm_text(row: &Row, models_why: &str) -> (String, String, String) {
+    let lead = format!("This removes {} ({}).", row.items, row.size);
+    let (heading, more, button) = match row.kind {
+        Kind::Packages => (
+            "Remove the AI Host packages?",
+            "AI nodes stop using the local AI Host. Turn on AI assist to reinstall them.",
+            "Remove the packages",
+        ),
+        Kind::Models => (
+            "Remove the model files?",
+            models_why,
+            "Remove the model files",
+        ),
+        Kind::Cache => (
+            "Remove the caches and logs?",
+            "They are made again when needed.",
+            "Remove the caches",
+        ),
+        Kind::Settings => (
+            "Remove the settings and keys?",
+            "Your cloud keys and host tokens are removed too: enter them again to use those \
+             hosts. Atidarla writes no settings again until it restarts.",
+            "Remove the settings",
+        ),
+    };
+    (
+        heading.to_owned(),
+        format!("{lead} {more}"),
+        button.to_owned(),
+    )
 }
 
 /// What a removal tells the user: what was freed, what failed, and after
@@ -360,6 +415,35 @@ mod tests {
         );
         assert_eq!(p.rows[1].items, "model files, licence acceptances");
         assert_eq!(p.models.len(), 2);
+    }
+
+    #[test]
+    fn every_kind_is_confirmed_with_what_goes_and_its_size() {
+        let mut p = StoragePanel::default();
+        p.rows_from(vec![
+            entry(Kind::Packages, "AI Host packages", 2_500_000_000),
+            entry(Kind::Models, "model files", 4_000_000_000),
+            entry(Kind::Cache, "logs", 10),
+            entry(Kind::Settings, "host tokens", 20),
+            entry(Kind::Settings, "cloud keys", 30),
+        ]);
+        assert_eq!(p.rows.len(), 4);
+        for row in &p.rows {
+            let (heading, body, button) = confirm_text(row, "MODELS WHY");
+            assert!(heading.ends_with('?') && button.starts_with("Remove"));
+            assert!(
+                body.contains(&row.items) && body.contains(&row.size),
+                "{body}"
+            );
+            match row.kind {
+                Kind::Packages => assert!(body.contains("AI assist to reinstall"), "{body}"),
+                Kind::Models => assert!(body.contains("MODELS WHY"), "{body}"),
+                Kind::Settings => {
+                    assert!(body.contains("cloud keys and host tokens"), "{body}")
+                }
+                Kind::Cache => {}
+            }
+        }
     }
 
     #[test]
