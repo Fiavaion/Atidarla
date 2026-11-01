@@ -53,9 +53,11 @@ fn engine() -> Option<Engine> {
     let mut reg = Registry::default();
     atd_ops_img::register(&mut reg);
     atd_ops_sig::register(&mut reg);
+    atd_ops_dat::register(&mut reg);
     let mut lib = OpLibrary::default();
     atd_ops_img::library(&mut lib);
     atd_ops_sig::library(&mut lib);
+    atd_ops_dat::library(&mut lib);
     let config = EngineConfig {
         width: 8,
         height: 4,
@@ -324,6 +326,124 @@ fn native_expressions_do_not_allocate() {
     assert!(
         with_exprs <= baseline,
         "expressions allocated: {with_exprs} vs {baseline} over 60 frames"
+    );
+}
+
+/// A Table DAT named `table1` with a header row and two rows.
+fn levels_table(e: &mut Engine, rows: &str) -> NodeId {
+    add(e, "dat.table", "table1", &[("rows", json!(rows))])
+}
+
+#[test]
+fn dat_cells_drive_parameters() {
+    let Some(mut e) = engine() else { return };
+    let table = levels_table(&mut e, "name\tlevel\ndim\t0.25\nfull\t1");
+    let (_, level) = white_level(&mut e, "level1");
+    expr(&mut e, level, "brightness", "op('table1')['dim', 'level']");
+    assert_near(red(&mut e, level, 0.0), 64);
+    assert_eq!(e.error(level), None);
+    // The DAT is a dependency: editing the table cooks the level again.
+    e.edit(
+        "rows",
+        [Edit::SetParam {
+            node: table,
+            param: "rows".into(),
+            value: Some(Param::constant(json!("name\tlevel\ndim\t0.5\nfull\t1"))),
+        }],
+    )
+    .unwrap();
+    assert_near(red(&mut e, level, 0.0), 128);
+    // By index, with a row that follows time.
+    expr(
+        &mut e,
+        level,
+        "brightness",
+        "op('table1')[int(time) % 2 + 1, 1]",
+    );
+    assert_near(red(&mut e, level, 0.0), 128);
+    assert_eq!(red(&mut e, level, 1.0), 255);
+    assert_near(red(&mut e, level, 2.0), 128);
+    // A missing cell fails clearly and keeps the stored value.
+    expr(&mut e, level, "brightness", "op('table1')[5, 'level']");
+    assert_eq!(red(&mut e, level, 3.0), 255);
+    assert_eq!(
+        e.error(level),
+        Some(
+            "expression for `brightness`: op('table1')[5, 'level']: no such cell; \
+             it has 3 rows and 2 columns"
+        )
+    );
+    expr(&mut e, level, "brightness", "op('table1')[0, 'level']");
+    red(&mut e, level, 4.0);
+    assert_eq!(
+        e.error(level),
+        Some(
+            "expression for `brightness`: op('table1')[0, 'level']: the cell is not a number; \
+             it holds 'level'"
+        )
+    );
+    expr(&mut e, level, "brightness", "op('level1_src')[0, 0]");
+    red(&mut e, level, 5.0);
+    assert_eq!(
+        e.error(level),
+        Some("expression for `brightness`: op('level1_src'): not a DAT, so it has no cells")
+    );
+}
+
+/// Rule 2: reading DAT cells adds no allocations per frame, even when the
+/// row changes every frame.
+#[test]
+fn dat_cells_do_not_allocate() {
+    let Some(mut e) = engine() else { return };
+    levels_table(&mut e, "name\tlevel\ndim\t0.5\nfull\t1\nhalf\t0.75");
+    let (_, first) = white_level(&mut e, "level0");
+    let mut levels = vec![first];
+    let mut prev = first;
+    for i in 1..6 {
+        let l = add(&mut e, "img.level", &format!("level{i}"), &[]);
+        wire(&mut e, prev, l);
+        levels.push(l);
+        prev = l;
+    }
+    let out = prev;
+    let measure = |e: &mut Engine| {
+        let mut t = 0.0;
+        for _ in 0..20 {
+            e.cook(&[out], t).unwrap();
+            t += 1.0 / 60.0;
+        }
+        COUNTING.with(|c| c.set(true));
+        let before = ALLOCS.with(Cell::get);
+        for _ in 0..60 {
+            e.cook(&[out], t).unwrap();
+            t += 1.0 / 60.0;
+        }
+        let n = ALLOCS.with(Cell::get) - before;
+        COUNTING.with(|c| c.set(false));
+        n
+    };
+    // Baseline: the same rows as plain numbers, every frame.
+    for &l in &levels {
+        expr(&mut e, l, "brightness", "0.5 + 0.25 * (frame % 3)");
+    }
+    let baseline = measure(&mut e);
+    for (i, &l) in levels.iter().enumerate() {
+        let source = match i % 3 {
+            0 => "op('table1')[1 + frame % 3, 1]",
+            1 => "op('table1')['half', 'level'] * (frame % 2 + 1) / 2",
+            _ => "op('table1')[1 + frame % 3, 'level']",
+        };
+        expr(&mut e, l, "brightness", source);
+    }
+    let with_cells = measure(&mut e);
+    assert!(levels.iter().all(|l| e.error(*l).is_none()));
+    // wgpu's own allocations on this thread vary by a few between runs
+    // (Metal); one allocation per frame in any one node would be 60. The
+    // evaluation itself is held to zero exactly in `atd-core`'s
+    // `expr_cell_alloc` test.
+    assert!(
+        with_cells <= baseline + 30,
+        "DAT cells allocated: {with_cells} vs {baseline} over 60 frames"
     );
 }
 

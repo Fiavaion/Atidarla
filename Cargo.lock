@@ -474,6 +474,7 @@ dependencies = [
  "atd-interop",
  "atd-io",
  "atd-kernel",
+ "atd-ops-dat",
  "atd-ops-sig",
  "epaint_default_fonts",
  "hound",
