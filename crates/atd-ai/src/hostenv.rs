@@ -213,7 +213,7 @@ pub enum InstallError {
     UnknownExtra { extra: String, known: String },
     #[error(
         "Sovereign mode blocks downloading packages from the internet. Allow this one install to \
-         reach PyPI (`--allow-internet`), or install offline from a folder of wheels \
+         reach PyPI and download.pytorch.org (`--allow-internet`), or install offline from a folder of wheels \
          (`--wheelhouse <folder>`; see docs/install.md)"
     )]
     Sovereign,
