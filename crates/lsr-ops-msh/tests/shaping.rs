@@ -439,7 +439,19 @@ fn surface(m: &Mesh) -> Vec<Vec<u32>> {
         let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
         assert!(len / 2.0 > 1e-6, "polygon {f} has no area: {p:?}");
         let n = n.map(|x| x / len);
-        let o = at(0);
+        // Flat as Bevel judges it: off the mean plane by at most
+        // `FLAT_TOLERANCE` of the polygon's size.
+        let k = p.len() as f64;
+        let o = [0, 1, 2].map(|c| (0..p.len()).map(|i| at(i)[c]).sum::<f64>() / k);
+        let size = (0..p.len())
+            .map(|i| {
+                (0..3)
+                    .map(|c| (at(i)[c] - o[c]).powi(2))
+                    .sum::<f64>()
+                    .sqrt()
+            })
+            .fold(0.0, f64::max);
+        let tol = lsr_ops_msh::bevel::FLAT_TOLERANCE * size + 1e-7;
         for i in 0..p.len() {
             let (a, b) = (at(i), at(i + 1));
             assert!(
@@ -447,7 +459,7 @@ fn surface(m: &Mesh) -> Vec<Vec<u32>> {
                 "polygon {f} repeats a point"
             );
             let h: f64 = (0..3).map(|k| (a[k] - o[k]) * n[k]).sum();
-            assert!(h.abs() < 1e-6, "polygon {f} is not planar: {h}");
+            assert!(h.abs() <= tol, "polygon {f} is not planar: {h} > {tol}");
             let e = (p[i], p[(i + 1) % p.len()]);
             assert!(
                 dir.insert(e, f).is_none(),
@@ -840,12 +852,22 @@ fn bevel_one_edge_between_four_polygons() {
         ],
         &p,
     );
-    // The base, cut by the arc at its three-polygon corner, is not flat
-    // (the base is not square to the edge), so only the topology is
-    // checked here.
-    assert!(watertight(&r));
+    // The base is not square to the edge: the arc that cuts its corner
+    // still lies in it, and the strips stay flat.
+    assert!(surface(&r).is_empty());
     assert_eq!(r.prims(), 5 + 4 + 4);
     assert_eq!(r.points(), 5 - 1 + 4 + 2 * 3);
+    let base = (0..r.prims())
+        .find(|&f| r.prim(f).len() > 4)
+        .expect("the cut base");
+    assert_eq!(r.prim(base).len(), 3 + 2 + 3);
+    assert!(
+        r.prim(base)
+            .iter()
+            .all(|&i| r.p[i as usize][1].abs() < 1e-7)
+    );
+    let v = volume(&r);
+    assert!(v > 4.0 / 3.0 - cut && v < 4.0 / 3.0, "{v}");
 
     // A box of two divisions, bevelled along half of its top front edge:
     // the end at the edge's midpoint meets four quads. The chamfer stops
@@ -904,6 +926,101 @@ fn bevel_one_edge_between_four_polygons() {
         ),
         "deterministic"
     );
+}
+
+/// An octahedron with unequal arms, so no corner is symmetric: four
+/// triangles meet at every point.
+fn uneven_octahedron(group: &[u32]) -> Mesh {
+    polyhedron(
+        &[
+            [1.0, 0.0, 0.0],
+            [-0.8, 0.0, 0.0],
+            [0.0, 1.2, 0.0],
+            [0.0, -0.9, 0.0],
+            [0.0, 0.0, 0.7],
+            [0.0, 0.0, -1.1],
+        ],
+        &[
+            &[0, 2, 4],
+            &[2, 1, 4],
+            &[1, 3, 4],
+            &[3, 0, 4],
+            &[2, 0, 5],
+            &[1, 2, 5],
+            &[3, 1, 5],
+            &[0, 3, 5],
+        ],
+        group,
+    )
+}
+
+#[test]
+fn bevel_several_edges_between_four_polygons() {
+    let d = 0.08;
+    let whole = volume(&uneven_octahedron(&[]));
+    // Two neighbouring edges at each of +X, +Y, +Z (the three edges of
+    // one face); two opposite edges at +Y (ends at ±X); every edge.
+    // Points and polygons for s segments:
+    // - neighbours: at each end a mitre, two slid points and the kept
+    //   point; 3 strips, each end an arc; the gap a fan of 2s from the
+    //   point.
+    // - opposite: +Y goes, the strips share their ends there; the shared
+    //   slid points twist the strips: under FLAT_TOLERANCE for a chamfer
+    //   (quads kept), well over it next to +Y when rounded (those rows
+    //   two triangles each); a fan of s at ±X.
+    // - all: four mitres and a centre at each point, 12 strips, the
+    //   uneven gaps fans of 4s from the centre.
+    type Count = fn(usize) -> (usize, usize);
+    let cases: [(&str, Mesh, Count); 3] = [
+        ("neighbours", uneven_octahedron(&[0, 2, 4]), |s| {
+            (15 + 6 * (s - 1), 8 + 3 * s + 6 * s)
+        }),
+        ("opposite", uneven_octahedron(&[2, 0, 1]), |s| {
+            // Rows split (their twist over FLAT_TOLERANCE): none for a
+            // chamfer, the row beside +Y in each strip, and the next too
+            // with 5 segments.
+            let split = match s {
+                1 => 0,
+                2 | 3 => 2,
+                _ => 4,
+            };
+            (11 + 3 * (s - 1), 8 + 2 * s + split + 2 * s)
+        }),
+        ("all", uneven_octahedron(&[0, 1, 2, 3, 4, 5]), |s| {
+            (30 + 24 * (s - 1), 8 + 12 * s + 24 * s)
+        }),
+    ];
+    for (name, m, count) in &cases {
+        for s in [1, 2, 3, 5] {
+            let params = [
+                ("offset", json!(d)),
+                ("group", json!("edge")),
+                ("segments", json!(s)),
+            ];
+            let c = on("msh.bevel", &params, m);
+            assert_eq!((c.points(), c.prims()), count(s), "{name}, {s} segments");
+            assert!(surface(&c).is_empty(), "{name}, {s} segments: closed");
+            assert!(watertight(&c), "{name}, {s} segments");
+            let v = volume(&c);
+            assert!(
+                v > 0.9 * whole && v < whole,
+                "{name}, {s} segments: {v} {whole}"
+            );
+            assert_eq!(c, on("msh.bevel", &params, m), "{name}: deterministic");
+        }
+    }
+    // A capped tube's rounded rim: its strip quads twist by about 1.5e-3
+    // of their size, under FLAT_TOLERANCE, so they stay quads.
+    let tube = make("msh.tube", &[]);
+    for off in [0.05, 0.1] {
+        let r = on(
+            "msh.bevel",
+            &[("offset", json!(off)), ("segments", json!(2))],
+            &tube,
+        );
+        assert!(surface(&r).is_empty());
+        assert_eq!(r.prims(), 122, "offset {off}");
+    }
 }
 
 /// Mean edge length and the share of edges within `lo..hi`.

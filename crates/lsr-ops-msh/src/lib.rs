@@ -337,7 +337,7 @@ fn defs() -> Vec<Def> {
         Def {
             id: "bevel",
             label: "Bevel",
-            summary: "Bevels sharp edges: each becomes a flat chamfer or a rounded strip of segments, with patches where strips meet at a corner. A strip that ends inside the mesh cuts across the third polygon there, or, where four or more polygons meet, closes its end with triangles to the point. Selected by angle and an optional point group. A strip that reaches an open border runs to it: the border stays open and gains points where the strip meets it. Border edges themselves (one polygon, so no angle to round) are never bevelled, and edges at non-manifold points stay. The new polygons are the group `bevel`.",
+            summary: "Bevels sharp edges: each becomes a flat chamfer or a rounded strip of segments, with patches where strips meet at a corner. A strip that ends inside the mesh cuts across the third polygon there, or, where four or more polygons meet, closes its end with triangles to the point. Uneven corner patches and strips twisted by more than 0.2% of their size become triangles. Selected by angle and an optional point group. A strip that reaches an open border runs to it: the border stays open and gains points where the strip meets it. Border edges themselves (one polygon, so no angle to round) are never bevelled, and edges at non-manifold points stay. The new polygons are the group `bevel`.",
             inputs: &["in"],
             params: bevel::params,
             run: bevel::run,
